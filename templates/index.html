@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rocket League 6 Mans - Leaderboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #121212;
+            color: #f1f1f1;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .header {
+            background-color: #2c2f33;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 3px solid #7289da;
+            margin-bottom: 30px;
+        }
+        .leaderboard {
+            background-color: #2c2f33;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+        .leaderboard-header {
+            border-bottom: 2px solid #7289da;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .player-row {
+            border-bottom: 1px solid #444;
+            padding: 10px 0;
+        }
+        .player-row:hover {
+            background-color: #36393f;
+        }
+        .rank {
+            font-weight: bold;
+            color: #7289da;
+        }
+        .medal-1 {
+            color: gold;
+        }
+        .medal-2 {
+            color: silver;
+        }
+        .medal-3 {
+            color: #cd7f32; /* bronze */
+        }
+        .mmr {
+            font-weight: bold;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 50px;
+            padding: 20px;
+            background-color: #2c2f33;
+            border-top: 1px solid #444;
+        }
+        #refreshButton {
+            background-color: #7289da;
+            border: none;
+        }
+        #refreshButton:hover {
+            background-color: #5a69a8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Rocket League 6 Mans</h1>
+            <h3>Leaderboard</h3>
+        </div>
+
+        <div class="row">
+            <div class="col-md-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Player Rankings</h2>
+                    <button id="refreshButton" class="btn btn-primary">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+
+                <div class="leaderboard">
+                    <div class="leaderboard-header row">
+                        <div class="col-1">Rank</div>
+                        <div class="col-3">Player</div>
+                        <div class="col-2">MMR</div>
+                        <div class="col-2">Win Rate</div>
+                        <div class="col-2">W-L</div>
+                        <div class="col-2">Matches</div>
+                    </div>
+
+                    <div id="leaderboardContent">
+                        <!-- Leaderboard data will be loaded here -->
+                        <div class="text-center py-5">
+                            <div class="spinner-border text-light" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-3">Loading leaderboard data...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Rocket League 6 Mans Bot &copy; 2025</p>
+        </div>
+    </div>
+
+    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load leaderboard data on page load
+            loadLeaderboard();
+
+            // Set up refresh button
+            document.getElementById('refreshButton').addEventListener('click', loadLeaderboard);
+        });
+
+        function loadLeaderboard() {
+            fetch('/api/leaderboard')
+                .then(response => response.json())
+                .then(data => {
+                    const leaderboardContent = document.getElementById('leaderboardContent');
+                    leaderboardContent.innerHTML = '';
+
+                    if (data.length === 0) {
+                        leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available yet.</p>';
+                        return;
+                    }
+
+                    data.forEach((player, index) => {
+                        const rank = index + 1;
+                        let medalClass = '';
+                        let medalIcon = '';
+
+                        if (rank === 1) {
+                            medalClass = 'medal-1';
+                            medalIcon = '<i class="fas fa-medal"></i> ';
+                        } else if (rank === 2) {
+                            medalClass = 'medal-2';
+                            medalIcon = '<i class="fas fa-medal"></i> ';
+                        } else if (rank === 3) {
+                            medalClass = 'medal-3';
+                            medalIcon = '<i class="fas fa-medal"></i> ';
+                        }
+
+                        const playerRow = document.createElement('div');
+                        playerRow.className = 'player-row row align-items-center';
+                        playerRow.innerHTML = `
+                            <div class="col-1"><span class="rank ${medalClass}">${medalIcon}${rank}</span></div>
+                            <div class="col-3">${player.name}</div>
+                            <div class="col-2"><span class="mmr">${player.mmr}</span></div>
+                            <div class="col-2">${player.win_rate}%</div>
+                            <div class="col-2">${player.wins || 0}-${player.losses || 0}</div>
+                            <div class="col-2">${player.matches || 0}</div>
+                        `;
+
+                        leaderboardContent.appendChild(playerRow);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error fetching leaderboard data:', error);
+                    const leaderboardContent = document.getElementById('leaderboardContent');
+                    leaderboardContent.innerHTML = '<p class="text-center py-4 text-danger">Error loading leaderboard data. Please try again later.</p>';
+                });
+        }
+    </script>
+</body>
+</html>

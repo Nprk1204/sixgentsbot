@@ -1,0 +1,6 @@
+discord.py==2.3.2
+pymongo==4.5.0
+python-dotenv==1.0.0
+Flask==2.3.3
+uuid==1.30
+python-dateutil==2.8.2
