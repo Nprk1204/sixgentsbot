@@ -177,49 +177,35 @@ async def report(ctx, result: str):
 
 
 @bot.command()
-async def leaderboard(ctx, limit: int = 10):
-    """Show the top players by MMR"""
-    top_players = match_system.get_leaderboard(limit)
-
-    if not top_players:
-        await ctx.send("No players found in the leaderboard yet.")
-        return
+async def leaderboard(ctx):
+    """Shows a link to the leaderboard website"""
+    # Replace this URL with your actual leaderboard website URL from Render
+    leaderboard_url = "https://sixgentsbot-1.onrender.com/"
 
     embed = discord.Embed(
-        title="🏆 Leaderboard 🏆",
-        description=f"Top {len(top_players)} players by MMR",
-        color=0x00aaff
+        title="🏆 Rocket League 6 Mans Leaderboard 🏆",
+        description="View the complete leaderboard with player rankings, MMR, and stats!",
+        color=0x00aaff,
+        url=leaderboard_url  # This makes the title clickable
     )
 
-    for i, player in enumerate(top_players):
-        medal = ""
-        if i == 0:
-            medal = "🥇 "
-        elif i == 1:
-            medal = "🥈 "
-        elif i == 2:
-            medal = "🥉 "
-        else:
-            medal = f"{i + 1}. "
+    embed.add_field(
+        name="Click to View Leaderboard",
+        value=f"[View Full Leaderboard]({leaderboard_url})",
+        inline=False
+    )
 
-        # Try to get member object for mention
-        try:
-            member = await ctx.guild.fetch_member(int(player["id"]))
-            name = member.display_name  # Use display_name instead of mention
-        except:
-            name = player["name"]  # Fallback to stored name
-
-        # Calculate win rate
-        matches = player.get("matches", 0)
-        wins = player.get("wins", 0)
-        win_rate = 0
-        if matches > 0:
-            win_rate = (wins / matches) * 100
-
-        value = f"MMR: **{player['mmr']}** | W-L: {wins}-{player.get('losses', 0)} | Win Rate: {win_rate:.1f}%"
-        embed.add_field(name=f"{medal}{name}", value=value, inline=False)
+    embed.add_field(
+        name="Features",
+        value="• Player rankings\n• MMR tracking\n• Win/Loss records\n• Win percentages",
+        inline=False
+    )
 
     embed.set_footer(text="Updated after each match")
+
+    # Optionally add a thumbnail
+    embed.set_thumbnail(url="https://i.imgur.com/pKd5Sdk.png")  # Replace with a Rocket League icon URL
+
     await ctx.send(embed=embed)
 
 
