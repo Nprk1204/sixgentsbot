@@ -6,8 +6,8 @@ import os
 from dotenv import load_dotenv
 from database import Database
 from queue_handler import QueueHandler
-from votesystem import VoteSystem
-from captainssystem import CaptainsSystem
+from vote_system import VoteSystem
+from captains_system import CaptainsSystem
 from matchsystem import MatchSystem
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
@@ -26,24 +26,6 @@ intents.message_content = True
 intents.reactions = True  # Make sure reaction intents are enabled
 
 bot = commands.Bot(command_prefix='/', intents=intents)
-
-# Track if the bot is already connected to avoid multiple connections
-bot_connected = False
-
-# Override the connect method to ensure only one connection
-original_connect = bot.connect
-
-
-async def single_connect():
-    global bot_connected
-    if bot_connected:
-        print("Bot is already connected! Skipping additional connection attempt.")
-        return
-    bot_connected = True
-    return await original_connect()
-
-
-bot.connect = single_connect
 
 # Track recent commands to prevent duplicates
 recent_commands = {}
