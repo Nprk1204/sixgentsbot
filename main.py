@@ -128,10 +128,19 @@ async def leave(ctx):
         print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
         return
 
+    # Check if voting is active
+    if vote_system.is_voting_active():
+        await ctx.send(f"{ctx.author.mention}, you cannot leave the queue while voting is in progress!")
+        return
+
+    # Check if captain selection is active
+    if captains_system.is_selection_active():
+        await ctx.send(f"{ctx.author.mention}, you cannot leave the queue while team selection is in progress!")
+        return
+
     player = ctx.author
     response = queue_handler.remove_player(player)
     await ctx.send(response)
-
 
 @bot.command()
 async def status(ctx):
@@ -230,6 +239,106 @@ async def report(ctx, result: str):
     # Also send a message encouraging people to check the leaderboard
     await ctx.send("Check the updated leaderboard with `/leaderboard`!")
 
+
+@bot.command()
+async def adminreport(ctx, team_number: int, result: str):
+    """Admin command to report match results (format: /adminreport <team_number> <win>)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
+    # Check if user has admin permissions
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need administrator permissions to use this command.")
+        return
+
+    # Validate team number
+    if team_number not in [1, 2]:
+        await ctx.send("Invalid team number. Please use 1 or 2.")
+        return
+
+    # Validate result argument
+    if result.lower() != "win":
+        await ctx.send("Invalid result. Please use 'win' to indicate the winning team.")
+        return
+
+    channel_id = str(ctx.channel.id)
+
+    # Find active match in this channel
+    active_match = match_system.get_active_match_by_channel(channel_id)
+
+    if not active_match:
+        await ctx.send(
+            "No active match found in this channel. Please report in the channel where the match was created.")
+        return
+
+    match_id = active_match["match_id"]
+
+    # Determine winner and scores based on admin input
+    if team_number == 1:
+        team1_score = 1
+        team2_score = 0
+    else:
+        team1_score = 0
+        team2_score = 1
+
+    # Update match data
+    match_system.matches.update_one(
+        {"match_id": match_id},
+        {"$set": {
+            "status": "completed",
+            "winner": team_number,
+            "score": {"team1": team1_score, "team2": team2_score},
+            "completed_at": datetime.datetime.utcnow(),
+            "reported_by": str(ctx.author.id)
+        }}
+    )
+
+    # Determine winning and losing teams
+    if team_number == 1:
+        winning_team = active_match["team1"]
+        losing_team = active_match["team2"]
+    else:
+        winning_team = active_match["team2"]
+        losing_team = active_match["team1"]
+
+    # Update MMR
+    match_system.update_player_mmr(winning_team, losing_team)
+
+    # Format team members - using display_name instead of mentions
+    winning_members = []
+    for player in winning_team:
+        try:
+            member = await ctx.guild.fetch_member(int(player["id"]) if player["id"].isdigit() else 0)
+            winning_members.append(member.display_name if member else player["name"])
+        except:
+            winning_members.append(player["name"])
+
+    losing_members = []
+    for player in losing_team:
+        try:
+            member = await ctx.guild.fetch_member(int(player["id"]) if player["id"].isdigit() else 0)
+            losing_members.append(member.display_name if member else player["name"])
+        except:
+            losing_members.append(player["name"])
+
+    # Create results embed
+    embed = discord.Embed(
+        title="Match Results (Admin Report)",
+        description=f"Match completed",
+        color=0x00ff00
+    )
+
+    embed.add_field(name="Winners", value=", ".join(winning_members), inline=False)
+    embed.add_field(name="Losers", value=", ".join(losing_members), inline=False)
+    embed.add_field(name="MMR", value="+15 for winners, -12 for losers", inline=False)
+    embed.set_footer(text=f"Reported by admin: {ctx.author.display_name}")
+
+    await ctx.send(embed=embed)
+
+    # Also send a message encouraging people to check the leaderboard
+    await ctx.send("Check the updated leaderboard with `/leaderboard`!")
 
 @bot.command()
 async def leaderboard(ctx):
@@ -485,6 +594,55 @@ async def forcestart(ctx):
     await ctx.send("**Force starting team selection!**")
     await vote_system.start_vote(ctx.channel)
 
+
+@bot.command()
+async def forcestop(ctx):
+    """Force stop any active votes or selections and clear the queue (Admin only)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
+    # Check if user has admin permissions
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need administrator permissions to use this command.")
+        return
+
+    # Get current players in queue
+    players = queue_handler.get_players_for_match()
+    count = len(players)
+
+    # Cancel any active votes
+    vote_active = vote_system.is_voting_active()
+    if vote_active:
+        vote_system.cancel_voting()
+
+    # Cancel any active selections
+    selection_active = captains_system.is_selection_active()
+    if selection_active:
+        captains_system.cancel_selection()
+
+    # Clear the queue collection
+    queue_handler.queue.delete_many({})
+
+    # Create a response message
+    embed = discord.Embed(
+        title="⚠️ Force Stop Executed",
+        color=0xff9900
+    )
+
+    # Add appropriate fields based on what was stopped
+    if vote_active:
+        embed.add_field(name="Vote Canceled", value="Team selection voting has been canceled.", inline=False)
+
+    if selection_active:
+        embed.add_field(name="Team Selection Canceled", value="Captain selection process has been canceled.",
+                        inline=False)
+
+    embed.add_field(name="Queue Cleared", value=f"Removed {count} player(s) from the queue.", inline=False)
+    embed.set_footer(text=f"Executed by {ctx.author.display_name}")
+
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def purgechat(ctx, amount_to_delete: int = 10):
