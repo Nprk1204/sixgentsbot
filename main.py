@@ -1,17 +1,17 @@
 import discord
 from discord.ext import commands
 import logging
-from dotenv import load_dotenv
+import datetime
 import os
+from dotenv import load_dotenv
 from database import Database
 from queue_handler import QueueHandler
-from votesystem import VoteSystem
-from captainssystem import CaptainsSystem
-from matchsystem import MatchSystem  # Changed from match_system to matchsystem
+from vote_system import VoteSystem
+from captains_system import CaptainsSystem
+from matchsystem import MatchSystem
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import uuid
-import datetime
 
 # Load environment variables
 load_dotenv()
@@ -26,6 +26,57 @@ intents.message_content = True
 intents.reactions = True  # Make sure reaction intents are enabled
 
 bot = commands.Bot(command_prefix='/', intents=intents)
+
+# Track if the bot is already connected to avoid multiple connections
+bot_connected = False
+
+# Override the connect method to ensure only one connection
+original_connect = bot.connect
+
+
+async def single_connect():
+    global bot_connected
+    if bot_connected:
+        print("Bot is already connected! Skipping additional connection attempt.")
+        return
+    bot_connected = True
+    return await original_connect()
+
+
+bot.connect = single_connect
+
+# Track recent commands to prevent duplicates
+recent_commands = {}
+
+
+def is_duplicate_command(ctx):
+    """Check if a command is a duplicate (same user, same command, within 2 seconds)"""
+    user_id = ctx.author.id
+    command_name = ctx.command.name
+    timestamp = ctx.message.created_at.timestamp()
+
+    # Create a key for this command
+    key = f"{user_id}:{command_name}"
+
+    # Check if we've seen this command recently
+    if key in recent_commands:
+        # If command was used within 2 seconds, consider it a duplicate
+        if timestamp - recent_commands[key] < 2.0:
+            return True
+
+    # Update the last time this command was used
+    recent_commands[key] = timestamp
+
+    # Limit dict size
+    if len(recent_commands) > 100:
+        # Clear old entries
+        now = datetime.datetime.now().timestamp()
+        current_commands = {k: v for k, v in recent_commands.items() if now - v < 60}
+        recent_commands.clear()
+        recent_commands.update(current_commands)
+
+    return False
+
 
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
@@ -46,13 +97,16 @@ match_system = MatchSystem(db)
 # Connect components
 queue_handler.set_vote_system(vote_system)
 queue_handler.set_captains_system(captains_system)
-captains_system.set_match_system(match_system)  # Set match_system in captains_system
-vote_system.set_match_system(match_system)      # Set match_system in vote_system
+captains_system.set_match_system(match_system)
+vote_system.set_match_system(match_system)
+
 
 @bot.event
 async def on_ready():
-    print(f"{bot.user.name} is now online")
+    print(f"{bot.user.name} is now online with ID: {bot.user.id}")
+    print(f"Connected to {len(bot.guilds)} guilds")
     vote_system.set_bot(bot)
+    print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now()}")
 
 
 @bot.event
@@ -69,6 +123,11 @@ async def on_reaction_add(reaction, user):
 @bot.command()
 async def join(ctx):
     """Join the queue for 6 mans"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     player = ctx.author
     response = queue_handler.add_player(player)
     await ctx.send(response)
@@ -82,6 +141,11 @@ async def join(ctx):
 @bot.command()
 async def leave(ctx):
     """Leave the queue"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     player = ctx.author
     response = queue_handler.remove_player(player)
     await ctx.send(response)
@@ -90,8 +154,13 @@ async def leave(ctx):
 @bot.command()
 async def status(ctx):
     """Shows the current queue status"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     response = queue_handler.get_queue_status()
-    await ctx.send(embed=response)  # Send as embed
+    await ctx.send(embed=response)
 
     # If queue is full but vote not started, start it
     players = queue_handler.get_players_for_match()
@@ -100,10 +169,14 @@ async def status(ctx):
 
 
 # Match commands
-
 @bot.command()
 async def report(ctx, result: str):
     """Report match results (format: /report <win/loss>)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     reporter_id = str(ctx.author.id)
     channel_id = str(ctx.channel.id)
 
@@ -179,8 +252,13 @@ async def report(ctx, result: str):
 @bot.command()
 async def leaderboard(ctx):
     """Shows a link to the leaderboard website"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     # Replace this URL with your actual leaderboard website URL from Render
-    leaderboard_url = "https://sixgentsbot-1.onrender.com/"
+    leaderboard_url = "https://your-leaderboard-name.onrender.com"
 
     embed = discord.Embed(
         title="🏆 Rocket League 6 Mans Leaderboard 🏆",
@@ -212,6 +290,11 @@ async def leaderboard(ctx):
 @bot.command()
 async def rank(ctx, member: discord.Member = None):
     """Check your rank and stats (or another member's)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     if member is None:
         member = ctx.author
 
@@ -267,6 +350,11 @@ async def rank(ctx, member: discord.Member = None):
 @bot.command()
 async def clearqueue(ctx):
     """Clear all players from the queue (Admin only)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     # Check if user has admin permissions
     if not ctx.author.guild_permissions.administrator:
         await ctx.send("You need administrator permissions to use this command.")
@@ -294,68 +382,13 @@ async def clearqueue(ctx):
 
 
 @bot.command()
-async def forcestart(ctx):
-    """Force start the team selection process (Admin only)"""
-    # Check if user has admin permissions
-    if not ctx.author.guild_permissions.administrator:
-        await ctx.send("You need administrator permissions to use this command.")
-        return
-
-    # Cancel any existing votes to ensure we can start a new one
-    if vote_system.is_voting_active():
-        vote_system.cancel_voting()
-
-    if captains_system.is_selection_active():
-        captains_system.cancel_selection()
-
-    # Get current players in queue
-    players = queue_handler.get_players_for_match()
-    current_count = len(players)
-
-    if current_count == 0:
-        await ctx.send("Can't force start: Queue is empty!")
-        return
-
-    # If fewer than 6 players, add dummy players to reach 6
-    if current_count < 6:
-        # Create dummy players to fill the queue
-        needed = 6 - current_count
-        await ctx.send(f"Adding {needed} dummy players to fill the queue for testing...")
-
-        for i in range(needed):
-            # Use numeric IDs starting from 9000 to prevent parsing issues
-            dummy_id = f"9000{i + 1}"  # 90001, 90002, etc
-            dummy_name = f"TestPlayer{i + 1}"
-            dummy_mention = f"@TestPlayer{i + 1}"
-
-            # Add dummy player to queue
-            queue_handler.queue.insert_one({
-                "id": dummy_id,
-                "name": dummy_name,
-                "mention": dummy_mention
-            })
-
-    # Force start the vote
-    await ctx.send("**Force starting team selection!**")
-    await vote_system.start_vote(ctx.channel)
-
-
-@bot.command()
-async def purgechat(ctx, amount_to_delete: int = 10):
-    """Clear chat messages"""
-    if ctx.author.guild_permissions.manage_messages:
-        if 1 <= amount_to_delete <= 100:
-            await ctx.channel.purge(limit=amount_to_delete + 1)
-            await ctx.send(f"Cleared {amount_to_delete} messages.", delete_after=5)
-        else:
-            await ctx.send("Please enter a number between 1 and 100")
-    else:
-        await ctx.send("You don't have permission to use this command.")
-
-
-@bot.command()
 async def resetleaderboard(ctx, confirmation: str = None):
     """Reset the leaderboard (Admin only)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     # Check if user has admin permissions
     if not ctx.author.guild_permissions.administrator:
         await ctx.send("You need administrator permissions to use this command.")
@@ -419,10 +452,96 @@ async def resetleaderboard(ctx, confirmation: str = None):
         await ctx.send(f"Error resetting leaderboard: {str(e)}")
 
 
+@bot.command()
+async def forcestart(ctx):
+    """Force start the team selection process (Admin only)"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
+    # Check if user has admin permissions
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need administrator permissions to use this command.")
+        return
+
+    # Cancel any existing votes to ensure we can start a new one
+    if vote_system.is_voting_active():
+        vote_system.cancel_voting()
+
+    if captains_system.is_selection_active():
+        captains_system.cancel_selection()
+
+    # Get current players in queue
+    players = queue_handler.get_players_for_match()
+    current_count = len(players)
+
+    if current_count == 0:
+        await ctx.send("Can't force start: Queue is empty!")
+        return
+
+    # If fewer than 6 players, add dummy players to reach 6
+    if current_count < 6:
+        # Create dummy players to fill the queue
+        needed = 6 - current_count
+        await ctx.send(f"Adding {needed} dummy players to fill the queue for testing...")
+
+        for i in range(needed):
+            # Use numeric IDs starting from 9000 to prevent parsing issues
+            dummy_id = f"9000{i + 1}"  # 90001, 90002, etc
+            dummy_name = f"TestPlayer{i + 1}"
+            dummy_mention = f"@TestPlayer{i + 1}"
+
+            # Add dummy player to queue
+            queue_handler.queue.insert_one({
+                "id": dummy_id,
+                "name": dummy_name,
+                "mention": dummy_mention
+            })
+
+    # Force start the vote
+    await ctx.send("**Force starting team selection!**")
+    await vote_system.start_vote(ctx.channel)
+
+
+@bot.command()
+async def purgechat(ctx, amount_to_delete: int = 10):
+    """Clear chat messages"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
+    if ctx.author.guild_permissions.manage_messages:
+        if 1 <= amount_to_delete <= 100:
+            await ctx.channel.purge(limit=amount_to_delete + 1)
+            await ctx.send(f"Cleared {amount_to_delete} messages.", delete_after=5)
+        else:
+            await ctx.send("Please enter a number between 1 and 100")
+    else:
+        await ctx.send("You don't have permission to use this command.")
+
+
+@bot.command()
+async def ping(ctx):
+    """Simple ping command that doesn't use MongoDB"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
+    await ctx.send("Pong! Bot is connected to Discord.")
+
+
 # Help command
 @bot.command()
 async def helpme(ctx):
     """Display help information"""
+    # Check if this is a duplicate command
+    if is_duplicate_command(ctx):
+        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+        return
+
     embed = discord.Embed(
         title="Rocket League 6 Mans Bot",
         description="Commands for the 6 mans queue system:",
@@ -432,8 +551,8 @@ async def helpme(ctx):
     embed.add_field(name="/join", value="Join the queue", inline=False)
     embed.add_field(name="/leave", value="Leave the queue", inline=False)
     embed.add_field(name="/status", value="Show the current queue status", inline=False)
-    embed.add_field(name="/report <team1_score> <team2_score>", value="Report match results", inline=False)
-    embed.add_field(name="/leaderboard [limit]", value="Show the leaderboard (default: top 10)", inline=False)
+    embed.add_field(name="/report <win/loss>", value="Report match results", inline=False)
+    embed.add_field(name="/leaderboard", value="View the leaderboard website", inline=False)
     embed.add_field(name="/rank [member]", value="Show your rank or another member's rank", inline=False)
     embed.add_field(name="/purgechat [number]", value="Clear messages (mod only)", inline=False)
 
@@ -444,7 +563,7 @@ async def helpme(ctx):
             "2. When 6 players join, voting starts automatically\n"
             "3. Vote by reacting to the vote message\n"
             "4. Teams will be created based on the vote results\n"
-            "5. After the match, report the results with `/report`\n"
+            "5. After the match, report the results with `/report win` or `/report loss`\n"
             "6. Check the leaderboard with `/leaderboard`"
         ),
         inline=False
