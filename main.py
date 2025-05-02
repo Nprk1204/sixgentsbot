@@ -349,7 +349,7 @@ async def leaderboard(ctx):
         return
 
     # Replace this URL with your actual leaderboard website URL from Render
-    leaderboard_url = "https://your-leaderboard-name.onrender.com"
+    leaderboard_url = "https://sixgentsbot-1.onrender.com"
 
     embed = discord.Embed(
         title="🏆 Rocket League 6 Mans Leaderboard 🏆",
