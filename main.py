@@ -6,8 +6,8 @@ import os
 from dotenv import load_dotenv
 from database import Database
 from queue_handler import QueueHandler
-from vote_system import VoteSystem
-from captains_system import CaptainsSystem
+from votesystem import VoteSystem
+from captainssystem import CaptainsSystem
 from matchsystem import MatchSystem
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
