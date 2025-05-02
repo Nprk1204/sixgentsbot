@@ -30,10 +30,11 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 try:
+    # Test the connection
     client.admin.command('ping')
-    print("Pinged your deployment. You successfully connected to MongoDB!")
+    print("MongoDB connection successful!")
 except Exception as e:
-    print(e)
+    print(f"MongoDB connection error: {e}")
 
 # Initialize components
 db = Database(MONGO_URI)
