@@ -461,21 +461,35 @@ def get_mmr_from_rank(rank):
 
 
 def assign_discord_role(username, role_name):
-    """Assign a Discord role to a user by username with corrected variable name"""
+    """Assign a Discord role to a user by username with improved environment variable handling"""
     print("\n=== DISCORD ROLE ASSIGNMENT DEBUG ===")
     print(f"Starting role assignment for user: {username} to role: {role_name}")
 
-    # Use the corrected environment variable
+    # Explicitly get environment variables
     BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-    GUILD_ID = os.getenv('DISCORD_GUILD_ID')  # Corrected variable name
+    GUILD_ID = os.getenv('DISCORD_GUILD_ID')
 
+    # Print environment variable status for debugging
     print(f"Bot token exists: {'Yes' if BOT_TOKEN else 'No'}")
     print(f"Guild ID exists: {'Yes' if GUILD_ID else 'No'}")
     print(f"Guild ID value: {GUILD_ID}")
 
-    if not username or not BOT_TOKEN or not GUILD_ID:
-        print(f"Missing required information")
-        return {"success": False, "message": "Missing required information for role assignment"}
+    # Validate required inputs
+    if not username:
+        print("Username not provided")
+        return {"success": False, "message": "Username is required for role assignment"}
+
+    if not role_name:
+        print("Role name not provided")
+        return {"success": False, "message": "Role name is required for role assignment"}
+
+    if not BOT_TOKEN:
+        print("Discord bot token not found in environment variables")
+        return {"success": False, "message": "Discord bot token not configured"}
+
+    if not GUILD_ID:
+        print("Discord guild ID not found in environment variables")
+        return {"success": False, "message": "Discord guild ID not configured"}
 
     try:
         # Get all guild members
@@ -497,7 +511,7 @@ def assign_discord_role(username, role_name):
         members = response.json()
         print(f"Successfully retrieved {len(members)} members from server")
 
-        # Find user by username with detailed logging
+        # Find user by username
         user_id = None
         matched_name = None
         search_name = username.lower().strip()
@@ -505,15 +519,13 @@ def assign_discord_role(username, role_name):
         print(f"Looking for user matching '{search_name}'")
         for member in members:
             member_user = member.get('user', {})
-            member_id = member_user.get('id', 'None')
             member_username = (member_user.get('username') or '').lower().strip()
             member_global_name = (member_user.get('global_name') or '').lower().strip()
             member_nickname = (member.get('nick') or '').lower().strip()
 
             print(
-                f"Checking member: id={member_id}, username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
+                f"Checking member: username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
 
-            # Match with multiple strategies
             if (search_name == member_username or
                     search_name == member_global_name or
                     search_name == member_nickname or
@@ -521,7 +533,7 @@ def assign_discord_role(username, role_name):
                     search_name in member_global_name or
                     search_name in member_nickname):
                 user_id = member_user.get('id')
-                matched_name = member_user.get('username')
+                matched_name = member_user.get('username') or member_global_name
                 print(f"✓ Found matching user: {matched_name} (ID: {user_id})")
                 break
 
@@ -560,6 +572,7 @@ def assign_discord_role(username, role_name):
 
         if not role_id:
             print(f"✗ No matching role found for '{role_name}'")
+            print(f"Available roles: {', '.join([r.get('name', 'Unknown') for r in roles])}")
             return {"success": False, "message": f"Could not find Discord role with name: {role_name}"}
 
         # Now assign the role
@@ -575,6 +588,11 @@ def assign_discord_role(username, role_name):
         else:
             print(f"✗ Role assignment failed with status code {role_response.status_code}")
             print(f"Response body: {role_response.text[:200]}")
+
+            if role_response.status_code == 403:
+                print("This is likely a permissions issue. Check that your bot has 'Manage Roles' permission.")
+                return {"success": False, "message": "Permission denied. Check bot's role hierarchy and permissions."}
+
             return {"success": False, "message": f"Failed to assign role: {role_response.status_code}"}
 
     except Exception as e:
