@@ -243,7 +243,7 @@ class VoteSystem:
             embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
             embed.add_field(
                 name="Report Results",
-                value=f"Play your match and report the result using `/report win` or `/report loss`",
+                value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
                 inline=False
             )
 

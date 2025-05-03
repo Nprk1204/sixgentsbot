@@ -58,10 +58,13 @@ def start_keepalive_server():
 async def is_duplicate_command(ctx):
     """Thread-safe check if a command is a duplicate"""
     user_id = ctx.author.id
-    command_name = ctx.command.name
-    channel_id = ctx.channel.id  # Adding channel specificity
-    message_id = ctx.message.id  # Add message ID for absolute uniqueness
+    command_name = ctx.command.name if ctx.command else "unknown"
+    channel_id = ctx.channel.id
+    message_id = ctx.message.id
     timestamp = ctx.message.created_at.timestamp()
+
+    # Add more detailed logging
+    print(f"Command received: {command_name} from {ctx.author.name} (ID: {message_id})")
 
     # Use a more unique key
     key = f"{user_id}:{command_name}:{channel_id}:{message_id}"
@@ -70,12 +73,12 @@ async def is_duplicate_command(ctx):
     async with command_lock:
         # Check if we've seen this command recently
         if key in recent_commands:
-            # If already processed this exact message, it's a duplicate
-            print(f"Blocked duplicate: {command_name} from {ctx.author.name} in {ctx.channel.name} (ID: {message_id})")
+            print(f"DUPLICATE FOUND: {command_name} from {ctx.author.name} in {ctx.channel.name} (ID: {message_id})")
             return True
 
         # Update BEFORE continuing to prevent race conditions
         recent_commands[key] = timestamp
+        print(f"Command registered: {command_name} (ID: {message_id})")
 
         # Keep dict size manageable
         if len(recent_commands) > 100:
@@ -188,33 +191,27 @@ async def status(ctx):
 
 # Match commands
 @bot.command()
-async def report(ctx, result: str, match_id: str = None):
-    """Report match results (format: /report <win/loss> [match_id])"""
+async def report(ctx, match_id: str, result: str):
+    """Report match results (format: /report <match_id> <win/loss>)"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
         return
 
     reporter_id = str(ctx.author.id)
-    channel_id = str(ctx.channel.id)
 
     # Validate result argument
     if result.lower() not in ["win", "loss"]:
         await ctx.send("Invalid result. Please use 'win' or 'loss'.")
         return
 
-    # Find the active match either by ID or channel
-    if match_id:
-        active_match = match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
-        if not active_match:
-            await ctx.send(f"No active match found with ID `{match_id}`.")
-            return
-    else:
-        # Try to find match in current channel
-        active_match = match_system.get_active_match_by_channel(channel_id)
-        if not active_match:
-            await ctx.send(
-                "No active match found in this channel. Please report in the channel where the match was created or provide a match ID.")
-            return
+    # Find match by ID
+    active_match = match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
+    if not active_match:
+        await ctx.send(f"No active match found with ID `{match_id}`.")
+        return
+
+    # Now proceed with reporting
+    match, error = match_system.report_match_by_id(match_id, reporter_id, result)
 
     # Get match ID from the active match
     match_id = active_match["match_id"]
@@ -299,7 +296,7 @@ async def adminreport(ctx, team_number: int, result: str, match_id: str = None):
 
     channel_id = str(ctx.channel.id)
 
-    # If match_id is provided, use it directly
+    # Find the active match either by ID or channel
     if match_id:
         active_match = match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
         if not active_match:
@@ -472,6 +469,7 @@ async def rank(ctx, member: discord.Member = None):
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
     embed.set_footer(text="Stats updated after each match")
 
+    # Send only once
     await ctx.send(embed=embed)
 
 
@@ -723,7 +721,7 @@ async def helpme(ctx):
     embed.add_field(name="/join", value="Join the queue", inline=False)
     embed.add_field(name="/leave", value="Leave the queue", inline=False)
     embed.add_field(name="/status", value="Show the current queue status", inline=False)
-    embed.add_field(name="/report <win/loss> [match_id]", value="Report match results", inline=False)
+    embed.add_field(name="/report <match_id> <win/loss>", value="Report match results", inline=False)
     embed.add_field(name="/leaderboard", value="View the leaderboard website", inline=False)
     embed.add_field(name="/rank [member]", value="Show your rank or another member's rank", inline=False)
     embed.add_field(name="/purgechat [number]", value="Clear messages (mod only)", inline=False)
@@ -735,7 +733,7 @@ async def helpme(ctx):
             "2. When 6 players join, voting starts automatically\n"
             "3. Vote by reacting to the vote message\n"
             "4. Teams will be created based on the vote results\n"
-            "5. After the match, report the results with `/report win` or `/report loss`\n"
+            "5. After the match, report the results with `/report <match_id> win` or `/report <match_id> loss`\n"
             "6. Check the leaderboard with `/leaderboard`"
         ),
         inline=False
@@ -747,8 +745,15 @@ async def helpme(ctx):
 # Error handler
 @bot.event
 async def on_command_error(ctx, error):
+    # Check for duplicate command
+    if await is_duplicate_command(ctx):
+        print(f"Duplicate command detected in error handler: {ctx.command}")
+        return
+
     if isinstance(error, commands.CommandNotFound):
-        await ctx.send("Command not found. Use `/helpme` to see available commands.")
+        # Get the command that was attempted
+        attempted_command = ctx.message.content.split()[0][1:]  # Remove the / prefix
+        await ctx.send(f"Command not found. Use `/helpme` to see available commands.")
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Missing required argument. Use `/helpme` to see command usage.")
     elif isinstance(error, (discord.errors.HTTPException, discord.errors.GatewayNotFound,
