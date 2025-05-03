@@ -461,7 +461,7 @@ def get_mmr_from_rank(rank):
 
 
 def assign_discord_role(username, role_name):
-    """Assign a Discord role to a user by username with improved error handling"""
+    """Assign a Discord role to a user by username using role names for portability"""
     if not username or not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
         print(
             f"Missing required information: username={bool(username)}, token={bool(DISCORD_BOT_TOKEN)}, guild={bool(DISCORD_GUILD_ID)}")
@@ -477,9 +477,12 @@ def assign_discord_role(username, role_name):
         }
 
         print(f"Searching for Discord user: {username}")
+        print(f"Using server ID: {DISCORD_GUILD_ID}")
+
+        # Get all server members
         response = requests.get(api_url_members, headers=headers)
 
-        if response.status_code not in [200]:
+        if response.status_code != 200:
             print(f"Failed to get members: Status code {response.status_code}")
             print(f"Response: {response.text[:200]}")
             return {"success": False, "message": f"Failed to get members: {response.status_code}"}
@@ -487,25 +490,25 @@ def assign_discord_role(username, role_name):
         members = response.json()
         print(f"Found {len(members)} members in the server")
 
-        # Find user by username with more flexible matching
+        # Find user by username with flexible matching
         user_id = None
         matched_name = None
 
-        # Normalize the search username (lowercase and strip spaces)
+        # Normalize the search username
         search_name = username.lower().strip()
 
         for member in members:
-            # Check various name fields with better matching
+            # Get all possible name fields
             member_user = member.get('user', {})
             member_username = (member_user.get('username') or '').lower().strip()
             member_global_name = (member_user.get('global_name') or '').lower().strip()
             member_nickname = (member.get('nick') or '').lower().strip()
 
-            # Print for debugging
+            # Print detailed info for debugging
             print(
                 f"Checking member: username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
 
-            # Check for partial matches too, not just exact matches
+            # Look for various types of matches
             if (search_name == member_username or
                     search_name == member_global_name or
                     search_name == member_nickname or
@@ -513,54 +516,58 @@ def assign_discord_role(username, role_name):
                     search_name in member_global_name or
                     search_name in member_nickname):
                 user_id = member_user.get('id')
-                matched_name = member_user.get('username')
+                matched_name = member_username or member_global_name or "Unknown"
                 print(f"Found matching user: {matched_name} with ID: {user_id}")
                 break
 
         if not user_id:
+            print(f"No user found matching: '{username}'")
             return {"success": False, "message": f"Could not find Discord user with username: {username}"}
 
-        # Now get all server roles to find the role by name
+        # Get all server roles
         api_url_roles = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
-
         roles_response = requests.get(api_url_roles, headers=headers)
 
-        if roles_response.status_code not in [200]:
+        if roles_response.status_code != 200:
             print(f"Failed to get roles: Status code {roles_response.status_code}")
             print(f"Response: {roles_response.text[:200]}")
             return {"success": False, "message": f"Failed to get roles: {roles_response.status_code}"}
 
         roles = roles_response.json()
-        print(f"Found {len(roles)} roles in the server")
 
-        # Print all role names for debugging
-        role_names = [role.get('name') for role in roles]
-        print(f"Available roles: {', '.join(role_names)}")
+        # Print all roles for debugging
+        print(f"Found {len(roles)} roles in the server:")
+        for role in roles:
+            print(f"  - {role.get('name', 'Unknown')} (ID: {role.get('id', 'Unknown')})")
 
-        # Find role ID by name with case-insensitive matching
+        # Find role ID by name (case-insensitive)
         role_id = None
         for role in roles:
-            role_name_from_server = role.get('name', '')
-            if role_name_from_server.lower() == role_name.lower():
+            if role.get('name', '').lower() == role_name.lower():
                 role_id = role.get('id')
-                print(f"Found matching role: {role_name_from_server} with ID: {role_id}")
+                print(f"Found matching role: {role.get('name')} with ID: {role_id}")
                 break
 
         if not role_id:
+            print(f"No role found matching: '{role_name}'")
+            print(f"Available roles: {', '.join([r.get('name', 'Unknown') for r in roles])}")
             return {"success": False, "message": f"Could not find Discord role with name: {role_name}"}
 
-        # Now assign the role using the found user ID and role ID
+        # Now assign the role
         api_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{role_id}"
-
         print(f"Assigning role {role_name} (ID: {role_id}) to user {matched_name} (ID: {user_id})")
+
         role_response = requests.put(api_url, headers=headers)
 
+        print(f"Role assignment response status code: {role_response.status_code}")
         if role_response.status_code in [204, 200]:
+            print("Role assignment successful!")
             return {"success": True, "message": f"Role {role_name} assigned successfully to {matched_name}"}
         else:
-            print(f"Failed to assign role: Status code {role_response.status_code}")
-            print(f"Response: {role_response.text[:200]}")
-            return {"success": False, "message": f"Failed to assign role: {role_response.status_code}"}
+            error_msg = f"Failed to assign role: Status code {role_response.status_code}"
+            print(error_msg)
+            print(f"Response body: {role_response.text[:200]}")
+            return {"success": False, "message": error_msg}
 
     except Exception as e:
         print(f"Error assigning role: {str(e)}")
