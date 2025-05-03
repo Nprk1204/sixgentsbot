@@ -190,7 +190,7 @@ async def status(ctx):
 @bot.command()
 async def report(ctx, result: str, match_id: str = None):
     """Report match results (format: /report <win/loss> [match_id])"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
         return
 
@@ -202,22 +202,24 @@ async def report(ctx, result: str, match_id: str = None):
         await ctx.send("Invalid result. Please use 'win' or 'loss'.")
         return
 
-    # If match_id is provided, use it directly
+    # Find the active match either by ID or channel
     if match_id:
         active_match = match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
         if not active_match:
             await ctx.send(f"No active match found with ID `{match_id}`.")
             return
     else:
-        # Otherwise try to find match in current channel
+        # Try to find match in current channel
         active_match = match_system.get_active_match_by_channel(channel_id)
         if not active_match:
             await ctx.send(
                 "No active match found in this channel. Please report in the channel where the match was created or provide a match ID.")
             return
-        match_id = active_match["match_id"]
 
-    # Now we can proceed with the match we found
+    # Get match ID from the active match
+    match_id = active_match["match_id"]
+
+    # Now proceed with reporting
     match, error = match_system.report_match_by_id(match_id, reporter_id, result)
 
     if error:
