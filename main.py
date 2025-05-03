@@ -3,6 +3,9 @@ from discord.ext import commands
 import logging
 import datetime
 import os
+import asyncio
+from threading import Thread
+from flask import Flask
 from dotenv import load_dotenv
 from database import Database
 from queue_handler import QueueHandler
@@ -29,33 +32,59 @@ bot = commands.Bot(command_prefix='/', intents=intents)
 
 # Track recent commands to prevent duplicates
 recent_commands = {}
+command_lock = asyncio.Lock()
+
+# Create a minimal Flask app just for keepalive purposes
+keepalive_app = Flask(__name__)
 
 
-def is_duplicate_command(ctx):
-    """Check if a command is a duplicate (same user, same command, within 2 seconds)"""
+@keepalive_app.route('/')
+def bot_status():
+    return "Discord bot is running! For the leaderboard, please visit the main leaderboard site."
+
+
+def run_keepalive_server():
+    port = int(os.environ.get("PORT", 8080))
+    keepalive_app.run(host='0.0.0.0', port=port)
+
+
+def start_keepalive_server():
+    server_thread = Thread(target=run_keepalive_server)
+    server_thread.daemon = True  # This ensures the thread will close when the main program exits
+    server_thread.start()
+    print("Keepalive web server started on port", os.environ.get("PORT", 8080))
+
+
+async def is_duplicate_command(ctx):
+    """Thread-safe check if a command is a duplicate"""
     user_id = ctx.author.id
     command_name = ctx.command.name
+    channel_id = ctx.channel.id  # Adding channel specificity
+    message_id = ctx.message.id  # Add message ID for absolute uniqueness
     timestamp = ctx.message.created_at.timestamp()
 
-    # Create a key for this command
-    key = f"{user_id}:{command_name}"
+    # Use a more unique key
+    key = f"{user_id}:{command_name}:{channel_id}:{message_id}"
 
-    # Check if we've seen this command recently
-    if key in recent_commands:
-        # If command was used within 2 seconds, consider it a duplicate
-        if timestamp - recent_commands[key] < 2.0:
+    # Use lock to prevent race conditions
+    async with command_lock:
+        # Check if we've seen this command recently
+        if key in recent_commands:
+            # If already processed this exact message, it's a duplicate
+            print(f"Blocked duplicate: {command_name} from {ctx.author.name} in {ctx.channel.name} (ID: {message_id})")
             return True
 
-    # Update the last time this command was used
-    recent_commands[key] = timestamp
+        # Update BEFORE continuing to prevent race conditions
+        recent_commands[key] = timestamp
 
-    # Limit dict size
-    if len(recent_commands) > 100:
-        # Clear old entries
-        now = datetime.datetime.now().timestamp()
-        current_commands = {k: v for k, v in recent_commands.items() if now - v < 60}
-        recent_commands.clear()
-        recent_commands.update(current_commands)
+        # Keep dict size manageable
+        if len(recent_commands) > 100:
+            now = datetime.datetime.now().timestamp()
+            # Only keep commands from last 5 minutes
+            old_size = len(recent_commands)
+            recent_commands.clear()
+            recent_commands.update({k: v for k, v in recent_commands.items() if now - v < 300})
+            print(f"Cleaned command cache: {old_size} → {len(recent_commands)} entries")
 
     return False
 
@@ -105,9 +134,8 @@ async def on_reaction_add(reaction, user):
 @bot.command()
 async def join(ctx):
     """Join the queue for 6 mans"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     player = ctx.author
@@ -123,9 +151,8 @@ async def join(ctx):
 @bot.command()
 async def leave(ctx):
     """Leave the queue"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Check if voting is active
@@ -142,12 +169,12 @@ async def leave(ctx):
     response = queue_handler.remove_player(player)
     await ctx.send(response)
 
+
 @bot.command()
 async def status(ctx):
     """Shows the current queue status"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     response = queue_handler.get_queue_status()
@@ -163,9 +190,8 @@ async def status(ctx):
 @bot.command()
 async def report(ctx, result: str):
     """Report match results (format: /report <win/loss>)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     reporter_id = str(ctx.author.id)
@@ -243,9 +269,8 @@ async def report(ctx, result: str):
 @bot.command()
 async def adminreport(ctx, team_number: int, result: str):
     """Admin command to report match results (format: /adminreport <team_number> <win>)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Check if user has admin permissions
@@ -340,12 +365,12 @@ async def adminreport(ctx, team_number: int, result: str):
     # Also send a message encouraging people to check the leaderboard
     await ctx.send("Check the updated leaderboard with `/leaderboard`!")
 
+
 @bot.command()
 async def leaderboard(ctx):
     """Shows a link to the leaderboard website"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Replace this URL with your actual leaderboard website URL from Render
@@ -381,9 +406,8 @@ async def leaderboard(ctx):
 @bot.command()
 async def rank(ctx, member: discord.Member = None):
     """Check your rank and stats (or another member's)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     if member is None:
@@ -441,9 +465,8 @@ async def rank(ctx, member: discord.Member = None):
 @bot.command()
 async def clearqueue(ctx):
     """Clear all players from the queue (Admin only)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Check if user has admin permissions
@@ -475,9 +498,8 @@ async def clearqueue(ctx):
 @bot.command()
 async def resetleaderboard(ctx, confirmation: str = None):
     """Reset the leaderboard (Admin only)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Check if user has admin permissions
@@ -546,9 +568,8 @@ async def resetleaderboard(ctx, confirmation: str = None):
 @bot.command()
 async def forcestart(ctx):
     """Force start the team selection process (Admin only)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Check if user has admin permissions
@@ -598,9 +619,8 @@ async def forcestart(ctx):
 @bot.command()
 async def forcestop(ctx):
     """Force stop any active votes or selections and clear the queue (Admin only)"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     # Check if user has admin permissions
@@ -644,12 +664,12 @@ async def forcestop(ctx):
 
     await ctx.send(embed=embed)
 
+
 @bot.command()
 async def purgechat(ctx, amount_to_delete: int = 10):
     """Clear chat messages"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     if ctx.author.guild_permissions.manage_messages:
@@ -665,9 +685,8 @@ async def purgechat(ctx, amount_to_delete: int = 10):
 @bot.command()
 async def ping(ctx):
     """Simple ping command that doesn't use MongoDB"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     await ctx.send("Pong! Bot is connected to Discord.")
@@ -677,9 +696,8 @@ async def ping(ctx):
 @bot.command()
 async def helpme(ctx):
     """Display help information"""
-    # Check if this is a duplicate command
-    if is_duplicate_command(ctx):
-        print(f"Blocked duplicate command: {ctx.command.name} from {ctx.author.name}")
+    # Check if this is a duplicate command - note the "await"
+    if await is_duplicate_command(ctx):
         return
 
     embed = discord.Embed(
@@ -719,9 +737,18 @@ async def on_command_error(ctx, error):
         await ctx.send("Command not found. Use `/helpme` to see available commands.")
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Missing required argument. Use `/helpme` to see command usage.")
+    elif isinstance(error, (discord.errors.HTTPException, discord.errors.GatewayNotFound,
+                            discord.errors.ConnectionClosed)):
+        print(f"Discord connection error: {error}")
+        # Don't reply, as this might create duplicates
     else:
         print(f"Error: {error}")
 
 
-# Run the bot
-bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+# Run the bot with the keepalive server
+if __name__ == "__main__":
+    # Start the keepalive server first
+    start_keepalive_server()
+
+    # Then run the bot
+    bot.run(token, log_handler=handler, log_level=logging.DEBUG)
