@@ -507,8 +507,28 @@ def assign_discord_role(username, role_name):
         if not user_id:
             return {"success": False, "message": f"Could not find Discord user with username: {username}"}
 
-        # Now assign the role using the found user ID
-        role_id = get_role_id(role_name)
+        # Now get all server roles to find the role by name
+        api_url_roles = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
+
+        roles_response = requests.get(api_url_roles, headers=headers)
+
+        if roles_response.status_code not in [200]:
+            print(f"Failed to get roles: {roles_response.status_code}")
+            return {"success": False, "message": f"Failed to get roles: {roles_response.status_code}"}
+
+        roles = roles_response.json()
+
+        # Find role ID by name
+        role_id = None
+        for role in roles:
+            if role.get('name') == role_name:
+                role_id = role.get('id')
+                break
+
+        if not role_id:
+            return {"success": False, "message": f"Could not find Discord role with name: {role_name}"}
+
+        # Now assign the role using the found user ID and role ID
         api_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{role_id}"
 
         print(f"Assigning role {role_name} (ID: {role_id}) to user {username} (ID: {user_id})")
@@ -522,7 +542,6 @@ def assign_discord_role(username, role_name):
     except Exception as e:
         print(f"Error assigning role: {str(e)}")
         return {"success": False, "message": f"Error: {str(e)}"}
-
 
 @app.route('/api/rank-check', methods=['GET'])
 def check_rank():
