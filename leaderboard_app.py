@@ -461,18 +461,14 @@ def get_mmr_from_rank(rank):
 
 
 def assign_discord_role(username, role_name):
-    """Assign a Discord role to a user by username with improved environment variable handling"""
+    """Assign a Discord role to a user by username"""
     print("\n=== DISCORD ROLE ASSIGNMENT DEBUG ===")
     print(f"Starting role assignment for user: {username} to role: {role_name}")
 
-    # Explicitly get environment variables
-    BOT_TOKEN = os.getenv('DISCORD_TOKEN')
-    GUILD_ID = os.getenv('DISCORD_GUILD_ID')
-
     # Print environment variable status for debugging
-    print(f"Bot token exists: {'Yes' if BOT_TOKEN else 'No'}")
-    print(f"Guild ID exists: {'Yes' if GUILD_ID else 'No'}")
-    print(f"Guild ID value: {GUILD_ID}")
+    print(f"Bot token exists: {'Yes' if DISCORD_TOKEN else 'No'}")
+    print(f"Guild ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
+    print(f"Guild ID value: {DISCORD_GUILD_ID}")
 
     # Validate required inputs
     if not username:
@@ -483,20 +479,20 @@ def assign_discord_role(username, role_name):
         print("Role name not provided")
         return {"success": False, "message": "Role name is required for role assignment"}
 
-    if not BOT_TOKEN:
-        print("Discord bot token not found in environment variables")
-        return {"success": False, "message": "Discord bot token not configured"}
+    if not DISCORD_TOKEN:
+        print("Discord token not found in environment variables")
+        return {"success": False, "message": "Discord token not configured"}
 
-    if not GUILD_ID:
+    if not DISCORD_GUILD_ID:
         print("Discord guild ID not found in environment variables")
         return {"success": False, "message": "Discord guild ID not configured"}
 
     try:
         # Get all guild members
-        api_url_members = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members?limit=1000"
+        api_url_members = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members?limit=1000"
 
         headers = {
-            "Authorization": f"Bot {BOT_TOKEN}",
+            "Authorization": f"Bot {DISCORD_TOKEN}",
             "Content-Type": "application/json"
         }
 
@@ -542,7 +538,7 @@ def assign_discord_role(username, role_name):
             return {"success": False, "message": f"Could not find Discord user with username: {username}"}
 
         # Get all server roles
-        api_url_roles = f"https://discord.com/api/v10/guilds/{GUILD_ID}/roles"
+        api_url_roles = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
         print("Getting server roles...")
         roles_response = requests.get(api_url_roles, headers=headers)
 
@@ -576,7 +572,7 @@ def assign_discord_role(username, role_name):
             return {"success": False, "message": f"Could not find Discord role with name: {role_name}"}
 
         # Now assign the role
-        api_url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{user_id}/roles/{role_id}"
+        api_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{role_id}"
         print(f"Assigning role {role_name} (ID: {role_id}) to user {matched_name} (ID: {user_id})")
 
         role_response = requests.put(api_url, headers=headers)
@@ -602,6 +598,7 @@ def assign_discord_role(username, role_name):
         return {"success": False, "message": f"Error: {str(e)}"}
     finally:
         print("=== END ROLE ASSIGNMENT DEBUG ===\n")
+
 
 @app.route('/api/rank-check', methods=['GET'])
 def check_rank():
@@ -648,6 +645,7 @@ def check_rank():
 
     return jsonify(rank_data)
 
+
 def get_mock_rank_data(username, platform):
     """Generate varied mock data for testing"""
     # Use username to deterministically generate different ranks
@@ -692,6 +690,7 @@ def get_mock_rank_data(username, platform):
         "profileUrl": f"https://rocketleague.tracker.network/rocket-league/profile/{platform}/{username}",
         "timestamp": time.time()
     }
+
 
 @app.errorhandler(404)
 def page_not_found(e):
