@@ -154,310 +154,242 @@
 {% block extra_js %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        const checkRankButton = document.getElementById('checkRankButton');
-        let resultModal;
-        
-        // Initialize the modal with proper cleanup on hide
-        if (document.getElementById('resultModal')) {
-            resultModal = new bootstrap.Modal(document.getElementById('resultModal'), {
-                backdrop: 'static',  // Prevent closing when clicking outside
-                keyboard: true       // Allow ESC key to close
-            });
-            
-            // Add event listener for when modal is hidden
-            document.getElementById('resultModal').addEventListener('hidden.bs.modal', function () {
-                // Re-enable any disabled buttons or forms
-                if (checkRankButton) {
-                    checkRankButton.disabled = false;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                }
-                
-                // Make sure the page is scrollable again
-                document.body.classList.remove('modal-open');
-                const modalBackdrops = document.getElementsByClassName('modal-backdrop');
-                while(modalBackdrops.length > 0) {
-                    modalBackdrops[0].parentNode.removeChild(modalBackdrops[0]);
-                }
-            });
-        }
+    const checkRankButton = document.getElementById('checkRankButton');
+    let resultModal;
 
-        // Ensure modal close buttons work
-        document.querySelectorAll('[data-bs-dismiss="modal"]').forEach(button => {
-            button.addEventListener('click', function() {
-                if (resultModal) {
-                    resultModal.hide();
-                }
-            });
+    // Initialize the modal with proper cleanup on hide
+    if (document.getElementById('resultModal')) {
+        resultModal = new bootstrap.Modal(document.getElementById('resultModal'), {
+            backdrop: 'static',  // Prevent closing when clicking outside
+            keyboard: true       // Allow ESC key to close
         });
 
-        if (checkRankButton) {
-            checkRankButton.addEventListener('click', function() {
-                const rocketId = document.getElementById('rocketId').value.trim();
-                const platform = document.getElementById('platform').value;
-                const discordId = document.getElementById('discordId').value.trim();
-
-                if (!rocketId) {
-                    alert('Please enter your Rocket League ID');
-                    return;
-                }
-
-                // Show loading state
-                document.getElementById('verificationResult').innerHTML = `
-                    <div class="text-center py-3">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2">Checking your rank via RLTracker...</p>
-                    </div>
-                `;
-
-                // Disable the button while checking
-                checkRankButton.disabled = true;
-                checkRankButton.innerHTML = `
-                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                    Checking...
-                `;
-
-                // Set a timeout to re-enable the button if the request takes too long
-                const timeoutId = setTimeout(() => {
-                    checkRankButton.disabled = false;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                    
-                    document.getElementById('verificationResult').innerHTML = `
-                        <div class="alert alert-warning mb-0">
-                            <i class="fas fa-exclamation-triangle me-2"></i> 
-                            Request is taking longer than expected. Please try again or check your connection.
-                        </div>
-                    `;
-                }, 15000); // 15 seconds timeout
-
-                // Call our API endpoint to get the rank data
-                fetchRankData(rocketId, platform, discordId, timeoutId);
-            });
-        }
-
-        function fetchRankData(username, platform, discordId, timeoutId) {
-            // Build the API URL with query parameters
-            let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
-
-            if (discordId) {
-                apiUrl += `&discord_id=${encodeURIComponent(discordId)}`;
+        // Add event listener for when modal is hidden
+        document.getElementById('resultModal').addEventListener('hidden.bs.modal', function () {
+            // Re-enable any disabled buttons or forms
+            if (checkRankButton) {
+                checkRankButton.disabled = false;
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
             }
 
-            // Make the API request
-            fetch(apiUrl)
-                .then(response => {
-                    // Clear the timeout since we got a response
-                    clearTimeout(timeoutId);
-                    
-                    if (!response.ok) {
-                        throw new Error(`HTTP error ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Process the API response
-                    if (data.success) {
-                        displayRankResults(data, discordId);
-                    } else {
-                        showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showError("An error occurred while checking your rank. Please try again later.");
-                })
-                .finally(() => {
-                    // Re-enable button regardless of outcome
-                    checkRankButton.disabled = false;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                });
-        }
-
-        function displayRankResults(data, discordId) {
-            // Update verification result section with a continue button
-            let resultHtml = `
-                <div class="alert alert-success mb-4">
-                    <i class="fas fa-check-circle me-2"></i> Rank verification successful!
-                </div>
-
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <div>
-                        <h5 class="mb-1">${data.username}</h5>
-                        <p class="mb-0 text-muted">${getPlatformName(data.platform)}</p>
-                    </div>
-                    <a href="${data.profileUrl}" target="_blank" class="btn btn-sm btn-outline-primary">
-                        View RLTracker Profile
-                    </a>
-                </div>
-
-                <div class="d-flex align-items-center mb-3">
-                    <div class="me-3">
-                        <i class="fas fa-trophy fa-2x text-warning"></i>
-                    </div>
-                    <div>
-                        <h6 class="mb-0">Detected 3v3 Rank</h6>
-                        <p class="mb-0">${data.rank}</p>
-                    </div>
-                </div>
-
-                <div class="d-flex align-items-center mb-3">
-                    <div class="me-3">
-                        <i class="fas fa-tag fa-2x text-info"></i>
-                    </div>
-                    <div>
-                        <h6 class="mb-0">Assigned Role</h6>
-                        <p class="mb-0"><span class="badge bg-${getRoleColor(data.tier)}">${data.tier}</span></p>
-                    </div>
-                </div>
-
-                <div class="d-flex align-items-center">
-                    <div class="me-3">
-                        <i class="fas fa-chart-line fa-2x text-success"></i>
-                    </div>
-                    <div>
-                        <h6 class="mb-0">Starting MMR</h6>
-                        <p class="mb-0">${data.mmr}</p>
-                    </div>
-                </div>
-            `;
-
-            // Add Discord role assignment status if applicable
-            if (discordId && data.role_assignment) {
-                const roleSuccess = data.role_assignment.success;
-                resultHtml += `
-                    <div class="alert alert-${roleSuccess ? 'success' : 'warning'} mt-3">
-                        <i class="fab fa-discord me-2"></i>
-                        ${roleSuccess ? 'Discord role assigned successfully!' : 'Could not assign Discord role automatically. Please contact an admin.'}
-                    </div>
-                `;
+            // Make sure the page is scrollable again
+            document.body.classList.remove('modal-open');
+            const modalBackdrops = document.getElementsByClassName('modal-backdrop');
+            while(modalBackdrops.length > 0) {
+                modalBackdrops[0].parentNode.removeChild(modalBackdrops[0]);
             }
-            
-            // Add continue buttons to make it clear how to proceed
-            resultHtml += `
-                <div class="mt-4 d-flex justify-content-center">
-                    <a href="/" class="btn btn-primary me-2">
-                        <i class="fas fa-home me-2"></i> Home
-                    </a>
-                    <a href="/leaderboard" class="btn btn-secondary me-2">
-                        <i class="fas fa-trophy me-2"></i> View Leaderboard
-                    </a>
-                    <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-discord">
-                        <i class="fab fa-discord me-2"></i> Join Discord
-                    </a>
-                </div>
-            `;
+        });
+    }
 
-            document.getElementById('verificationResult').innerHTML = resultHtml;
-
-            // Skip showing the modal and just display in the page
-            // This helps avoid modal-related issues
-            /* 
-            // Update modal
-            let modalContent = `
-                <div class="text-center">
-                    <div class="mb-3">
-                        <i class="fas fa-check-circle fa-4x text-success"></i>
-                    </div>
-                    <h4>Your rank has been verified!</h4>
-                    <p class="mb-3">Based on your ${data.rank} rank in competitive 3v3.</p>
-
-                    <div class="alert alert-info">
-                        <strong>Discord Role:</strong> ${data.tier}<br>
-                        <strong>Starting MMR:</strong> ${data.mmr}
-                    </div>
-
-                    <div class="mt-4">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                            <i class="fas fa-times me-2"></i> Close
-                        </button>
-                        <a href="/" class="btn btn-primary ms-2">
-                            <i class="fas fa-home me-2"></i> Continue to Home
-                        </a>
-                    </div>
-                </div>
-            `;
-
-            document.getElementById('resultModalContent').innerHTML = modalContent;
-
-            // Show modal
+    // Ensure modal close buttons work
+    document.querySelectorAll('[data-bs-dismiss="modal"]').forEach(button => {
+        button.addEventListener('click', function() {
             if (resultModal) {
-                resultModal.show();
+                resultModal.hide();
             }
-            */
-        }
+        });
+    });
 
-        function showError(message) {
-            // Update verification result section
+    if (checkRankButton) {
+        checkRankButton.addEventListener('click', function() {
+            const rocketId = document.getElementById('rocketId').value.trim();
+            const platform = document.getElementById('platform').value;
+            const discordId = document.getElementById('discordId').value.trim();
+
+            if (!rocketId) {
+                alert('Please enter your Rocket League ID');
+                return;
+            }
+
+            // Show loading state
             document.getElementById('verificationResult').innerHTML = `
-                <div class="alert alert-danger mb-4">
-                    <i class="fas fa-exclamation-circle me-2"></i> ${message}
-                </div>
-                
-                <div class="mt-4 d-flex justify-content-center">
-                    <button type="button" class="btn btn-primary me-2" onclick="location.reload()">
-                        <i class="fas fa-sync-alt me-2"></i> Try Again
-                    </button>
-                    <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-discord">
-                        <i class="fab fa-discord me-2"></i> Join Discord
-                    </a>
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Checking your rank via RLTracker...</p>
                 </div>
             `;
 
-            // Avoid showing the modal - display error on page instead
-            /*
-            // Update modal
-            document.getElementById('resultModalContent').innerHTML = `
-                <div class="text-center">
-                    <div class="mb-3">
-                        <i class="fas fa-exclamation-circle fa-4x text-danger"></i>
-                    </div>
-                    <h4>Verification Failed</h4>
-                    <div class="alert alert-danger mb-0">
-                        ${message}
-                    </div>
-                    <p class="mt-3">Please check your Rocket League ID and platform, then try again.</p>
-                    <p class="mt-3">If the problem persists, you can still join our Discord and request manual verification from an admin.</p>
-                    
-                    <div class="mt-3">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                            <i class="fas fa-times me-2"></i> Close
-                        </button>
-                        <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary ms-2">
-                            <i class="fab fa-discord me-2"></i> Join Discord
-                        </a>
-                    </div>
-                </div>
+            // Disable the button while checking
+            checkRankButton.disabled = true;
+            checkRankButton.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Checking...
             `;
 
-            // Show modal
-            if (resultModal) {
-                resultModal.show();
-            }
-            */
+            // Set a timeout to re-enable the button if the request takes too long
+            const timeoutId = setTimeout(() => {
+                checkRankButton.disabled = false;
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+
+                document.getElementById('verificationResult').innerHTML = `
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Request is taking longer than expected. Please try again or check your connection.
+                    </div>
+                `;
+            }, 15000); // 15 seconds timeout
+
+            // Call our API endpoint to get the rank data
+            fetchRankData(rocketId, platform, discordId, timeoutId);
+        });
+    }
+
+    function fetchRankData(username, platform, discordId, timeoutId) {
+        // Build the API URL with query parameters
+        let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
+
+        if (discordId) {
+            apiUrl += `&discord_id=${encodeURIComponent(discordId)}`;
         }
 
-        function getPlatformName(platformCode) {
-            const platforms = {
-                'epic': 'Epic Games',
-                'steam': 'Steam',
-                'psn': 'PlayStation',
-                'xbl': 'Xbox',
-                'switch': 'Nintendo Switch'
-            };
+        // Make the API request
+        fetch(apiUrl)
+            .then(response => {
+                // Clear the timeout since we got a response
+                clearTimeout(timeoutId);
 
-            return platforms[platformCode] || platformCode;
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Process the API response
+                if (data.success) {
+                    displayRankResults(data, discordId);
+                } else {
+                    showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showError("An error occurred while checking your rank. Please try again later.");
+            })
+            .finally(() => {
+                // Re-enable button regardless of outcome
+                checkRankButton.disabled = false;
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+            });
+    }
+
+    function displayRankResults(data, discordId) {
+        // Update verification result section with a continue button
+        let resultHtml = `
+            <div class="alert alert-success mb-4">
+                <i class="fas fa-check-circle me-2"></i> Rank verification successful!
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h5 class="mb-1">${data.username}</h5>
+                    <p class="mb-0 text-muted">${getPlatformName(data.platform)}</p>
+                </div>
+                <a href="${data.profileUrl}" target="_blank" class="btn btn-sm btn-outline-primary">
+                    View RLTracker Profile
+                </a>
+            </div>
+
+            <div class="d-flex align-items-center mb-3">
+                <div class="me-3">
+                    <i class="fas fa-trophy fa-2x text-warning"></i>
+                </div>
+                <div>
+                    <h6 class="mb-0">Detected 3v3 Rank</h6>
+                    <p class="mb-0">${data.rank}</p>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center mb-3">
+                <div class="me-3">
+                    <i class="fas fa-tag fa-2x text-info"></i>
+                </div>
+                <div>
+                    <h6 class="mb-0">Assigned Role</h6>
+                    <p class="mb-0"><span class="badge bg-${getRoleColor(data.tier)}">${data.tier}</span></p>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center mb-4">
+                <div class="me-3">
+                    <i class="fas fa-chart-line fa-2x text-success"></i>
+                </div>
+                <div>
+                    <h6 class="mb-0">Starting MMR</h6>
+                    <p class="mb-0">${data.mmr}</p>
+                </div>
+            </div>
+        `;
+
+        // Add Discord role assignment status if applicable
+        if (discordId && data.role_assignment) {
+            const roleSuccess = data.role_assignment.success;
+            resultHtml += `
+                <div class="alert alert-${roleSuccess ? 'success' : 'warning'} mt-3 mb-4">
+                    <i class="fab fa-discord me-2"></i>
+                    ${roleSuccess ? 'Discord role assigned successfully!' : 'Could not assign Discord role automatically. Please contact an admin.'}
+                </div>
+            `;
         }
 
-        function getRoleColor(tier) {
-            const colors = {
-                'Rank A': 'danger',
-                'Rank B': 'primary',
-                'Rank C': 'success'
-            };
+        // Add continue buttons with direct href links instead of JavaScript handlers
+        resultHtml += `
+            <div class="mt-4 text-center">
+                <a href="/" class="btn btn-primary me-2" style="text-decoration: none;">
+                    <i class="fas fa-home me-2"></i> Home
+                </a>
+                <a href="/leaderboard" class="btn btn-secondary me-2" style="text-decoration: none;">
+                    <i class="fas fa-trophy me-2"></i> View Leaderboard
+                </a>
+                <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary" style="background-color: #7289da; border-color: #7289da; text-decoration: none;">
+                    <i class="fab fa-discord me-2"></i> Join Discord
+                </a>
+            </div>
+        `;
 
-            return colors[tier] || 'secondary';
-        }
+        document.getElementById('verificationResult').innerHTML = resultHtml;
+    }
+
+    function showError(message) {
+        // Update verification result section
+        document.getElementById('verificationResult').innerHTML = `
+            <div class="alert alert-danger mb-4">
+                <i class="fas fa-exclamation-circle me-2"></i> ${message}
+            </div>
+
+            <div class="mt-4 text-center">
+                <button type="button" class="btn btn-primary me-2" onclick="window.location.reload();">
+                    <i class="fas fa-sync-alt me-2"></i> Try Again
+                </button>
+                <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary" style="background-color: #7289da; border-color: #7289da;">
+                    <i class="fab fa-discord me-2"></i> Join Discord
+                </a>
+            </div>
+        `;
+    }
+
+    function getPlatformName(platformCode) {
+        const platforms = {
+            'epic': 'Epic Games',
+            'steam': 'Steam',
+            'psn': 'PlayStation',
+            'xbl': 'Xbox',
+            'switch': 'Nintendo Switch'
+        };
+
+        return platforms[platformCode] || platformCode;
+    }
+
+    function getRoleColor(tier) {
+        const colors = {
+            'Rank A': 'danger',
+            'Rank B': 'primary',
+            'Rank C': 'success'
+        };
+
+        return colors[tier] || 'secondary';
+    }
     });
 </script>
 {% endblock %}
