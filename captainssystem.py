@@ -297,6 +297,7 @@ class CaptainsSystem:
             color=0xe74c3c
         )
 
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)  # Add match ID field
         embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
         embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
         embed.add_field(
@@ -330,6 +331,8 @@ class CaptainsSystem:
             title="🏆 Teams Finalized!",
             color=0x2ecc71
         )
+
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)  # Add match ID field
 
         embed.add_field(
             name=f"Team 1 (Captain: {self.captain1['name']})",

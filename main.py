@@ -188,8 +188,8 @@ async def status(ctx):
 
 # Match commands
 @bot.command()
-async def report(ctx, result: str):
-    """Report match results (format: /report <win/loss>)"""
+async def report(ctx, result: str, match_id: str = None):
+    """Report match results (format: /report <win/loss> [match_id])"""
     # Check if this is a duplicate command - note the "await"
     if await is_duplicate_command(ctx):
         return
@@ -202,15 +202,22 @@ async def report(ctx, result: str):
         await ctx.send("Invalid result. Please use 'win' or 'loss'.")
         return
 
-    # Find active match in this channel
-    active_match = match_system.get_active_match_by_channel(channel_id)
+    # If match_id is provided, use it directly
+    if match_id:
+        active_match = match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
+        if not active_match:
+            await ctx.send(f"No active match found with ID `{match_id}`.")
+            return
+    else:
+        # Otherwise try to find match in current channel
+        active_match = match_system.get_active_match_by_channel(channel_id)
+        if not active_match:
+            await ctx.send(
+                "No active match found in this channel. Please report in the channel where the match was created or provide a match ID.")
+            return
+        match_id = active_match["match_id"]
 
-    if not active_match:
-        await ctx.send(
-            "No active match found in this channel. Please report in the channel where the match was created.")
-        return
-
-    match_id = active_match["match_id"]
+    # Now we can proceed with the match we found
     match, error = match_system.report_match_by_id(match_id, reporter_id, result)
 
     if error:
@@ -267,8 +274,8 @@ async def report(ctx, result: str):
 
 
 @bot.command()
-async def adminreport(ctx, team_number: int, result: str):
-    """Admin command to report match results (format: /adminreport <team_number> <win>)"""
+async def adminreport(ctx, team_number: int, result: str, match_id: str = None):
+    """Admin command to report match results (format: /adminreport <team_number> <win> [match_id])"""
     # Check if this is a duplicate command - note the "await"
     if await is_duplicate_command(ctx):
         return
@@ -290,15 +297,20 @@ async def adminreport(ctx, team_number: int, result: str):
 
     channel_id = str(ctx.channel.id)
 
-    # Find active match in this channel
-    active_match = match_system.get_active_match_by_channel(channel_id)
-
-    if not active_match:
-        await ctx.send(
-            "No active match found in this channel. Please report in the channel where the match was created.")
-        return
-
-    match_id = active_match["match_id"]
+    # If match_id is provided, use it directly
+    if match_id:
+        active_match = match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
+        if not active_match:
+            await ctx.send(f"No active match found with ID `{match_id}`.")
+            return
+    else:
+        # Otherwise try to find match in current channel
+        active_match = match_system.get_active_match_by_channel(channel_id)
+        if not active_match:
+            await ctx.send(
+                "No active match found in this channel. Please report in the channel where the match was created or provide a match ID.")
+            return
+        match_id = active_match["match_id"]
 
     # Determine winner and scores based on admin input
     if team_number == 1:
@@ -709,7 +721,7 @@ async def helpme(ctx):
     embed.add_field(name="/join", value="Join the queue", inline=False)
     embed.add_field(name="/leave", value="Leave the queue", inline=False)
     embed.add_field(name="/status", value="Show the current queue status", inline=False)
-    embed.add_field(name="/report <win/loss>", value="Report match results", inline=False)
+    embed.add_field(name="/report <win/loss> [match_id]", value="Report match results", inline=False)
     embed.add_field(name="/leaderboard", value="View the leaderboard website", inline=False)
     embed.add_field(name="/rank [member]", value="Show your rank or another member's rank", inline=False)
     embed.add_field(name="/purgechat [number]", value="Clear messages (mod only)", inline=False)
