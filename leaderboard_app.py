@@ -18,7 +18,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-k
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
 RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
-DISCORD_BOT_TOKEN = os.getenv('DISCORD_TOKEN', '')
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
 DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')
 
 
