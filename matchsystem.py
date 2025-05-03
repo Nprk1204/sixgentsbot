@@ -20,7 +20,7 @@ class MatchSystem:
             "match_id": short_id,  # Use the shorter ID
             "team1": team1,
             "team2": team2,
-            "status": "in_progress",
+            "status": "in_progress",  # Make sure this is set correctly
             "winner": None,
             "score": {"team1": 0, "team2": 0},
             "channel_id": channel_id,
@@ -35,6 +35,9 @@ class MatchSystem:
         # Store in memory for quick access
         self.active_matches[short_id] = match_data
 
+        # Debug print to confirm match creation
+        print(f"Created match with ID: {short_id}, status: {match_data['status']}")
+
         return short_id  # Return the short ID
 
     def get_active_match_by_channel(self, channel_id):
@@ -42,7 +45,7 @@ class MatchSystem:
         match = self.matches.find_one({"channel_id": channel_id, "status": "in_progress"})
         return match
 
-    def report_match_by_id(self, match_id, reporter_id, result):
+    async def report_match_by_id(self, match_id, reporter_id, result, ctx=None):
         """Report a match result by match ID and win/loss"""
         # Find the match by ID
         match = self.matches.find_one({"match_id": match_id})
@@ -50,7 +53,11 @@ class MatchSystem:
         if not match:
             return None, "No match found with that ID."
 
-        if match["status"] != "in_progress":
+        # Debug print to troubleshoot
+        print(f"Reporting match {match_id}, current status: {match.get('status')}")
+
+        # Make sure we're checking for "in_progress" status correctly
+        if match.get("status") != "in_progress":
             return None, "This match has already been reported."
 
         # Get player ID to determine which team they're on
@@ -83,9 +90,9 @@ class MatchSystem:
             team1_score = 0
             team2_score = 1
 
-        # Update match data
-        self.matches.update_one(
-            {"match_id": match_id},
+        # Update match data with a timestamp to ensure it's updated correctly
+        result = self.matches.update_one(
+            {"match_id": match_id, "status": "in_progress"},  # Only update if still in progress
             {"$set": {
                 "status": "completed",
                 "winner": winner,
@@ -94,6 +101,19 @@ class MatchSystem:
                 "reported_by": reporter_id
             }}
         )
+
+        # Check if the update was successful
+        if result.modified_count == 0:
+            # This means the match wasn't updated - either doesn't exist or already reported
+            # Double check if it exists but is already completed
+            completed_match = self.matches.find_one({"match_id": match_id, "status": "completed"})
+            if completed_match:
+                return None, "This match has already been reported."
+            else:
+                return None, "Failed to update match. Please check the match ID."
+
+        # Now get the updated match document
+        updated_match = self.matches.find_one({"match_id": match_id})
 
         # Update MMR for all players
         if winner == 1:
@@ -110,7 +130,39 @@ class MatchSystem:
         if match["match_id"] in self.active_matches:
             del self.active_matches[match["match_id"]]
 
-        return match, None
+        # Update roles if context is provided
+        if ctx:
+            # Update roles for winners
+            for player in winning_team:
+                player_id = player["id"]
+                # Skip dummy players (those with IDs starting with 9000)
+                if player_id.startswith('9000'):
+                    continue
+
+                # Get updated MMR from database
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 1000)
+                    # Update Discord role if the method exists
+                    if hasattr(self, 'update_discord_role'):
+                        await self.update_discord_role(ctx, player_id, mmr)
+
+            # Update roles for losers
+            for player in losing_team:
+                player_id = player["id"]
+                # Skip dummy players
+                if player_id.startswith('9000'):
+                    continue
+
+                # Get updated MMR from database
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 1000)
+                    # Update Discord role if the method exists
+                    if hasattr(self, 'update_discord_role'):
+                        await self.update_discord_role(ctx, player_id, mmr)
+
+        return updated_match, None
 
     def update_player_mmr(self, winning_team, losing_team):
         """Update MMR for all players in the match"""
