@@ -461,23 +461,28 @@ def get_mmr_from_rank(rank):
 
 
 def assign_discord_role(username, role_name):
-    """Assign a Discord role to a user by username with comprehensive logging"""
+    """Assign a Discord role to a user by username with corrected variable name"""
     print("\n=== DISCORD ROLE ASSIGNMENT DEBUG ===")
     print(f"Starting role assignment for user: {username} to role: {role_name}")
 
-    if not username or not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
-        print(f"Missing required information:")
-        print(f"- username provided: {'Yes' if username else 'No'}")
-        print(f"- DISCORD_BOT_TOKEN provided: {'Yes' if DISCORD_BOT_TOKEN else 'No'}")
-        print(f"- DISCORD_GUILD_ID provided: {'Yes' if DISCORD_GUILD_ID else 'No'}")
+    # Use the corrected environment variable
+    BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+    GUILD_ID = os.getenv('DISCORD_GUILD_ID')  # Corrected variable name
+
+    print(f"Bot token exists: {'Yes' if BOT_TOKEN else 'No'}")
+    print(f"Guild ID exists: {'Yes' if GUILD_ID else 'No'}")
+    print(f"Guild ID value: {GUILD_ID}")
+
+    if not username or not BOT_TOKEN or not GUILD_ID:
+        print(f"Missing required information")
         return {"success": False, "message": "Missing required information for role assignment"}
 
     try:
         # Get all guild members
-        api_url_members = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members?limit=1000"
+        api_url_members = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members?limit=1000"
 
         headers = {
-            "Authorization": f"Bot {DISCORD_BOT_TOKEN}",
+            "Authorization": f"Bot {BOT_TOKEN}",
             "Content-Type": "application/json"
         }
 
@@ -498,31 +503,26 @@ def assign_discord_role(username, role_name):
         search_name = username.lower().strip()
 
         print(f"Looking for user matching '{search_name}'")
-        for i, member in enumerate(members):
+        for member in members:
             member_user = member.get('user', {})
             member_id = member_user.get('id', 'None')
             member_username = (member_user.get('username') or '').lower().strip()
             member_global_name = (member_user.get('global_name') or '').lower().strip()
             member_nickname = (member.get('nick') or '').lower().strip()
 
-            if i < 10:  # Only print first 10 members to avoid log spam
-                print(
-                    f"Member {i + 1}: id={member_id}, username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
+            print(
+                f"Checking member: id={member_id}, username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
 
-            # Various matching strategies
-            exact_match = (search_name == member_username or
-                           search_name == member_global_name or
-                           search_name == member_nickname)
-
-            contains_match = (search_name in member_username or
-                              search_name in member_global_name or
-                              search_name in member_nickname)
-
-            if exact_match or contains_match:
+            # Match with multiple strategies
+            if (search_name == member_username or
+                    search_name == member_global_name or
+                    search_name == member_nickname or
+                    search_name in member_username or
+                    search_name in member_global_name or
+                    search_name in member_nickname):
                 user_id = member_user.get('id')
                 matched_name = member_user.get('username')
                 print(f"✓ Found matching user: {matched_name} (ID: {user_id})")
-                print(f"  Match type: {'Exact match' if exact_match else 'Contains match'}")
                 break
 
         if not user_id:
@@ -530,7 +530,7 @@ def assign_discord_role(username, role_name):
             return {"success": False, "message": f"Could not find Discord user with username: {username}"}
 
         # Get all server roles
-        api_url_roles = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
+        api_url_roles = f"https://discord.com/api/v10/guilds/{GUILD_ID}/roles"
         print("Getting server roles...")
         roles_response = requests.get(api_url_roles, headers=headers)
 
@@ -544,81 +544,37 @@ def assign_discord_role(username, role_name):
 
         # Print all roles for debugging
         print("Available roles:")
-        for i, role in enumerate(roles):
+        for role in roles:
             role_id = role.get('id', 'None')
             role_name_from_server = role.get('name', 'Unknown')
             role_position = role.get('position', 0)
-            print(f"  {i + 1}. '{role_name_from_server}' (ID: {role_id}, Position: {role_position})")
+            print(f"  '{role_name_from_server}' (ID: {role_id}, Position: {role_position})")
 
-        # Find bot's role position
-        bot_role_position = 0
-        bot_user = None
-
-        # First get the bot's user ID from the token
-        auth_url = "https://discord.com/api/v10/users/@me"
-        auth_response = requests.get(auth_url, headers=headers)
-
-        if auth_response.status_code == 200:
-            bot_user = auth_response.json()
-            bot_id = bot_user.get('id')
-            print(f"Bot ID: {bot_id}")
-
-            # Now find the bot's highest role
-            for member in members:
-                member_user = member.get('user', {})
-                if member_user.get('id') == bot_id:
-                    member_roles = member.get('roles', [])
-                    print(f"Bot has {len(member_roles)} roles")
-
-                    # Find highest position role
-                    for role in roles:
-                        if role.get('id') in member_roles and role.get('position', 0) > bot_role_position:
-                            bot_role_position = role.get('position', 0)
-
-                    print(f"Bot's highest role position: {bot_role_position}")
-                    break
-        else:
-            print("Could not get bot user information")
-
-        # Find role ID by name with position check
+        # Find role ID by name (case-insensitive)
         role_id = None
-        role_position = 0
-
         for role in roles:
-            server_role_name = role.get('name', '')
-            if server_role_name.lower() == role_name.lower():
+            if role.get('name', '').lower() == role_name.lower():
                 role_id = role.get('id')
-                role_position = role.get('position', 0)
-                print(f"✓ Found matching role: '{server_role_name}' (ID: {role_id}, Position: {role_position})")
+                print(f"✓ Found matching role: {role.get('name')} with ID: {role_id}")
                 break
 
         if not role_id:
             print(f"✗ No matching role found for '{role_name}'")
             return {"success": False, "message": f"Could not find Discord role with name: {role_name}"}
 
-        # Check role hierarchy
-        if role_position >= bot_role_position and bot_role_position > 0:
-            print(
-                f"✗ Role hierarchy issue: Bot's highest role ({bot_role_position}) must be higher than the role to assign ({role_position})")
-            return {"success": False, "message": "Bot's role must be higher than the role it's trying to assign"}
-
-        # Attempt to assign the role
-        api_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{role_id}"
+        # Now assign the role
+        api_url = f"https://discord.com/api/v10/guilds/{GUILD_ID}/members/{user_id}/roles/{role_id}"
         print(f"Assigning role {role_name} (ID: {role_id}) to user {matched_name} (ID: {user_id})")
 
         role_response = requests.put(api_url, headers=headers)
-        print(f"Role assignment response status code: {role_response.status_code}")
 
+        print(f"Role assignment response status code: {role_response.status_code}")
         if role_response.status_code in [204, 200]:
             print("✓ Role assignment successful!")
             return {"success": True, "message": f"Role {role_name} assigned successfully to {matched_name}"}
         else:
             print(f"✗ Role assignment failed with status code {role_response.status_code}")
             print(f"Response body: {role_response.text[:200]}")
-
-            if role_response.status_code == 403:
-                print("This is likely a permissions issue. Check that your bot has 'Manage Roles' permission.")
-
             return {"success": False, "message": f"Failed to assign role: {role_response.status_code}"}
 
     except Exception as e:
@@ -677,6 +633,97 @@ def check_rank():
         rank_data["role_assignment"] = role_result
 
     return jsonify(rank_data)
+
+@app.route('/api/rank-check', methods=['GET'])
+def check_rank():
+    """API endpoint to check Rocket League rank"""
+    platform = request.args.get('platform', '')
+    username = request.args.get('username', '')
+    discord_username = request.args.get('discord_username', '')
+
+    if not platform or not username:
+        return jsonify({"success": False, "message": "Platform and username are required"}), 400
+
+    # Add debug logging
+    print(f"=== RANK CHECK DEBUG ===")
+    print(f"Platform: {platform}")
+    print(f"Username: {username}")
+    print(f"Discord username: {discord_username}")
+    print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
+    print(f"API Key length: {len(RLTRACKER_API_KEY)}")
+    print(f"========================")
+
+    # Use mock data with variety if no API key is provided or API key isn't approved yet
+    if not RLTRACKER_API_KEY:
+        print("WARNING: No API key provided, using varied mock data")
+        mock_data = get_mock_rank_data(username, platform)
+
+        # If Discord username was provided, attempt role assignment
+        if discord_username:
+            tier = mock_data.get("tier")
+            role_result = assign_discord_role(discord_username, tier)
+            mock_data["role_assignment"] = role_result
+
+        return jsonify(mock_data)
+
+    # Get rank from API (with caching)
+    rank_data = get_cached_rank(platform, username)
+    print(f"Rank data returned: {rank_data}")
+
+    # If Discord username was provided, attempt to assign role
+    if discord_username and rank_data.get("success", False):
+        tier = rank_data.get("tier")
+        role_result = assign_discord_role(discord_username, tier)
+        rank_data["role_assignment"] = role_result
+        print(f"Role assignment result: {role_result}")
+
+    return jsonify(rank_data)
+
+
+def get_mock_rank_data(username, platform):
+    """Generate varied mock data for testing"""
+    # Use username to deterministically generate different ranks
+    import hashlib
+
+    # Generate a hash based on username for consistency
+    hash_value = int(hashlib.md5(username.encode()).hexdigest(), 16) % 100
+
+    # Determine rank based on hash value
+    if hash_value < 10:  # 10% chance
+        rank = "Supersonic Legend I"
+        tier = "Rank A"
+        mmr = 1500
+    elif hash_value < 20:  # 10% chance
+        rank = "Grand Champion III"
+        tier = "Rank A"
+        mmr = 1500
+    elif hash_value < 40:  # 20% chance
+        rank = "Champion III"
+        tier = "Rank B"
+        mmr = 1300
+    elif hash_value < 60:  # 20% chance
+        rank = "Champion I"
+        tier = "Rank B"
+        mmr = 1300
+    elif hash_value < 80:  # 20% chance
+        rank = "Diamond III"
+        tier = "Rank C"
+        mmr = 1000
+    else:  # 20% chance
+        rank = "Platinum II"
+        tier = "Rank C"
+        mmr = 1000
+
+    return {
+        "success": True,
+        "username": username,
+        "platform": platform,
+        "rank": rank,
+        "tier": tier,
+        "mmr": mmr,
+        "profileUrl": f"https://rocketleague.tracker.network/rocket-league/profile/{platform}/{username}",
+        "timestamp": time.time()
+    }
 
 @app.errorhandler(404)
 def page_not_found(e):
