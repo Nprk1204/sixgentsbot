@@ -226,7 +226,7 @@ async def report(ctx, match_id: str, result: str):
 
     # Now proceed with reporting - ONLY ONCE
     print(f"Calling report_match_by_id for match {match_id}")
-    match, error = match_system.report_match_by_id(match_id, reporter_id, result)
+    match, error = await match_system.report_match_by_id(match_id, reporter_id, result, ctx)
     print(f"Report result: match={match is not None}, error={error}")
 
     if error:
