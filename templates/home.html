@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+
+{% block title %}Rocket League 6 Mans - Home{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="content-container mb-4">
+    <div class="row align-items-center">
+        <div class="col-lg-7">
+            <h2 class="mb-3">Welcome to Rocket League 6 Mans</h2>
+            <p class="lead mb-4">A competitive matchmaking system for Discord communities. Play custom matches, track your stats, and climb the leaderboard!</p>
+            <p class="mb-4">Join our Discord server and start playing today!</p>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary">
+                    <i class="fab fa-discord me-2"></i> Join Discord Server
+                </a>
+                <a href="{{ url_for('leaderboard') }}" class="btn btn-secondary">
+                    <i class="fas fa-trophy me-2"></i> View Leaderboard
+                </a>
+            </div>
+        </div>
+        <div class="col-lg-5 mt-4 mt-lg-0">
+            <img src="{{ url_for('static', filename='img/rocket-league-hero.png') }}" alt="Rocket League 6 Mans" class="img-fluid rounded">
+        </div>
+    </div>
+</div>
+
+<!-- Stats Section -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="stat-card primary">
+            <div class="stat-card-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div class="stat-card-value">{{ player_count }}</div>
+            <div class="stat-card-title">Registered Players</div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="stat-card secondary">
+            <div class="stat-card-icon">
+                <i class="fas fa-gamepad"></i>
+            </div>
+            <div class="stat-card-value">{{ match_count }}</div>
+            <div class="stat-card-title">Matches Played</div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="stat-card accent">
+            <div class="stat-card-icon">
+                <i class="fas fa-server"></i>
+            </div>
+            <div class="stat-card-value">1</div>
+            <div class="stat-card-title">Active Servers</div>
+        </div>
+    </div>
+</div>
+
+<!-- Featured Players and Recent Matches -->
+<div class="row">
+    <!-- Featured Players -->
+    <div class="col-lg-6">
+        <div class="content-container">
+            <div class="content-header">
+                <h2>Featured Players</h2>
+                <a href="{{ url_for('leaderboard') }}" class="btn btn-sm btn-outline-primary">View All</a>
+            </div>
+
+            <div class="row">
+                {% for player in featured_players %}
+                <div class="col-md-6">
+                    <div class="featured-player" data-player-id="{{ player.id }}">
+                        {% if loop.index <= 3 %}
+                        <div class="featured-player-rank rank-{{ loop.index }}">{{ loop.index }}</div>
+                        {% endif %}
+
+                        <div class="featured-player-header">
+                            {{ player.name }}
+                        </div>
+
+                        <div class="featured-player-body">
+                            <div class="featured-player-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.mmr }}</span>
+                                    <span class="stat-label">MMR</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.win_rate }}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.matches }}</span>
+                                    <span class="stat-label">Matches</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Matches -->
+    <div class="col-lg-6">
+        <div class="content-container">
+            <div class="content-header">
+                <h2>Recent Matches</h2>
+            </div>
+
+            {% if recent_matches %}
+                {% for match in recent_matches %}
+                <div class="match-card">
+                    <div class="match-header">
+                        <span class="match-date">{{ match.date }}</span>
+                        <span class="match-id">Match ID: {{ match.match_id }}</span>
+                    </div>
+                    <div class="match-body">
+                        <div class="team team1 {% if match.winner == 1 %}team-winner{% endif %}">
+                            <div class="team-header">
+                                <i class="fas fa-users me-2"></i> Team 1
+                                {% if match.winner == 1 %}
+                                <span class="badge bg-success ms-2">Winner</span>
+                                {% endif %}
+                            </div>
+                            <div class="team-members">
+                                {{ match.team1|join(', ') }}
+                            </div>
+                        </div>
+
+                        <div class="text-center my-2">
+                            <span class="badge bg-dark">VS</span>
+                        </div>
+
+                        <div class="team team2 {% if match.winner == 2 %}team-winner{% endif %}">
+                            <div class="team-header">
+                                <i class="fas fa-users me-2"></i> Team 2
+                                {% if match.winner == 2 %}
+                                <span class="badge bg-success ms-2">Winner</span>
+                                {% endif %}
+                            </div>
+                            <div class="team-members">
+                                {{ match.team2|join(', ') }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center py-4">
+                    <p>No matches have been played yet.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- How It Works Section -->
+<div class="content-container mt-4">
+    <div class="content-header">
+        <h2>How It Works</h2>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-users fa-3x text-primary"></i>
+                    </div>
+                    <h5 class="card-title">1. Join the Queue</h5>
+                    <p class="card-text">Use the `/join` command in your Discord server to join the 6 mans queue. Once 6 players have joined, a match will be created.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-gamepad fa-3x text-secondary"></i>
+                    </div>
+                    <h5 class="card-title">2. Play the Match</h5>
+                    <p class="card-text">Teams will be formed either through a vote system or captain picks. Play the match with your assigned teammates.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-chart-line fa-3x" style="color: var(--accent);"></i>
+                    </div>
+                    <h5 class="card-title">3. Report & Track</h5>
+                    <p class="card-text">Report match results using the `/report` command. Win to gain MMR and climb the leaderboard!</p>
+                </div>
+            </div>
+        </div>
+        </div>
+    </div>
+</div>
+
+<!-- Discord Bot Features -->
+<div class="content-container mt-4">
+    <div class="content-header">
+        <h2>Discord Bot Features</h2>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-6">
+            <ul class="list-group list-group-flush bg-transparent mb-4">
+                <li class="list-group-item bg-transparent d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-3"></i>
+                    <div>
+                        <strong>Automated Queue System</strong>
+                        <p class="mb-0 text-muted">Join the queue with a simple command and get matched with other players.</p>
+                    </div>
+                </li>
+                <li class="list-group-item bg-transparent d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-3"></i>
+                    <div>
+                        <strong>Team Selection Options</strong>
+                        <p class="mb-0 text-muted">Choose between random teams or captains selection through voting.</p>
+                    </div>
+                </li>
+                <li class="list-group-item bg-transparent d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-3"></i>
+                    <div>
+                        <strong>MMR Ranking System</strong>
+                        <p class="mb-0 text-muted">Climb the leaderboard by winning matches and earning MMR points.</p>
+                    </div>
+                </li>
+            </ul>
+        </div>
+
+        <div class="col-lg-6">
+            <ul class="list-group list-group-flush bg-transparent">
+                <li class="list-group-item bg-transparent d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-3"></i>
+                    <div>
+                        <strong>Match History</strong>
+                        <p class="mb-0 text-muted">Keep track of all your matches and performance over time.</p>
+                    </div>
+                </li>
+                <li class="list-group-item bg-transparent d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-3"></i>
+                    <div>
+                        <strong>Role Assignment</strong>
+                        <p class="mb-0 text-muted">Get Discord roles based on your in-game Rocket League rank.</p>
+                    </div>
+                </li>
+                <li class="list-group-item bg-transparent d-flex align-items-center">
+                    <i class="fas fa-check-circle text-success me-3"></i>
+                    <div>
+                        <strong>Admin Commands</strong>
+                        <p class="mb-0 text-muted">Useful commands for server admins to manage the queue and matches.</p>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="text-center mt-4">
+        <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary">
+            <i class="fab fa-discord me-2"></i> Add to Your Discord
+        </a>
+    </div>
+</div>
+
+<!-- Command Reference -->
+<div class="content-container mt-4">
+    <div class="content-header">
+        <h2>Command Reference</h2>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-dark table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>Command</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>/join</code></td>
+                    <td>Join the 6 mans queue</td>
+                </tr>
+                <tr>
+                    <td><code>/leave</code></td>
+                    <td>Leave the queue</td>
+                </tr>
+                <tr>
+                    <td><code>/status</code></td>
+                    <td>Check the current queue status</td>
+                </tr>
+                <tr>
+                    <td><code>/report &lt;match_id&gt; &lt;win/loss&gt;</code></td>
+                    <td>Report match results</td>
+                </tr>
+                <tr>
+                    <td><code>/leaderboard</code></td>
+                    <td>Get a link to the leaderboard website</td>
+                </tr>
+                <tr>
+                    <td><code>/rank [member]</code></td>
+                    <td>Check your rank or another member's rank</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Player Profile Modal -->
+<div class="modal fade" id="playerModal" tabindex="-1" aria-labelledby="playerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="playerModalLabel">Player Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="playerModalContent">
+                <!-- Player details will be loaded here -->
+                <div class="text-center">
+                    <div class="spinner-border text-light" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Loading player data...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Set up click events for featured players
+        const featuredPlayers = document.querySelectorAll('.featured-player');
+        featuredPlayers.forEach(player => {
+            player.addEventListener('click', function() {
+                const playerId = this.dataset.playerId;
+                showPlayerDetails(playerId);
+            });
+        });
+    });
+
+    function showPlayerDetails(playerId) {
+        const playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
+        const modalContent = document.getElementById('playerModalContent');
+
+        // Reset modal content
+        modalContent.innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-light" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p>Loading player data...</p>
+            </div>
+        `;
+
+        // Show modal while loading data
+        playerModal.show();
+
+        // Fetch player data
+        fetch(`/api/player/${playerId}`)
+            .then(response => response.json())
+            .then(player => {
+                if (player.error) {
+                    modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
+                    return;
+                }
+
+                // Build player stats
+                let content = `
+                    <div class="row mb-4">
+                        <div class="col-md-6">
+                            <h3>${player.name}</h3>
+                            <p class="lead">MMR: <span class="badge bg-primary">${player.mmr}</span></p>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="card bg-dark">
+                                <div class="card-body">
+                                    <h5 class="card-title">Stats</h5>
+                                    <div class="row">
+                                        <div class="col-6">Win Rate: ${player.win_rate}%</div>
+                                        <div class="col-6">Record: ${player.wins || 0}-${player.losses || 0}</div>
+                                        <div class="col-6">Matches: ${player.matches || 0}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Display recent matches if available
+                if (player.recent_matches && player.recent_matches.length > 0) {
+                    content += `
+                        <h4>Recent Matches</h4>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Result</th>
+                                        <th>Teams</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    player.recent_matches.forEach(match => {
+                        // Format teams
+                        let team1Names = match.team1.map(p => p.name).join(', ');
+                        let team2Names = match.team2.map(p => p.name).join(', ');
+
+                        // Determine result color
+                        let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
+
+                        content += `
+                            <tr>
+                                <td>${match.date || 'Unknown'}</td>
+                                <td class="${resultClass}">${match.player_result}</td>
+                                <td>
+                                    <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    content += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    content += `<p>No recent matches found for this player.</p>`;
+                }
+
+                modalContent.innerHTML = content;
+            })
+            .catch(error => {
+                console.error('Error fetching player details:', error);
+                modalContent.innerHTML = '<div class="alert alert-danger">Error loading player data. Please try again later.</div>';
+            });
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - 500 Error{% endblock %}
+
+{% block content %}
+<div class="content-container text-center py-5">
+    <div class="mb-4">
+        <i class="fas fa-cogs fa-5x text-danger"></i>
+    </div>
+    <h1 class="display-4">500</h1>
+    <h2 class="mb-4">Server Error</h2>
+    <p class="lead mb-5">Oops! Something went wrong on our end. Our team has been notified and we're working on it.</p>
+    <img src="{{ url_for('static', filename='img/rocket-crash.png') }}" alt="Rocket Crash" class="img-fluid mb-4" style="max-width: 300px;">
+    <div class="mt-4">
+        <a href="{{ url_for('home') }}" class="btn btn-primary">
+            <i class="fas fa-home me-2"></i> Back to Home
+        </a>
+        <button onclick="location.reload()" class="btn btn-secondary ms-2">
+            <i class="fas fa-sync-alt me-2"></i> Try Again
+        </button>
+    </div>
+</div>
+{% endblock %}

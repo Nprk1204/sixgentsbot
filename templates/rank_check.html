@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+
+{% block title %}Rocket League 6 Mans - Rank Check{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <div class="content-header">
+        <h2>Rocket League Rank Check</h2>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-lg-6">
+            <div class="card bg-dark-medium mb-4">
+                <div class="card-body">
+                    <h4 class="mb-3">How It Works</h4>
+                    <p>Our rank check system verifies your Rocket League competitive rank and assigns you the appropriate Discord role and starting MMR in our 6 Mans system.</p>
+
+                    <h5 class="mt-4">Step 1: Enter Your Game ID</h5>
+                    <p>Provide your Rocket League ID and select your platform.</p>
+
+                    <h5 class="mt-3">Step 2: One-Click Verification</h5>
+                    <p>Click the verify button and we'll automatically check your competitive rank using RLTracker data.</p>
+
+                    <h5 class="mt-3">Step 3: Role Assignment</h5>
+                    <p>You'll receive the appropriate Discord role and starting MMR based on your competitive 3v3 rank.</p>
+                </div>
+            </div>
+
+            <div class="card bg-dark-medium">
+                <div class="card-header">
+                    <h4 class="mb-0">Check Your Rank</h4>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="rocketId" class="form-label">Rocket League ID/Epic Games ID</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fas fa-gamepad"></i></span>
+                            <input type="text" class="form-control" id="rocketId" placeholder="Your Rocket League/Epic ID" required>
+                        </div>
+                        <small class="form-text text-muted">Your Rocket League/Epic Games username</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="platform" class="form-label">Platform</label>
+                        <select class="form-select" id="platform">
+                            <option value="epic">Epic Games</option>
+                            <option value="steam">Steam</option>
+                            <option value="psn">PlayStation</option>
+                            <option value="xbl">Xbox</option>
+                            <option value="switch">Nintendo Switch</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="discordId" class="form-label">Discord ID (optional - for automatic role assignment)</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fab fa-discord"></i></span>
+                            <input type="text" class="form-control" id="discordId" placeholder="e.g., 123456789012345678">
+                        </div>
+                        <small class="form-text text-muted">Your Discord ID (Right-click your username → Copy ID)</small>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="button" id="checkRankButton" class="btn btn-primary">
+                            <i class="fas fa-check-circle me-2"></i> Check My Rank
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6 mt-4 mt-lg-0">
+            <h4 class="mb-3">Rank Tiers & Starting MMR</h4>
+
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <div class="rank-card">
+                        <div class="rank-header rank-a">
+                            <i class="fas fa-trophy fa-2x"></i>
+                        </div>
+                        <div class="rank-body">
+                            <h5 class="rank-title">Rank A</h5>
+                            <p class="rank-description">Grand Champion & SSL Players</p>
+                            <p class="rank-mmr">Starting MMR: 1500</p>
+                            <span class="badge bg-danger">Rank A Role</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="rank-card">
+                        <div class="rank-header rank-b">
+                            <i class="fas fa-award fa-2x"></i>
+                        </div>
+                        <div class="rank-body">
+                            <h5 class="rank-title">Rank B</h5>
+                            <p class="rank-description">Champion I to Grand Champion I</p>
+                            <p class="rank-mmr">Starting MMR: 1300</p>
+                            <span class="badge bg-primary">Rank B Role</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="rank-card">
+                        <div class="rank-header rank-c">
+                            <i class="fas fa-medal fa-2x"></i>
+                        </div>
+                        <div class="rank-body">
+                            <h5 class="rank-title">Rank C</h5>
+                            <p class="rank-description">Diamond III and below</p>
+                            <p class="rank-mmr">Starting MMR: 1000</p>
+                            <span class="badge bg-success">Rank C Role</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card bg-dark-medium mt-4">
+                <div class="card-header">
+                    <h5 class="mb-0">Verification Result</h5>
+                </div>
+                <div class="card-body" id="verificationResult">
+                    <p class="text-center text-muted">Click "Check My Rank" to see your results</p>
+                </div>
+            </div>
+
+            <div class="alert alert-info mt-3">
+                <i class="fas fa-info-circle me-2"></i> Your rank will be verified based on your 3v3 competitive rank. The highest rank from your recent placements will be used.
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Result Modal -->
+<div class="modal fade" id="resultModal" tabindex="-1" aria-labelledby="resultModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="resultModalLabel">Rank Verification Result</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="resultModalContent">
+                <!-- Results will be shown here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const checkRankButton = document.getElementById('checkRankButton');
+        const resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
+
+        checkRankButton.addEventListener('click', function() {
+            const rocketId = document.getElementById('rocketId').value.trim();
+            const platform = document.getElementById('platform').value;
+            const discordId = document.getElementById('discordId').value.trim();
+
+            if (!rocketId) {
+                alert('Please enter your Rocket League ID');
+                return;
+            }
+
+            // Show loading state
+            document.getElementById('verificationResult').innerHTML = `
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Checking your rank via RLTracker...</p>
+                </div>
+            `;
+
+            // Disable the button while checking
+            checkRankButton.disabled = true;
+            checkRankButton.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Checking...
+            `;
+
+            // Call our API endpoint to get the rank data
+            fetchRankData(rocketId, platform, discordId);
+        });
+
+        function fetchRankData(username, platform, discordId) {
+            // Build the API URL with query parameters
+            let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
+
+            if (discordId) {
+                apiUrl += `&discord_id=${encodeURIComponent(discordId)}`;
+            }
+
+            // Make the API request
+            fetch(apiUrl)
+                .then(response => response.json())
+                .then(data => {
+                    // Process the API response
+                    if (data.success) {
+                        displayRankResults(data, discordId);
+                    } else {
+                        showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showError("An error occurred while checking your rank. Please try again later.");
+                })
+                .finally(() => {
+                    // Re-enable button regardless of outcome
+                    checkRankButton.disabled = false;
+                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                });
+        }
+
+        function displayRankResults(data, discordId) {
+            // Update verification result section
+            let resultHtml = `
+                <div class="alert alert-success mb-4">
+                    <i class="fas fa-check-circle me-2"></i> Rank verification successful!
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div>
+                        <h5 class="mb-1">${data.username}</h5>
+                        <p class="mb-0 text-muted">${getPlatformName(data.platform)}</p>
+                    </div>
+                    <a href="${data.profileUrl}" target="_blank" class="btn btn-sm btn-outline-primary">
+                        View RLTracker Profile
+                    </a>
+                </div>
+
+                <div class="d-flex align-items-center mb-3">
+                    <div class="me-3">
+                        <i class="fas fa-trophy fa-2x text-warning"></i>
+                    </div>
+                    <div>
+                        <h6 class="mb-0">Detected 3v3 Rank</h6>
+                        <p class="mb-0">${data.rank}</p>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center mb-3">
+                    <div class="me-3">
+                        <i class="fas fa-tag fa-2x text-info"></i>
+                    </div>
+                    <div>
+                        <h6 class="mb-0">Assigned Role</h6>
+                        <p class="mb-0"><span class="badge bg-${getRoleColor(data.tier)}">${data.tier}</span></p>
+                    </div>
+                </div>
+                </div>
+
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="fas fa-chart-line fa-2x text-success"></i>
+                    </div>
+                    <div>
+                        <h6 class="mb-0">Starting MMR</h6>
+                        <p class="mb-0">${data.mmr}</p>
+                    </div>
+                </div>
+            `;
+
+            // Add Discord role assignment status if applicable
+            if (discordId && data.role_assignment) {
+                const roleSuccess = data.role_assignment.success;
+                resultHtml += `
+                    <div class="alert alert-${roleSuccess ? 'success' : 'warning'} mt-3">
+                        <i class="fab fa-discord me-2"></i>
+                        ${roleSuccess ? 'Discord role assigned successfully!' : 'Could not assign Discord role automatically. Please contact an admin.'}
+                    </div>
+                `;
+            }
+
+            document.getElementById('verificationResult').innerHTML = resultHtml;
+
+            // Update modal
+            let modalContent = `
+                <div class="text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-check-circle fa-4x text-success"></i>
+                    </div>
+                    <h4>Your rank has been verified!</h4>
+                    <p class="mb-3">Based on your ${data.rank} rank in competitive 3v3.</p>
+
+                    <div class="alert alert-info">
+                        <strong>Discord Role:</strong> ${data.tier}<br>
+                        <strong>Starting MMR:</strong> ${data.mmr}
+                    </div>
+            `;
+
+            if (discordId) {
+                if (data.role_assignment && data.role_assignment.success) {
+                    modalContent += `
+                        <div class="alert alert-success">
+                            <i class="fab fa-discord me-2"></i> Your Discord role has been updated automatically!
+                        </div>
+                    `;
+                } else {
+                    modalContent += `
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i> Could not update your Discord role automatically. Please contact an admin.
+                        </div>
+                    `;
+                }
+            } else {
+                modalContent += `
+                    <div class="alert alert-warning">
+                        <i class="fas fa-exclamation-triangle me-2"></i> No Discord ID provided. Please contact an admin to get your role assigned.
+                    </div>
+                `;
+            }
+
+            modalContent += `
+                    <p>You can now join the 6 Mans queue in our Discord server.</p>
+                    <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary mt-2">
+                        <i class="fab fa-discord me-2"></i> Join Our Discord
+                    </a>
+                </div>
+            `;
+
+            document.getElementById('resultModalContent').innerHTML = modalContent;
+
+            // Show modal
+            resultModal.show();
+        }
+
+        function showError(message) {
+            // Update verification result section
+            document.getElementById('verificationResult').innerHTML = `
+                <div class="alert alert-danger mb-0">
+                    <i class="fas fa-exclamation-circle me-2"></i> ${message}
+                </div>
+            `;
+
+            // Update modal
+            document.getElementById('resultModalContent').innerHTML = `
+                <div class="text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-exclamation-circle fa-4x text-danger"></i>
+                    </div>
+                    <h4>Verification Failed</h4>
+                    <div class="alert alert-danger mb-0">
+                        ${message}
+                    </div>
+                    <p class="mt-3">Please check your Rocket League ID and platform, then try again.</p>
+                    <p class="mt-3">If the problem persists, you can still join our Discord and request manual verification from an admin.</p>
+                    <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary mt-2">
+                        <i class="fab fa-discord me-2"></i> Join Our Discord
+                    </a>
+                </div>
+            `;
+
+            // Show modal
+            resultModal.show();
+        }
+
+        function getPlatformName(platformCode) {
+            const platforms = {
+                'epic': 'Epic Games',
+                'steam': 'Steam',
+                'psn': 'PlayStation',
+                'xbl': 'Xbox',
+                'switch': 'Nintendo Switch'
+            };
+
+            return platforms[platformCode] || platformCode;
+        }
+
+        function getRoleColor(tier) {
+            const colors = {
+                'Rank A': 'danger',
+                'Rank B': 'primary',
+                'Rank C': 'success'
+            };
+
+            return colors[tier] || 'secondary';
+        }
+    });
+</script>
+{% endblock %}
