@@ -204,21 +204,18 @@ async def report(ctx, match_id: str, result: str):
         await ctx.send("Invalid result. Please use 'win' or 'loss'.")
         return
 
-    # Find match by ID - get status for debugging
+    # Find match by ID
     active_match = match_system.matches.find_one({"match_id": match_id})
     if not active_match:
         await ctx.send(f"No match found with ID `{match_id}`.")
         return
-
-    # Debug output to help troubleshoot
-    print(f"Reporting match {match_id}, current status: {active_match.get('status')}")
 
     # Check if match is still in progress
     if active_match.get("status") != "in_progress":
         await ctx.send(f"Error: This match has already been reported.")
         return
 
-    # Now proceed with reporting - ONE time only
+    # Now proceed with reporting - ONLY ONCE
     match, error = match_system.report_match_by_id(match_id, reporter_id, result)
 
     if error:
