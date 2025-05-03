@@ -466,7 +466,7 @@ def assign_discord_role(username, role_name):
     print(f"Starting role assignment for user: {username} to role: {role_name}")
 
     # Explicitly get environment variables
-    BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
+    BOT_TOKEN = os.getenv('DISCORD_TOKEN')
     GUILD_ID = os.getenv('DISCORD_GUILD_ID')
 
     # Print environment variable status for debugging
