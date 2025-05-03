@@ -461,14 +461,19 @@ def get_mmr_from_rank(rank):
 
 
 def assign_discord_role(username, role_name):
-    """Assign a Discord role to a user by username using role names for portability"""
+    """Assign a Discord role to a user by username with comprehensive logging"""
+    print("\n=== DISCORD ROLE ASSIGNMENT DEBUG ===")
+    print(f"Starting role assignment for user: {username} to role: {role_name}")
+
     if not username or not DISCORD_BOT_TOKEN or not DISCORD_GUILD_ID:
-        print(
-            f"Missing required information: username={bool(username)}, token={bool(DISCORD_BOT_TOKEN)}, guild={bool(DISCORD_GUILD_ID)}")
+        print(f"Missing required information:")
+        print(f"- username provided: {'Yes' if username else 'No'}")
+        print(f"- DISCORD_BOT_TOKEN provided: {'Yes' if DISCORD_BOT_TOKEN else 'No'}")
+        print(f"- DISCORD_GUILD_ID provided: {'Yes' if DISCORD_GUILD_ID else 'No'}")
         return {"success": False, "message": "Missing required information for role assignment"}
 
     try:
-        # First get all guild members to find the user by name
+        # Get all guild members
         api_url_members = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members?limit=1000"
 
         headers = {
@@ -476,104 +481,153 @@ def assign_discord_role(username, role_name):
             "Content-Type": "application/json"
         }
 
-        print(f"Searching for Discord user: {username}")
-        print(f"Using server ID: {DISCORD_GUILD_ID}")
-
-        # Get all server members
+        print(f"Making API request to get server members...")
         response = requests.get(api_url_members, headers=headers)
 
+        print(f"Response status code: {response.status_code}")
         if response.status_code != 200:
-            print(f"Failed to get members: Status code {response.status_code}")
-            print(f"Response: {response.text[:200]}")
-            return {"success": False, "message": f"Failed to get members: {response.status_code}"}
+            print(f"API Error: {response.text[:200]}")
+            return {"success": False, "message": f"Discord API error: {response.status_code}"}
 
         members = response.json()
-        print(f"Found {len(members)} members in the server")
+        print(f"Successfully retrieved {len(members)} members from server")
 
-        # Find user by username with flexible matching
+        # Find user by username with detailed logging
         user_id = None
         matched_name = None
-
-        # Normalize the search username
         search_name = username.lower().strip()
 
-        for member in members:
-            # Get all possible name fields
+        print(f"Looking for user matching '{search_name}'")
+        for i, member in enumerate(members):
             member_user = member.get('user', {})
+            member_id = member_user.get('id', 'None')
             member_username = (member_user.get('username') or '').lower().strip()
             member_global_name = (member_user.get('global_name') or '').lower().strip()
             member_nickname = (member.get('nick') or '').lower().strip()
 
-            # Print detailed info for debugging
-            print(
-                f"Checking member: username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
+            if i < 10:  # Only print first 10 members to avoid log spam
+                print(
+                    f"Member {i + 1}: id={member_id}, username={member_username}, global_name={member_global_name}, nickname={member_nickname}")
 
-            # Look for various types of matches
-            if (search_name == member_username or
-                    search_name == member_global_name or
-                    search_name == member_nickname or
-                    search_name in member_username or
-                    search_name in member_global_name or
-                    search_name in member_nickname):
+            # Various matching strategies
+            exact_match = (search_name == member_username or
+                           search_name == member_global_name or
+                           search_name == member_nickname)
+
+            contains_match = (search_name in member_username or
+                              search_name in member_global_name or
+                              search_name in member_nickname)
+
+            if exact_match or contains_match:
                 user_id = member_user.get('id')
-                matched_name = member_username or member_global_name or "Unknown"
-                print(f"Found matching user: {matched_name} with ID: {user_id}")
+                matched_name = member_user.get('username')
+                print(f"✓ Found matching user: {matched_name} (ID: {user_id})")
+                print(f"  Match type: {'Exact match' if exact_match else 'Contains match'}")
                 break
 
         if not user_id:
-            print(f"No user found matching: '{username}'")
+            print("✗ No matching user found")
             return {"success": False, "message": f"Could not find Discord user with username: {username}"}
 
         # Get all server roles
         api_url_roles = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
+        print("Getting server roles...")
         roles_response = requests.get(api_url_roles, headers=headers)
 
+        print(f"Roles response status code: {roles_response.status_code}")
         if roles_response.status_code != 200:
-            print(f"Failed to get roles: Status code {roles_response.status_code}")
-            print(f"Response: {roles_response.text[:200]}")
+            print(f"Roles API Error: {roles_response.text[:200]}")
             return {"success": False, "message": f"Failed to get roles: {roles_response.status_code}"}
 
         roles = roles_response.json()
+        print(f"Successfully retrieved {len(roles)} roles")
 
         # Print all roles for debugging
-        print(f"Found {len(roles)} roles in the server:")
-        for role in roles:
-            print(f"  - {role.get('name', 'Unknown')} (ID: {role.get('id', 'Unknown')})")
+        print("Available roles:")
+        for i, role in enumerate(roles):
+            role_id = role.get('id', 'None')
+            role_name_from_server = role.get('name', 'Unknown')
+            role_position = role.get('position', 0)
+            print(f"  {i + 1}. '{role_name_from_server}' (ID: {role_id}, Position: {role_position})")
 
-        # Find role ID by name (case-insensitive)
+        # Find bot's role position
+        bot_role_position = 0
+        bot_user = None
+
+        # First get the bot's user ID from the token
+        auth_url = "https://discord.com/api/v10/users/@me"
+        auth_response = requests.get(auth_url, headers=headers)
+
+        if auth_response.status_code == 200:
+            bot_user = auth_response.json()
+            bot_id = bot_user.get('id')
+            print(f"Bot ID: {bot_id}")
+
+            # Now find the bot's highest role
+            for member in members:
+                member_user = member.get('user', {})
+                if member_user.get('id') == bot_id:
+                    member_roles = member.get('roles', [])
+                    print(f"Bot has {len(member_roles)} roles")
+
+                    # Find highest position role
+                    for role in roles:
+                        if role.get('id') in member_roles and role.get('position', 0) > bot_role_position:
+                            bot_role_position = role.get('position', 0)
+
+                    print(f"Bot's highest role position: {bot_role_position}")
+                    break
+        else:
+            print("Could not get bot user information")
+
+        # Find role ID by name with position check
         role_id = None
+        role_position = 0
+
         for role in roles:
-            if role.get('name', '').lower() == role_name.lower():
+            server_role_name = role.get('name', '')
+            if server_role_name.lower() == role_name.lower():
                 role_id = role.get('id')
-                print(f"Found matching role: {role.get('name')} with ID: {role_id}")
+                role_position = role.get('position', 0)
+                print(f"✓ Found matching role: '{server_role_name}' (ID: {role_id}, Position: {role_position})")
                 break
 
         if not role_id:
-            print(f"No role found matching: '{role_name}'")
-            print(f"Available roles: {', '.join([r.get('name', 'Unknown') for r in roles])}")
+            print(f"✗ No matching role found for '{role_name}'")
             return {"success": False, "message": f"Could not find Discord role with name: {role_name}"}
 
-        # Now assign the role
+        # Check role hierarchy
+        if role_position >= bot_role_position and bot_role_position > 0:
+            print(
+                f"✗ Role hierarchy issue: Bot's highest role ({bot_role_position}) must be higher than the role to assign ({role_position})")
+            return {"success": False, "message": "Bot's role must be higher than the role it's trying to assign"}
+
+        # Attempt to assign the role
         api_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{role_id}"
         print(f"Assigning role {role_name} (ID: {role_id}) to user {matched_name} (ID: {user_id})")
 
         role_response = requests.put(api_url, headers=headers)
-
         print(f"Role assignment response status code: {role_response.status_code}")
+
         if role_response.status_code in [204, 200]:
-            print("Role assignment successful!")
+            print("✓ Role assignment successful!")
             return {"success": True, "message": f"Role {role_name} assigned successfully to {matched_name}"}
         else:
-            error_msg = f"Failed to assign role: Status code {role_response.status_code}"
-            print(error_msg)
+            print(f"✗ Role assignment failed with status code {role_response.status_code}")
             print(f"Response body: {role_response.text[:200]}")
-            return {"success": False, "message": error_msg}
+
+            if role_response.status_code == 403:
+                print("This is likely a permissions issue. Check that your bot has 'Manage Roles' permission.")
+
+            return {"success": False, "message": f"Failed to assign role: {role_response.status_code}"}
 
     except Exception as e:
-        print(f"Error assigning role: {str(e)}")
         import traceback
+        print(f"✗ Exception during role assignment: {str(e)}")
         traceback.print_exc()
         return {"success": False, "message": f"Error: {str(e)}"}
+    finally:
+        print("=== END ROLE ASSIGNMENT DEBUG ===\n")
 
 @app.route('/api/rank-check', methods=['GET'])
 def check_rank():
