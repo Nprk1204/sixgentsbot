@@ -176,7 +176,7 @@ def home():
 
         formatted_matches.append(formatted_match)
 
-    return render_template('index.html',
+    return render_template('home.html',
                            player_count=player_count,
                            match_count=match_count,
                            featured_players=featured_players,
