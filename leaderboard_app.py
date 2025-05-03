@@ -339,9 +339,6 @@ def get_cached_rank(platform, username, cache_time=300):
 
 def fetch_rank_from_api(platform, username):
     """Fetch rank data from RLTracker or similar API"""
-    # This is a placeholder implementation
-    # You would need to implement this based on the specific API you're using
-
     try:
         # Example for RLTracker Network API
         api_url = f"https://api.tracker.gg/api/v2/rocket-league/standard/profile/{platform}/{username}"
@@ -352,13 +349,17 @@ def fetch_rank_from_api(platform, username):
             "Accept-Encoding": "gzip"
         }
 
+        print(f"Fetching rank data for {username} on {platform} with API key: {RLTRACKER_API_KEY[:5]}...")
+
         response = requests.get(api_url, headers=headers)
 
         if response.status_code == 200:
             data = response.json()
 
+            # For debugging
+            print("API Response received successfully")
+
             # Parse the response to extract 3v3 competitive rank
-            # This would depend on the specific structure of the API response
             rank_data = extract_3v3_rank(data)
 
             return {
@@ -372,6 +373,8 @@ def fetch_rank_from_api(platform, username):
                 "timestamp": time.time()
             }
         else:
+            print(f"API Error: Status code {response.status_code}")
+            print(f"Response body: {response.text[:200]}")
             return {
                 "success": False,
                 "error": f"API returned status code {response.status_code}",
@@ -379,7 +382,7 @@ def fetch_rank_from_api(platform, username):
             }
 
     except Exception as e:
-        print(f"Error fetching rank: {str(e)}")
+        print(f"Exception in fetch_rank_from_api: {str(e)}")
         return {
             "success": False,
             "error": str(e),
@@ -390,9 +393,18 @@ def fetch_rank_from_api(platform, username):
 def extract_3v3_rank(api_data):
     """Extract 3v3 rank from API response data"""
     try:
-        # This would need to be adapted based on the actual API response structure
+        # Check if data exists
+        if "data" not in api_data:
+            print("No data found in API response")
+            return {"rank": "Unknown", "tierGroup": "Unknown"}
+
         segments = api_data.get("data", {}).get("segments", [])
 
+        # For debugging
+        playlist_types = [segment.get("type") for segment in segments]
+        print(f"Found segment types: {playlist_types}")
+
+        # Try to find the ranked standard 3v3 playlist
         for segment in segments:
             if segment.get("type") == "playlist" and segment.get("metadata", {}).get("name") == "Ranked Standard 3v3":
                 tier = segment.get("stats", {}).get("tier", {}).get("metadata", {}).get("name", "Unranked")
@@ -403,6 +415,20 @@ def extract_3v3_rank(api_data):
                     "tierGroup": tier.split()[0] if tier != "Unranked" else "Unranked"
                 }
 
+        # If we didn't find Ranked Standard 3v3, try looking for other playlists
+        for segment in segments:
+            if segment.get("type") == "playlist" and "Ranked" in segment.get("metadata", {}).get("name", ""):
+                tier = segment.get("stats", {}).get("tier", {}).get("metadata", {}).get("name", "Unranked")
+                division = segment.get("stats", {}).get("division", {}).get("metadata", {}).get("name", "I")
+
+                print(f"Found alternate playlist: {segment.get('metadata', {}).get('name')}")
+
+                return {
+                    "rank": f"{tier} {division}",
+                    "tierGroup": tier.split()[0] if tier != "Unranked" else "Unranked"
+                }
+
+        # If no ranked playlists found at all, use a fallback
         return {"rank": "Unranked", "tierGroup": "Unranked"}
 
     except Exception as e:
@@ -484,6 +510,33 @@ def check_rank():
 
     if not platform or not username:
         return jsonify({"success": False, "message": "Platform and username are required"}), 400
+
+    # Add debug logging
+    print(f"Checking rank for {username} on {platform}")
+    print(f"Using API key: {RLTRACKER_API_KEY[:5]}..." if RLTRACKER_API_KEY else "No API key provided")
+
+    # Create a mock response if no API key is provided
+    if not RLTRACKER_API_KEY:
+        print("No API key provided, using mock data")
+        mock_data = {
+            "success": True,
+            "username": username,
+            "platform": platform,
+            "rank": "Champion II",
+            "tier": "Rank B",
+            "mmr": 1300,
+            "profileUrl": f"https://rocketleague.tracker.network/rocket-league/profile/{platform}/{username}",
+            "timestamp": time.time()
+        }
+
+        # If Discord ID was provided, mock role assignment
+        if discord_id:
+            mock_data["role_assignment"] = {
+                "success": True,
+                "message": "Discord role assigned successfully (mock)"
+            }
+
+        return jsonify(mock_data)
 
     # Get rank from API (with caching)
     rank_data = get_cached_rank(platform, username)
