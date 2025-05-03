@@ -17,10 +17,17 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-k
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
-RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
+RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '8974589b-396c-4a8b-925f-af173094b353')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
-DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')
+DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '1365506343015944222')  # Provide hardcoded fallback
 
+# Debug environment variables
+print("\n=== ENVIRONMENT VARIABLES DEBUG ===")
+print(f"DISCORD_TOKEN exists: {'Yes' if DISCORD_TOKEN else 'No'}")
+print(f"DISCORD_TOKEN length: {len(DISCORD_TOKEN) if DISCORD_TOKEN else 0}")
+print(f"DISCORD_GUILD_ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
+print(f"DISCORD_GUILD_ID value: '{DISCORD_GUILD_ID}'")
+print("===================================\n")
 
 # Simple cache implementation
 class SimpleCache:
