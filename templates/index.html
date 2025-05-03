@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Rocket League 6 Mans - Leaderboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body {
             background-color: #121212;
@@ -23,15 +24,18 @@
             border-radius: 10px;
             padding: 20px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            overflow-x: auto; /* For mobile responsiveness */
         }
         .leaderboard-header {
             border-bottom: 2px solid #7289da;
             padding-bottom: 10px;
             margin-bottom: 20px;
+            font-weight: bold;
         }
         .player-row {
             border-bottom: 1px solid #444;
             padding: 10px 0;
+            cursor: pointer;
         }
         .player-row:hover {
             background-color: #36393f;
@@ -59,12 +63,53 @@
             background-color: #2c2f33;
             border-top: 1px solid #444;
         }
-        #refreshButton {
+        .btn-discord {
             background-color: #7289da;
             border: none;
+            color: white;
         }
-        #refreshButton:hover {
+        .btn-discord:hover {
             background-color: #5a69a8;
+            color: white;
+        }
+        .pagination-container {
+            margin-top: 20px;
+        }
+        .page-item.active .page-link {
+            background-color: #7289da;
+            border-color: #7289da;
+        }
+        .page-link {
+            background-color: #2c2f33;
+            color: #f1f1f1;
+            border-color: #444;
+        }
+        .page-link:hover {
+            background-color: #36393f;
+            color: #f1f1f1;
+            border-color: #444;
+        }
+        #searchContainer {
+            margin-bottom: 20px;
+        }
+        .modal-content {
+            background-color: #2c2f33;
+            color: #f1f1f1;
+        }
+        .modal-header {
+            border-bottom: 1px solid #444;
+        }
+        .modal-footer {
+            border-top: 1px solid #444;
+        }
+        .table-dark {
+            background-color: #36393f;
+        }
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .hide-on-mobile {
+                display: none;
+            }
         }
     </style>
 </head>
@@ -79,9 +124,30 @@
             <div class="col-md-12">
                 <div class="d-flex justify-content-between align-items-center mb-4">
                     <h2>Player Rankings</h2>
-                    <button id="refreshButton" class="btn btn-primary">
-                        <i class="fas fa-sync-alt"></i> Refresh
+                    <div>
+                        <button id="refreshButton" class="btn btn-discord">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div id="searchContainer" class="input-group mb-3">
+                    <input type="text" id="searchInput" class="form-control" placeholder="Search for a player...">
+                    <button class="btn btn-discord" type="button" id="searchButton">
+                        <i class="fas fa-search"></i> Search
                     </button>
+                </div>
+
+                <div id="searchResults" class="mb-3" style="display: none;">
+                    <div class="card bg-dark">
+                        <div class="card-header">
+                            Search Results
+                            <button type="button" class="btn-close btn-close-white float-end" aria-label="Close" id="closeSearchResults"></button>
+                        </div>
+                        <div class="card-body" id="searchResultsContent">
+                            <!-- Search results will be displayed here -->
+                        </div>
+                    </div>
                 </div>
 
                 <div class="leaderboard">
@@ -90,7 +156,7 @@
                         <div class="col-3">Player</div>
                         <div class="col-2">MMR</div>
                         <div class="col-2">Win Rate</div>
-                        <div class="col-2">W-L</div>
+                        <div class="col-2 hide-on-mobile">W-L</div>
                         <div class="col-2">Matches</div>
                     </div>
 
@@ -103,6 +169,14 @@
                             <p class="mt-3">Loading leaderboard data...</p>
                         </div>
                     </div>
+
+                    <div class="pagination-container d-flex justify-content-center">
+                        <nav aria-label="Leaderboard pagination">
+                            <ul class="pagination" id="pagination">
+                                <!-- Pagination will be generated here -->
+                            </ul>
+                        </nav>
+                    </div>
                 </div>
             </div>
         </div>
@@ -112,62 +186,388 @@
         </div>
     </div>
 
-    <script src="https://kit.fontawesome.com/a076d05399.js" crossorigin="anonymous"></script>
+    <!-- Player Details Modal -->
+    <div class="modal fade" id="playerModal" tabindex="-1" aria-labelledby="playerModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="playerModalLabel">Player Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="playerModalContent">
+                    <!-- Player details will be loaded here -->
+                    <div class="text-center">
+                        <div class="spinner-border text-light" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p>Loading player data...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Global variables
+        let currentPage = 1;
+        const perPage = 25;
+        let totalPages = 1;
+        let playerModal;
+
         document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Bootstrap modal
+            playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
+
             // Load leaderboard data on page load
-            loadLeaderboard();
+            loadLeaderboard(currentPage);
 
             // Set up refresh button
-            document.getElementById('refreshButton').addEventListener('click', loadLeaderboard);
+            document.getElementById('refreshButton').addEventListener('click', function() {
+                loadLeaderboard(currentPage);
+            });
+
+            // Set up search functionality
+            document.getElementById('searchButton').addEventListener('click', searchPlayers);
+            document.getElementById('searchInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    searchPlayers();
+                }
+            });
+
+            // Set up close search results button
+            document.getElementById('closeSearchResults').addEventListener('click', function() {
+                document.getElementById('searchResults').style.display = 'none';
+            });
         });
 
-        function loadLeaderboard() {
-            fetch('/api/leaderboard')
+        function loadLeaderboard(page) {
+            fetch(`/api/leaderboard?page=${page}&per_page=${perPage}`)
                 .then(response => response.json())
                 .then(data => {
                     const leaderboardContent = document.getElementById('leaderboardContent');
                     leaderboardContent.innerHTML = '';
 
-                    if (data.length === 0) {
-                        leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available yet.</p>';
-                        return;
-                    }
+                    // If the new API structure is used (with pagination)
+                    if (data.players && data.pagination) {
+                        const players = data.players;
+                        totalPages = data.pagination.pages;
 
-                    data.forEach((player, index) => {
-                        const rank = index + 1;
-                        let medalClass = '';
-                        let medalIcon = '';
-
-                        if (rank === 1) {
-                            medalClass = 'medal-1';
-                            medalIcon = '<i class="fas fa-medal"></i> ';
-                        } else if (rank === 2) {
-                            medalClass = 'medal-2';
-                            medalIcon = '<i class="fas fa-medal"></i> ';
-                        } else if (rank === 3) {
-                            medalClass = 'medal-3';
-                            medalIcon = '<i class="fas fa-medal"></i> ';
+                        if (players.length === 0) {
+                            leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available yet.</p>';
+                            return;
                         }
 
-                        const playerRow = document.createElement('div');
-                        playerRow.className = 'player-row row align-items-center';
-                        playerRow.innerHTML = `
-                            <div class="col-1"><span class="rank ${medalClass}">${medalIcon}${rank}</span></div>
-                            <div class="col-3">${player.name}</div>
-                            <div class="col-2"><span class="mmr">${player.mmr}</span></div>
-                            <div class="col-2">${player.win_rate}%</div>
-                            <div class="col-2">${player.wins || 0}-${player.losses || 0}</div>
-                            <div class="col-2">${player.matches || 0}</div>
-                        `;
+                        displayPlayers(players, (page - 1) * perPage);
+                        updatePagination(page, totalPages);
+                    }
+                    // Legacy API structure (without pagination)
+                    else if (Array.isArray(data)) {
+                        if (data.length === 0) {
+                            leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available yet.</p>';
+                            return;
+                        }
 
-                        leaderboardContent.appendChild(playerRow);
-                    });
+                        displayPlayers(data, 0);
+                        // No pagination for legacy API
+                        document.getElementById('pagination').innerHTML = '';
+                    }
                 })
                 .catch(error => {
                     console.error('Error fetching leaderboard data:', error);
                     const leaderboardContent = document.getElementById('leaderboardContent');
                     leaderboardContent.innerHTML = '<p class="text-center py-4 text-danger">Error loading leaderboard data. Please try again later.</p>';
+                });
+        }
+
+        function displayPlayers(players, startIndex) {
+            const leaderboardContent = document.getElementById('leaderboardContent');
+
+            players.forEach((player, index) => {
+                const rank = startIndex + index + 1;
+                let medalClass = '';
+                let medalIcon = '';
+
+                if (rank === 1) {
+                    medalClass = 'medal-1';
+                    medalIcon = '<i class="fas fa-medal"></i> ';
+                } else if (rank === 2) {
+                    medalClass = 'medal-2';
+                    medalIcon = '<i class="fas fa-medal"></i> ';
+                } else if (rank === 3) {
+                    medalClass = 'medal-3';
+                    medalIcon = '<i class="fas fa-medal"></i> ';
+                }
+
+                const playerRow = document.createElement('div');
+                playerRow.className = 'player-row row align-items-center';
+                playerRow.dataset.playerId = player.id;
+                playerRow.innerHTML = `
+                    <div class="col-1"><span class="rank ${medalClass}">${medalIcon}${rank}</span></div>
+                    <div class="col-3">${player.name}</div>
+                    <div class="col-2"><span class="mmr">${player.mmr}</span></div>
+                    <div class="col-2">${player.win_rate}%</div>
+                    <div class="col-2 hide-on-mobile">${player.wins || 0}-${player.losses || 0}</div>
+                    <div class="col-2">${player.matches || 0}</div>
+                `;
+
+                // Add click event to show player details
+                playerRow.addEventListener('click', function() {
+                    showPlayerDetails(player.id);
+                });
+
+                leaderboardContent.appendChild(playerRow);
+            });
+        }
+
+        function updatePagination(currentPage, totalPages) {
+            const pagination = document.getElementById('pagination');
+            pagination.innerHTML = '';
+
+            // Don't show pagination if there's only one page
+            if (totalPages <= 1) {
+                return;
+            }
+
+            // Previous button
+            const prevLi = document.createElement('li');
+            prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+            prevLi.innerHTML = `<a class="page-link" href="#" aria-label="Previous">
+                                    <span aria-hidden="true">&laquo;</span>
+                                </a>`;
+            if (currentPage > 1) {
+                prevLi.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadLeaderboard(currentPage - 1);
+                });
+            }
+            pagination.appendChild(prevLi);
+
+            // Page links
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            // Adjust start page if needed
+            if (endPage - startPage < maxVisiblePages - 1) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            // First page link if not in range
+            if (startPage > 1) {
+                const firstLi = document.createElement('li');
+                firstLi.className = 'page-item';
+                firstLi.innerHTML = '<a class="page-link" href="#">1</a>';
+                firstLi.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadLeaderboard(1);
+                });
+                pagination.appendChild(firstLi);
+
+                // Ellipsis if needed
+                if (startPage > 2) {
+                    const ellipsisLi = document.createElement('li');
+                    ellipsisLi.className = 'page-item disabled';
+                    ellipsisLi.innerHTML = '<a class="page-link" href="#">...</a>';
+                    pagination.appendChild(ellipsisLi);
+                }
+            }
+
+            // Page numbers
+            for (let i = startPage; i <= endPage; i++) {
+                const pageLi = document.createElement('li');
+                pageLi.className = `page-item ${i === currentPage ? 'active' : ''}`;
+                pageLi.innerHTML = `<a class="page-link" href="#">${i}</a>`;
+                pageLi.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadLeaderboard(i);
+                });
+                pagination.appendChild(pageLi);
+            }
+
+            // Ellipsis if needed
+            if (endPage < totalPages - 1) {
+                const ellipsisLi = document.createElement('li');
+                ellipsisLi.className = 'page-item disabled';
+                ellipsisLi.innerHTML = '<a class="page-link" href="#">...</a>';
+                pagination.appendChild(ellipsisLi);
+            }
+
+            // Last page if not in range
+            if (endPage < totalPages) {
+                const lastLi = document.createElement('li');
+                lastLi.className = 'page-item';
+                lastLi.innerHTML = `<a class="page-link" href="#">${totalPages}</a>`;
+                lastLi.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadLeaderboard(totalPages);
+                });
+                pagination.appendChild(lastLi);
+            }
+
+            // Next button
+            const nextLi = document.createElement('li');
+            nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+            nextLi.innerHTML = `<a class="page-link" href="#" aria-label="Next">
+                                    <span aria-hidden="true">&raquo;</span>
+                                </a>`;
+            if (currentPage < totalPages) {
+                nextLi.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    loadLeaderboard(currentPage + 1);
+                });
+            }
+            pagination.appendChild(nextLi);
+        }
+
+        function searchPlayers() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (query.length < 2) {
+                alert('Please enter at least 2 characters to search');
+                return;
+            }
+
+            fetch(`/api/search?q=${encodeURIComponent(query)}`)
+                .then(response => response.json())
+                .then(data => {
+                    const searchResults = document.getElementById('searchResults');
+                    const searchResultsContent = document.getElementById('searchResultsContent');
+
+                    searchResultsContent.innerHTML = '';
+                    searchResults.style.display = 'block';
+
+                    if (data.error) {
+                        searchResultsContent.innerHTML = `<p class="text-danger">${data.error}</p>`;
+                        return;
+                    }
+
+                    if (data.length === 0) {
+                        searchResultsContent.innerHTML = '<p>No players found matching your search.</p>';
+                        return;
+                    }
+
+                    const resultsList = document.createElement('ul');
+                    resultsList.className = 'list-group';
+
+                    data.forEach(player => {
+                        const listItem = document.createElement('li');
+                        listItem.className = 'list-group-item bg-dark text-light d-flex justify-content-between align-items-center';
+                        listItem.innerHTML = `
+                            <span>${player.name}</span>
+                            <span class="badge bg-primary rounded-pill">MMR: ${player.mmr}</span>
+                        `;
+                        listItem.style.cursor = 'pointer';
+                        listItem.addEventListener('click', function() {
+                            showPlayerDetails(player.id);
+                            searchResults.style.display = 'none';
+                        });
+                        resultsList.appendChild(listItem);
+                    });
+
+                    searchResultsContent.appendChild(resultsList);
+                })
+                .catch(error => {
+                    console.error('Error searching players:', error);
+                    const searchResultsContent = document.getElementById('searchResultsContent');
+                    searchResultsContent.innerHTML = '<p class="text-danger">Error searching players. Please try again later.</p>';
+                });
+        }
+
+        function showPlayerDetails(playerId) {
+            const modalContent = document.getElementById('playerModalContent');
+            modalContent.innerHTML = `
+                <div class="text-center">
+                    <div class="spinner-border text-light" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Loading player data...</p>
+                </div>
+            `;
+
+            playerModal.show();
+
+            fetch(`/api/player/${playerId}`)
+                .then(response => response.json())
+                .then(player => {
+                    if (player.error) {
+                        modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
+                        return;
+                    }
+
+                    // Player stats
+                    let content = `
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <h3>${player.name}</h3>
+                                <p class="lead">MMR: <span class="badge bg-primary">${player.mmr}</span></p>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card bg-dark">
+                                    <div class="card-body">
+                                        <h5 class="card-title">Stats</h5>
+                                        <div class="row">
+                                            <div class="col-6">Win Rate: ${player.win_rate}%</div>
+                                            <div class="col-6">Record: ${player.wins || 0}-${player.losses || 0}</div>
+                                            <div class="col-6">Matches: ${player.matches || 0}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+
+                    // Recent matches
+                    if (player.recent_matches && player.recent_matches.length > 0) {
+                        content += `
+                            <h4>Recent Matches</h4>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Result</th>
+                                            <th>Teams</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                        `;
+
+                        player.recent_matches.forEach(match => {
+                            // Format teams
+                            let team1Names = match.team1.map(p => p.name).join(', ');
+                            let team2Names = match.team2.map(p => p.name).join(', ');
+
+                            // Determine result color
+                            let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
+
+                            content += `
+                                <tr>
+                                    <td>${match.date || 'Unknown'}</td>
+                                    <td class="${resultClass}">${match.player_result}</td>
+                                    <td>
+                                        <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
+                                    </td>
+                                </tr>
+                            `;
+                        });
+
+                        content += `
+                                    </tbody>
+                                </table>
+                            </div>
+                        `;
+                    } else {
+                        content += `<p>No recent matches found for this player.</p>`;
+                    }
+
+                    modalContent.innerHTML = content;
+                })
+                .catch(error => {
+                    console.error('Error fetching player details:', error);
+                    modalContent.innerHTML = '<div class="alert alert-danger">Error loading player data. Please try again later.</div>';
                 });
         }
     </script>
