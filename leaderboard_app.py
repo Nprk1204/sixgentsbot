@@ -596,55 +596,6 @@ def check_rank():
         return jsonify({"success": False, "message": "Platform and username are required"}), 400
 
     # Add debug logging
-    print(f"Checking rank for {username} on {platform}")
-    print(f"Using API key: {RLTRACKER_API_KEY[:5]}..." if RLTRACKER_API_KEY else "No API key provided")
-    print(f"Discord username provided: {discord_username}")
-
-    # Create a mock response if no API key is provided
-    if not RLTRACKER_API_KEY:
-        print("No API key provided, using mock data")
-        mock_data = {
-            "success": True,
-            "username": username,
-            "platform": platform,
-            "rank": "Champion II",
-            "tier": "Rank B",
-            "mmr": 1300,
-            "profileUrl": f"https://rocketleague.tracker.network/rocket-league/profile/{platform}/{username}",
-            "timestamp": time.time()
-        }
-
-        # If Discord username was provided, mock role assignment
-        if discord_username:
-            mock_data["role_assignment"] = {
-                "success": True,
-                "message": "Discord role assigned successfully (mock)"
-            }
-
-        return jsonify(mock_data)
-
-    # Get rank from API (with caching)
-    rank_data = get_cached_rank(platform, username)
-
-    # If Discord username was provided, attempt to assign role
-    if discord_username and rank_data.get("success", False):
-        tier = rank_data.get("tier")
-        role_result = assign_discord_role(discord_username, tier)
-        rank_data["role_assignment"] = role_result
-
-    return jsonify(rank_data)
-
-@app.route('/api/rank-check', methods=['GET'])
-def check_rank():
-    """API endpoint to check Rocket League rank"""
-    platform = request.args.get('platform', '')
-    username = request.args.get('username', '')
-    discord_username = request.args.get('discord_username', '')
-
-    if not platform or not username:
-        return jsonify({"success": False, "message": "Platform and username are required"}), 400
-
-    # Add debug logging
     print(f"=== RANK CHECK DEBUG ===")
     print(f"Platform: {platform}")
     print(f"Username: {username}")
@@ -678,7 +629,6 @@ def check_rank():
         print(f"Role assignment result: {role_result}")
 
     return jsonify(rank_data)
-
 
 def get_mock_rank_data(username, platform):
     """Generate varied mock data for testing"""
