@@ -5,10 +5,11 @@ import uuid
 
 
 class VoteSystem:
-    def __init__(self, db, queue_handler, match_system=None):
+    def __init__(self, db, queue_handler, captains_system=None, match_system=None):
         self.db = db
         self.queue = queue_handler
         self.match_system = match_system
+        self.captains_system = captains_system  # Add reference to captains_system
         self.bot = None
 
         # Store voting state by channel
@@ -21,6 +22,10 @@ class VoteSystem:
     def set_match_system(self, match_system):
         """Set the match system reference"""
         self.match_system = match_system
+
+    def set_captains_system(self, captains_system):
+        """Set the captains system reference"""
+        self.captains_system = captains_system
 
     def set_bot(self, bot):
         """Set the bot instance"""
@@ -153,8 +158,6 @@ class VoteSystem:
             else:
                 vote_state['captains_votes'] -= 1
 
-        await self.update_vote_message(channel_id)
-
         # Update user's vote
         vote_state['user_votes'][user.id] = emoji
 
@@ -170,9 +173,6 @@ class VoteSystem:
         # Check if all 6 players have voted
         if len(vote_state['voters']) >= 6:
             await self.finalize_vote(channel_id)
-
-    # Continue with the rest of the VoteSystem methods (update_vote_message, finalize_vote)
-    # making sure to adapt them to work with channel-specific voting state
 
     async def update_vote_message(self, channel_id):
         """Update the vote message with current counts for specific channel"""
@@ -224,10 +224,51 @@ class VoteSystem:
             # Cancel this vote
             self.cancel_voting(channel_id)
 
-            # Start captains selection for this channel - use the captains_system reference
-            captains_result = self.match_system.start_captains_selection(players, channel)
-            await channel.send(embed=captains_result)
-            await self.match_system.execute_captain_selection(channel)
+            # Use the captains_system reference instead of match_system
+            if self.captains_system:
+                captains_result = self.captains_system.start_captains_selection(players, channel_id)
+                await channel.send(embed=captains_result)
+                await self.captains_system.execute_captain_selection(channel)
+            else:
+                # Fallback to random teams if captains_system is not set
+                await channel.send("Captains system not available. Falling back to random teams...")
+                # Continue to the random teams code below
+                random.shuffle(players)
+                team1 = players[:3]
+                team2 = players[3:6]
+
+                # Format team mentions
+                team1_mentions = [player['mention'] for player in team1]
+                team2_mentions = [player['mention'] for player in team2]
+
+                # Remove players from queue
+                self.queue.remove_players_from_queue(players, channel_id)
+
+                # Create match record - using self.match_system
+                match_id = self.match_system.create_match(
+                    str(uuid.uuid4()),
+                    team1,
+                    team2,
+                    channel_id
+                )
+
+                # Create an embed for team announcement
+                embed = discord.Embed(
+                    title="Match Created! (Random Teams)",
+                    color=0xe74c3c
+                )
+
+                embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+                embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
+                embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
+                embed.add_field(
+                    name="Report Results",
+                    value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
+                    inline=False
+                )
+
+                # Send team announcement as embed
+                await channel.send(embed=embed)
         else:
             # Create random teams
             random.shuffle(players)
