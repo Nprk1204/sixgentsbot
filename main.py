@@ -249,8 +249,10 @@ async def status(ctx):
 
     # If queue is full but vote not started, start it
     players = queue_handler.get_players_for_match(channel_id)
-    if len(players) >= 6 and channel_id in vote_system.vote_systems and not vote_system.is_voting_active(channel_id):
-        await vote_system.start_vote(ctx.channel)
+    if len(players) >= 6 and not vote_system.is_voting_active(channel_id):
+        channel_name = ctx.channel.name.lower()
+        if channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
+            await vote_system.start_vote(ctx.channel)
 
 
 # Match commands

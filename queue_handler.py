@@ -25,9 +25,10 @@ class QueueHandler:
             return f"{player_mention} is already in this queue!"
 
         # Check if player is in any other queue
-        other_queue = self.queue_collection.find_one({"id": player_id})
-        if other_queue and other_queue.get("channel_id") != channel_id:
-            other_channel = other_queue.get("channel_id", "another")
+        other_queue = self.queue_collection.find_one({"id": player_id, "channel_id": {"$ne": channel_id}})
+        if other_queue:
+            other_channel = other_queue.get("channel_id", "unknown")
+            # Use proper channel mention format
             return f"{player_mention} is already in a queue in <#{other_channel}>. Please leave that queue first."
 
         # Store player in queue with channel ID
