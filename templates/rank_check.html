@@ -208,6 +208,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 const rankData = JSON.parse(storedRankData);
                 // Display the verification result with stored data
                 displayStoredRankResult(rankData);
+
+                // Disable the check rank button since we already have rank data
+                if (checkRankButton) {
+                    checkRankButton.disabled = true;
+                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
+
+                    // Add a small note about refreshing
+                    const buttonContainer = checkRankButton.closest('.d-grid');
+                    if (buttonContainer) {
+                        const noteElement = document.createElement('p');
+                        noteElement.className = 'text-muted small mt-2 text-center';
+                        noteElement.innerHTML = 'To check again, refresh the page and enter new details.';
+                        buttonContainer.appendChild(noteElement);
+                    }
+                }
             } catch (e) {
                 console.error('Error parsing stored rank data:', e);
                 // Clear invalid data
@@ -285,18 +300,40 @@ document.addEventListener('DOMContentLoaded', function() {
                     localStorage.setItem('rankCheckData', JSON.stringify(data));
 
                     displayRankResults(data, discordUsername);
+
+                    // Permanently disable the button
+                    if (checkRankButton) {
+                        checkRankButton.disabled = true;
+                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Verified`;
+
+                        // Add a small note about refreshing
+                        const buttonContainer = checkRankButton.closest('.d-grid');
+                        if (buttonContainer) {
+                            const noteElement = document.createElement('p');
+                            noteElement.className = 'text-muted small mt-2 text-center';
+                            noteElement.innerHTML = 'To check again, refresh the page and enter new details.';
+                            buttonContainer.appendChild(noteElement);
+                        }
+                    }
                 } else {
                     showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+
+                    // Re-enable button in case of error
+                    if (checkRankButton) {
+                        checkRankButton.disabled = false;
+                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                    }
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 showError("An error occurred while checking your rank. Please try again later.");
-            })
-            .finally(() => {
-                // Re-enable button regardless of outcome
-                checkRankButton.disabled = false;
-                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+
+                // Re-enable button in case of error
+                if (checkRankButton) {
+                    checkRankButton.disabled = false;
+                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                }
             });
     }
 
