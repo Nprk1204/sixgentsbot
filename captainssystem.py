@@ -81,7 +81,7 @@ class CaptainsSystem:
 
     async def execute_captain_selection(self, channel):
         """Execute the captain selection process via DMs"""
-        if not self.selection_active or not self.captain1 or not self.captain2:
+        if not self.is_selection_active() or not self.captain1 or not self.captain2:
             return
 
         self.announcement_channel = channel
