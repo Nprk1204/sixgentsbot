@@ -209,10 +209,23 @@ class CaptainsSystem:
         except asyncio.TimeoutError:
             return None
 
-    async def fallback_to_random(self):
+    async def fallback_to_random(self, channel_id):
         """Fall back to random team selection if captain selection fails"""
+        channel_id = str(channel_id)
+
+        # Get selection state for this channel
+        if channel_id not in self.active_selections:
+            return
+
+        selection_state = self.active_selections[channel_id]
+
         # Reconstruct all players
-        all_players = [self.captain1, self.captain2] + self.remaining_players
+        all_players = selection_state['match_players']
+
+        # Get the announcement channel
+        channel = selection_state.get('announcement_channel')
+        if not channel:
+            return  # Can't proceed without a channel to send messages to
 
         # Create random teams
         random.shuffle(all_players)
@@ -228,7 +241,7 @@ class CaptainsSystem:
             str(uuid.uuid4()),
             team1,
             team2,
-            str(self.announcement_channel.id)
+            channel_id
         )
 
         # Create an embed for team announcement
@@ -247,10 +260,14 @@ class CaptainsSystem:
         )
 
         # Send team announcement as embed
-        await self.announcement_channel.send(embed=embed)
+        await channel.send(embed=embed)
 
-        # Clean up
-        self.cleanup_after_match()
+        # Clear the selection state for this channel
+        if channel_id in self.active_selections:
+            del self.active_selections[channel_id]
+
+        # Remove players from queue
+        self.queue.remove_players_from_queue(all_players)
 
     async def finalize_teams(self):
         """Finalize and announce the teams after captain selection"""
