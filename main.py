@@ -369,6 +369,77 @@ async def status(ctx):
                 await vote_system.start_vote(ctx.channel)
 
 
+@bot.command()
+async def adjustmmr(ctx, member: discord.Member = None, amount: int = 0):
+    """Admin command to adjust a player's MMR (format: /adjustmmr @user +/-amount)"""
+    # Check if user has admin permissions
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need administrator permissions to use this command.")
+        return
+
+    if member is None:
+        await ctx.send("Please specify a member to adjust MMR for. Usage: `/adjustmmr @user +/-amount`")
+        return
+
+    if amount == 0:
+        await ctx.send("Please specify a non-zero amount to adjust. Usage: `/adjustmmr @user +/-amount`")
+        return
+
+    player_id = str(member.id)
+
+    # Get player data from database
+    player_data = match_system.players.find_one({"id": player_id})
+
+    if not player_data:
+        # Player doesn't exist in database, create a new entry
+        match_system.players.insert_one({
+            "id": player_id,
+            "name": member.display_name,
+            "mmr": 1000 + amount,  # Start with default 1000 + adjustment
+            "wins": 0,
+            "losses": 0,
+            "matches": 0,
+            "created_at": datetime.datetime.utcnow(),
+            "last_updated": datetime.datetime.utcnow()
+        })
+
+        old_mmr = 1000
+        new_mmr = 1000 + amount
+    else:
+        # Update existing player
+        old_mmr = player_data.get("mmr", 1000)
+        new_mmr = max(0, old_mmr + amount)  # Ensure MMR doesn't go below 0
+
+        match_system.players.update_one(
+            {"id": player_id},
+            {"$set": {
+                "mmr": new_mmr,
+                "last_updated": datetime.datetime.utcnow()
+            }}
+        )
+
+    # Create an embed to show the MMR change
+    direction = "increased" if amount > 0 else "decreased"
+    color = 0x00ff00 if amount > 0 else 0xff0000  # Green for increase, red for decrease
+
+    embed = discord.Embed(
+        title=f"MMR Adjustment for {member.display_name}",
+        description=f"MMR has been {direction} by {abs(amount)} points.",
+        color=color
+    )
+
+    embed.add_field(name="Previous MMR", value=str(old_mmr), inline=True)
+    embed.add_field(name="New MMR", value=str(new_mmr), inline=True)
+    embed.add_field(name="Change", value=f"{'+' if amount > 0 else ''}{amount}", inline=True)
+
+    embed.set_footer(text=f"Adjusted by {ctx.author.display_name}")
+
+    await ctx.send(embed=embed)
+
+    # Update their Discord role based on new MMR
+    await match_system.update_discord_role(ctx, player_id, new_mmr)
+
+
 # Match commands
 @bot.command()
 async def report(ctx, match_id: str, result: str):

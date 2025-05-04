@@ -126,6 +126,38 @@ class MatchSystem:
         # Update MMR
         self.update_player_mmr(winning_team, losing_team)
 
+        # In report_match_by_id method in MatchSystem class
+
+        # After updating MMR for winners and losers:
+        if ctx:
+            # Update roles for winners
+            for player in winning_team:
+                player_id = player["id"]
+                # Skip dummy players (those with IDs starting with 9000)
+                if player_id.startswith('9000'):
+                    continue
+
+                # Get updated MMR from database
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 1000)
+                    # Update Discord role based on new MMR
+                    await self.update_discord_role(ctx, player_id, mmr)
+
+            # Update roles for losers
+            for player in losing_team:
+                player_id = player["id"]
+                # Skip dummy players
+                if player_id.startswith('9000'):
+                    continue
+
+                # Get updated MMR from database
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 1000)
+                    # Update Discord role based on new MMR
+                    await self.update_discord_role(ctx, player_id, mmr)
+
         # Remove from active matches
         if match["match_id"] in self.active_matches:
             del self.active_matches[match["match_id"]]
@@ -163,6 +195,59 @@ class MatchSystem:
                         await self.update_discord_role(ctx, player_id, mmr)
 
         return updated_match, None
+
+    async def update_discord_role(self, ctx, player_id, new_mmr):
+        """Update a player's Discord role based on their new MMR"""
+        try:
+            # Define MMR thresholds for ranks
+            RANK_A_THRESHOLD = 1500
+            RANK_B_THRESHOLD = 1300
+
+            # Get the player's Discord member object
+            member = await ctx.guild.fetch_member(int(player_id))
+            if not member:
+                print(f"Could not find Discord member with ID {player_id}")
+                return
+
+            # Get the rank roles
+            rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+            rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+            rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+
+            if not rank_a_role or not rank_b_role or not rank_c_role:
+                print("Could not find one or more rank roles")
+                return
+
+            # Determine which role the player should have based on MMR
+            new_role = None
+            if new_mmr >= RANK_A_THRESHOLD:
+                new_role = rank_a_role
+            elif new_mmr >= RANK_B_THRESHOLD:
+                new_role = rank_b_role
+            else:
+                new_role = rank_c_role
+
+            # Remove all existing rank roles
+            roles_to_remove = [role for role in member.roles if role in [rank_a_role, rank_b_role, rank_c_role]]
+            if roles_to_remove:
+                await member.remove_roles(*roles_to_remove, reason="MMR rank update")
+
+            # Add the new role
+            await member.add_role(new_role, reason=f"MMR update: {new_mmr}")
+
+            # Log the role change
+            old_role_names = [role.name for role in roles_to_remove]
+            if old_role_names:
+                print(f"Updated roles for {member.display_name}: {', '.join(old_role_names)} -> {new_role.name}")
+            else:
+                print(f"Assigned {new_role.name} to {member.display_name}")
+
+            # Announce the rank change if it's a promotion
+            if roles_to_remove and roles_to_remove[0] != new_role:
+                await ctx.send(f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!")
+
+        except Exception as e:
+            print(f"Error updating Discord role: {str(e)}")
 
     def update_player_mmr(self, winning_team, losing_team):
         """Update MMR for all players in the match"""
