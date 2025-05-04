@@ -224,11 +224,10 @@ class VoteSystem:
             # Cancel this vote
             self.cancel_voting(channel_id)
 
-            # Start captains selection in this channel
-            if channel_id in self.captains_systems:
-                captains_result = self.captains_system.start_captains_selection(players, channel)
-                await channel.send(embed=captains_result)
-                await self.captains_system.execute_captain_selection(channel)
+            # Start captains selection for this channel - use the captains_system reference
+            captains_result = self.match_system.start_captains_selection(players, channel)
+            await channel.send(embed=captains_result)
+            await self.match_system.execute_captain_selection(channel)
         else:
             # Create random teams
             random.shuffle(players)
