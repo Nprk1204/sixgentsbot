@@ -18,34 +18,61 @@ class QueueHandler:
         player_id = str(player.id)
         player_mention = player.mention
         player_name = player.display_name
-        channel_id = str(channel_id)
+        channel_id = str(channel_id)  # Ensure channel_id is a string
+
+        # Debug output
+        print(f"Adding player {player_name} (ID: {player_id}) to channel {channel_id}")
 
         # Check if player is already in this channel's queue
         if self.queue_collection.find_one({"id": player_id, "channel_id": channel_id}):
             return f"{player_mention} is already in this queue!"
 
         # Check if player is in any other queue
-        other_queue = self.queue_collection.find_one({"id": player_id, "channel_id": {"$ne": channel_id}})
+        other_queue = self.queue_collection.find_one({"id": player_id})
+
         if other_queue:
-            # Get the channel ID from the other queue and format it correctly for Discord mention
-            other_channel_id = other_queue.get("channel_id", "unknown")
-            # This format makes Discord display the channel name: <#123456789>
-            channel_mention = f"<#{other_channel_id}>"
-            return f"{player_mention} is already in a queue in {channel_mention}. Please leave that queue first."
+            # Get the channel ID from the other queue
+            other_channel_id = other_queue.get("channel_id")
+            print(f"Player is in another queue. Channel ID: {other_channel_id}")
+
+            # Fix for missing or None channel ID
+            if not other_channel_id:
+                # Delete the broken entry and create a new one
+                self.queue_collection.delete_one({"id": player_id})
+                print(f"Deleted broken entry for {player_name} with missing channel ID")
+
+                # Now proceed to add the player to the current channel
+                self.queue_collection.insert_one({
+                    "id": player_id,
+                    "name": player_name,
+                    "mention": player_mention,
+                    "channel_id": channel_id
+                })
+
+                count = self.queue_collection.count_documents({"channel_id": channel_id})
+                return f"{player_mention} has joined the queue! There are {count}/6 players"
+
+            # Only format as mention if we have a valid channel ID
+            if other_channel_id and other_channel_id.isdigit():
+                channel_mention = f"<#{other_channel_id}>"
+                return f"{player_mention} is already in a queue in {channel_mention}. Please leave that queue first."
+            else:
+                # Fallback if channel ID is invalid but not None
+                return f"{player_mention} is already in another queue. Please leave that queue first."
 
         # Store player in queue with channel ID
         self.queue_collection.insert_one({
             "id": player_id,
             "name": player_name,
             "mention": player_mention,
-            "channel_id": channel_id
+            "channel_id": channel_id  # Make sure this is stored
         })
 
         # Count players in this channel's queue
         count = self.queue_collection.count_documents({"channel_id": channel_id})
 
         # Start vote if queue is full for this channel
-        if count == 6:
+        if count >= 6:
             return f"{player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
 
         return f"{player_mention} has joined the queue! There are {count}/6 players"

@@ -224,19 +224,32 @@ async def join(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(
-            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
+
+    # ADD DEBUG CODE HERE - Before joining
+    print(f"DEBUG - JOIN ATTEMPT: {ctx.author.name} trying to join channel {ctx.channel.id} ({ctx.channel.name})")
+    existing_entry = queue_handler.queue_collection.find_one({"id": str(ctx.author.id)})
+    if existing_entry:
+        print(f"EXISTING QUEUE ENTRY: {existing_entry}")
 
     player = ctx.author
     channel_id = ctx.channel.id
     response = queue_handler.add_player(player, channel_id)
     await ctx.send(response)
 
+    # ADD DEBUG CODE HERE - After joining
+    print("DEBUG - AFTER JOIN: Current queue state:")
+    all_queued = list(queue_handler.queue_collection.find())
+    for p in all_queued:
+        print(f"Player: {p.get('name')}, Channel: {p.get('channel_id')}")
+
     # Check if queue is full and start voting
     players = queue_handler.get_players_for_match(channel_id)
-    if len(players) >= 6 and channel_id in vote_system.vote_systems and not vote_system.is_voting_active(channel_id):
-        await vote_system.start_vote(ctx.channel)
+    if len(players) >= 6:
+        # Check if voting is already active for this channel
+        if not vote_system.is_voting_active(channel_id):
+            await vote_system.start_vote(ctx.channel)
 
 
 @bot.command()
@@ -252,21 +265,44 @@ async def leave(ctx):
             f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
-    channel_id = ctx.channel.id
+    channel_id = str(ctx.channel.id)
+    player_id = str(ctx.author.id)
+    player_mention = ctx.author.mention
+
+    # DEBUG - Before leaving
+    print(f"DEBUG - LEAVE ATTEMPT: {ctx.author.name} trying to leave queue")
+    existing_entry = queue_handler.queue_collection.find_one({"id": player_id})
+    if existing_entry:
+        print(f"EXISTING QUEUE ENTRY TO REMOVE: {existing_entry}")
+
+    # First try to find if the player is in any queue
+    existing_queue = queue_handler.queue_collection.find_one({"id": player_id})
+
+    if not existing_queue:
+        await ctx.send(f"{player_mention} was not in any queue!")
+        return
+
+    # Delete the player from the queue collection
+    result = queue_handler.queue_collection.delete_one({"id": player_id})
 
     # Check if voting is active in this channel
     if vote_system.is_voting_active(channel_id):
-        await ctx.send(f"{ctx.author.mention}, you cannot leave the queue while voting is in progress!")
-        return
+        vote_system.cancel_voting(channel_id)
 
     # Check if captain selection is active in this channel
     if captains_system.is_selection_active(channel_id):
-        await ctx.send(f"{ctx.author.mention}, you cannot leave the queue while team selection is in progress!")
-        return
+        captains_system.cancel_selection(channel_id)
 
-    player = ctx.author
-    response = queue_handler.remove_player(player, channel_id)
-    await ctx.send(response)
+    if result.deleted_count > 0:
+        await ctx.send(f"{player_mention} has left the queue!")
+    else:
+        await ctx.send(f"Error removing {player_mention} from the queue. Please try again.")
+
+    # DEBUG - After leaving
+    print("DEBUG - AFTER LEAVE: Current queue state:")
+    all_queued = list(queue_handler.queue_collection.find())
+    for p in all_queued:
+        print(f"Player: {p.get('name')}, Channel: {p.get('channel_id')}")
 
 
 @bot.command()
