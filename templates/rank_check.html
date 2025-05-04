@@ -204,6 +204,13 @@
 
         // Function to check if leaderboard has been reset
         function checkForLeaderboardReset() {
+            // Check if we've already cleared data in this session to prevent reload loops
+            const alreadyCheckedThisSession = sessionStorage.getItem('resetCheckedThisSession');
+            if (alreadyCheckedThisSession) {
+                console.log('Already checked for resets in this session, skipping...');
+                return;
+            }
+
             fetch('/api/reset-timestamp')
                 .then(response => response.json())
                 .then(data => {
@@ -212,19 +219,34 @@
                     if (data.success && data.last_reset) {
                         console.log('Server reports last reset at:', data.last_reset);
 
-                        // Force clear localStorage data regardless of previous checks
-                        console.log('Clearing rank data due to server reset...');
-                        localStorage.removeItem('rankCheckData');
-                        localStorage.setItem('lastCheckedReset', data.last_reset);
+                        // Get stored reset timestamp
+                        const lastCheckedReset = localStorage.getItem('lastCheckedReset');
 
-                        // Reload the page to ensure a fresh state
-                        window.location.reload();
+                        // Only clear and reload if we have a new reset
+                        if (!lastCheckedReset || new Date(data.last_reset) > new Date(lastCheckedReset)) {
+                            console.log('New reset detected! Clearing rank data...');
+                            localStorage.removeItem('rankCheckData');
+                            localStorage.setItem('lastCheckedReset', data.last_reset);
+
+                            // Mark that we've checked during this session
+                            sessionStorage.setItem('resetCheckedThisSession', 'true');
+
+                            // Reload only if we had stored rank data
+                            if (localStorage.getItem('rankCheckData')) {
+                                window.location.reload();
+                            }
+                        } else {
+                            console.log('Reset was already processed, no action needed');
+                            sessionStorage.setItem('resetCheckedThisSession', 'true');
+                        }
                     } else {
                         console.log('No reset timestamp found or reset check failed');
+                        sessionStorage.setItem('resetCheckedThisSession', 'true');
                     }
                 })
                 .catch(error => {
                     console.error('Error checking for leaderboard reset:', error);
+                    sessionStorage.setItem('resetCheckedThisSession', 'true');
                 });
         }
 
