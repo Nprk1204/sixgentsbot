@@ -98,7 +98,7 @@ class VoteSystem:
         channel_id = str(channel_id)
         await asyncio.sleep(seconds)
 
-        # Check if voting is still active
+        # Check if voting is still active for this channel
         if channel_id not in self.active_votes:
             return  # Vote was already completed or canceled
 
@@ -199,25 +199,36 @@ class VoteSystem:
 
         await vote_state['message'].edit(embed=embed)
 
-    async def finalize_vote(self, force=False):
-        """Finalize the vote and create teams"""
-        if not self.voting_active:
+    async def finalize_vote(self, channel_id, force=False):
+        """Finalize the vote and create teams for a specific channel"""
+        channel_id = str(channel_id)
+
+        if channel_id not in self.active_votes:
             return
 
-        players = self.queue.get_players_for_match()
+        vote_state = self.active_votes[channel_id]
 
         # If forced, we'll create teams even with incomplete voting
-        if not force and len(self.voters) < 6:
+        if not force and len(vote_state['voters']) < 6:
             # Not all players voted and not forced
             return
 
+        # Get the channel object
+        channel = vote_state['channel']
+
+        # Get players from the queue
+        players = self.queue.get_players_for_match(channel_id)
+
         # Determine winner (default to random if tied or no votes)
-        if self.captains_votes > self.random_votes:
-            # Start captains selection
-            self.voting_active = False
-            result = self.captains_system.start_captains_selection(players)
-            await self.vote_channel.send(embed=result)
-            await self.captains_system.execute_captain_selection(self.vote_channel)
+        if vote_state['captains_votes'] > vote_state['random_votes']:
+            # Cancel this vote
+            self.cancel_voting(channel_id)
+
+            # Start captains selection in this channel
+            if channel_id in self.captains_systems:
+                captains_result = self.captains_system.start_captains_selection(players, channel)
+                await channel.send(embed=captains_result)
+                await self.captains_system.execute_captain_selection(channel)
         else:
             # Create random teams
             random.shuffle(players)
@@ -229,14 +240,14 @@ class VoteSystem:
             team2_mentions = [player['mention'] for player in team2]
 
             # Remove players from queue
-            self.queue.remove_players_from_queue(players)
+            self.queue.remove_players_from_queue(players, channel_id)
 
             # Create match record - using self.match_system
             match_id = self.match_system.create_match(
                 str(uuid.uuid4()),
                 team1,
                 team2,
-                str(self.vote_channel.id)
+                channel_id
             )
 
             # Create an embed for team announcement
@@ -245,7 +256,7 @@ class VoteSystem:
                 color=0xe74c3c
             )
 
-            embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)  # Add match ID field
+            embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
             embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
             embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
             embed.add_field(
@@ -255,7 +266,7 @@ class VoteSystem:
             )
 
             # Send team announcement as embed
-            await self.vote_channel.send(embed=embed)
+            await channel.send(embed=embed)
 
-            # Reset vote state
-            self.cancel_voting()
+            # Cancel this vote
+            self.cancel_voting(channel_id)
