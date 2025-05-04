@@ -370,22 +370,51 @@ async def status(ctx):
 
 
 @bot.command()
-async def adjustmmr(ctx, member: discord.Member = None, amount: int = 0):
-    """Admin command to adjust a player's MMR (format: /adjustmmr @user +/-amount)"""
+async def adjustmmr(ctx, member_input=None, amount: int = 0):
+    """Admin command to adjust a player's MMR (format: /adjustmmr @user +/-amount or /adjustmmr userID +/-amount)"""
     # Check if user has admin permissions
     if not ctx.author.guild_permissions.administrator:
         await ctx.send("You need administrator permissions to use this command.")
         return
 
-    if member is None:
-        await ctx.send("Please specify a member to adjust MMR for. Usage: `/adjustmmr @user +/-amount`")
+    if member_input is None:
+        await ctx.send(
+            "Please specify a member to adjust MMR for. Usage: `/adjustmmr @user +/-amount` or `/adjustmmr userID +/-amount`")
         return
 
     if amount == 0:
         await ctx.send("Please specify a non-zero amount to adjust. Usage: `/adjustmmr @user +/-amount`")
         return
 
+    # Try to resolve the member
+    member = None
+
+    # Check if it's a mention
+    if ctx.message.mentions:
+        member = ctx.message.mentions[0]
+    else:
+        # Try to convert to ID
+        try:
+            user_id = int(member_input.strip("<@!>"))  # Remove mention formatting if present
+            member = await ctx.guild.fetch_member(user_id)
+        except (ValueError, discord.errors.NotFound):
+            # Try to find by name
+            try:
+                members = await ctx.guild.fetch_members().flatten()
+                member = discord.utils.get(members, display_name=member_input)
+                if not member:
+                    member = discord.utils.get(members, name=member_input)
+            except:
+                pass
+
+    if not member:
+        await ctx.send(f"Could not find member '{member_input}'. Please use a mention, ID, or exact username.")
+        return
+
     player_id = str(member.id)
+
+    # Debug output
+    print(f"Adjusting MMR for player: {member.display_name} (ID: {player_id}) by {amount}")
 
     # Get player data from database
     player_data = match_system.players.find_one({"id": player_id})
@@ -437,7 +466,11 @@ async def adjustmmr(ctx, member: discord.Member = None, amount: int = 0):
     await ctx.send(embed=embed)
 
     # Update their Discord role based on new MMR
-    await match_system.update_discord_role(ctx, player_id, new_mmr)
+    try:
+        await match_system.update_discord_role(ctx, player_id, new_mmr)
+    except Exception as e:
+        print(f"Error updating Discord role: {str(e)}")
+        await ctx.send(f"Note: Could not update Discord role. Error: {str(e)}")
 
 
 # Match commands
