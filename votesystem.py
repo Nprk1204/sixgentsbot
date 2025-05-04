@@ -153,6 +153,8 @@ class VoteSystem:
             else:
                 vote_state['captains_votes'] -= 1
 
+        await self.update_vote_message(channel_id)
+
         # Update user's vote
         vote_state['user_votes'][user.id] = emoji
 
@@ -172,27 +174,30 @@ class VoteSystem:
     # Continue with the rest of the VoteSystem methods (update_vote_message, finalize_vote)
     # making sure to adapt them to work with channel-specific voting state
 
-    async def update_vote_message(self):
-        """Update the vote message with current counts"""
-        if not self.voting_active or self.vote_message is None:
+    async def update_vote_message(self, channel_id):
+        """Update the vote message with current counts for specific channel"""
+        channel_id = str(channel_id)
+
+        if channel_id not in self.active_votes or self.active_votes[channel_id]['message'] is None:
             return
 
-        total_votes = len(self.voters)
+        vote_state = self.active_votes[channel_id]
+        total_votes = len(vote_state['voters'])
         votes_needed = 6 - total_votes
 
         embed = discord.Embed(
             title="🗳️ Team Selection Vote",
             description=(
                 "Vote for team selection method:\n\n"
-                f"{self.random_emoji} Random Teams: **{self.random_votes}** votes\n"
-                f"{self.captains_emoji} Captains Pick: **{self.captains_votes}** votes\n\n"
+                f"{self.random_emoji} Random Teams: **{vote_state['random_votes']}** votes\n"
+                f"{self.captains_emoji} Captains Pick: **{vote_state['captains_votes']}** votes\n\n"
                 f"Votes received: **{total_votes}/6**\n"
                 f"Votes needed: **{votes_needed}**"
             ),
             color=0x3498db
         )
 
-        await self.vote_message.edit(embed=embed)
+        await vote_state['message'].edit(embed=embed)
 
     async def finalize_vote(self, force=False):
         """Finalize the vote and create teams"""
