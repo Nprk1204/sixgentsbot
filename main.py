@@ -92,6 +92,20 @@ async def is_duplicate_command(ctx):
     return False
 
 
+# Helper function to check if command is used in a queue-specific channel
+def is_queue_channel(ctx):
+    """Check if the command is being used in a queue-allowed channel"""
+    allowed_channels = ["rank-a", "rank-b", "rank-c", "global"]
+    return ctx.channel.name.lower() in allowed_channels
+
+
+# Helper function to check if command is used in a general command channel
+def is_command_channel(ctx):
+    """Check if the command is being used in a general command channel"""
+    allowed_channels = ["rank-a", "rank-b", "rank-c", "global", "sixgents"]
+    return ctx.channel.name.lower() in allowed_channels
+
+
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 try:
@@ -137,8 +151,13 @@ async def on_reaction_add(reaction, user):
 @bot.command()
 async def join(ctx):
     """Join the queue for 6 mans"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_queue_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     player = ctx.author
@@ -154,8 +173,13 @@ async def join(ctx):
 @bot.command()
 async def leave(ctx):
     """Leave the queue"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_queue_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     # Check if voting is active
@@ -176,8 +200,13 @@ async def leave(ctx):
 @bot.command()
 async def status(ctx):
     """Shows the current queue status"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_queue_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     response = queue_handler.get_queue_status()
@@ -195,6 +224,11 @@ async def report(ctx, match_id: str, result: str):
     """Report match results (format: /report <match_id> <win/loss>)"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     reporter_id = str(ctx.author.id)
@@ -285,8 +319,13 @@ async def report(ctx, match_id: str, result: str):
 @bot.command()
 async def adminreport(ctx, team_number: int, result: str, match_id: str = None):
     """Admin command to report match results (format: /adminreport <team_number> <win> [match_id])"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     # Check if user has admin permissions
@@ -390,8 +429,13 @@ async def adminreport(ctx, team_number: int, result: str, match_id: str = None):
 @bot.command()
 async def leaderboard(ctx):
     """Shows a link to the leaderboard website"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     # Replace this URL with your actual leaderboard website URL from Render
@@ -427,8 +471,13 @@ async def leaderboard(ctx):
 @bot.command()
 async def rank(ctx, member: discord.Member = None):
     """Check your rank and stats (or another member's)"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     if member is None:
@@ -487,8 +536,13 @@ async def rank(ctx, member: discord.Member = None):
 @bot.command()
 async def clearqueue(ctx):
     """Clear all players from the queue (Admin only)"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     # Check if user has admin permissions
@@ -522,6 +576,11 @@ async def resetleaderboard(ctx, confirmation: str = None):
     """Reset the leaderboard (Admin only)"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     # Check if user has admin permissions
@@ -710,8 +769,13 @@ async def remove_all_rank_roles(guild):
 @bot.command()
 async def forcestart(ctx):
     """Force start the team selection process (Admin only)"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_queue_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     # Check if user has admin permissions
@@ -761,8 +825,13 @@ async def forcestart(ctx):
 @bot.command()
 async def forcestop(ctx):
     """Force stop any active votes or selections and clear the queue (Admin only)"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     # Check if user has admin permissions
@@ -810,8 +879,13 @@ async def forcestop(ctx):
 @bot.command()
 async def purgechat(ctx, amount_to_delete: int = 10):
     """Clear chat messages"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     if ctx.author.guild_permissions.manage_messages:
@@ -827,8 +901,13 @@ async def purgechat(ctx, amount_to_delete: int = 10):
 @bot.command()
 async def ping(ctx):
     """Simple ping command that doesn't use MongoDB"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     await ctx.send("Pong! Bot is connected to Discord.")
@@ -838,8 +917,13 @@ async def ping(ctx):
 @bot.command()
 async def helpme(ctx):
     """Display help information"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     embed = discord.Embed(
@@ -848,18 +932,17 @@ async def helpme(ctx):
         color=0x00ff00
     )
 
-    embed.add_field(name="/join", value="Join the queue", inline=False)
-    embed.add_field(name="/leave", value="Leave the queue", inline=False)
-    embed.add_field(name="/status", value="Show the current queue status", inline=False)
+    embed.add_field(name="/join", value="Join the queue (rank-a, rank-b, rank-c, global channels only)", inline=False)
+    embed.add_field(name="/leave", value="Leave the queue (rank-a, rank-b, rank-c, global channels only)", inline=False)
+    embed.add_field(name="/status", value="Show the current queue status (rank-a, rank-b, rank-c, global channels only)", inline=False)
     embed.add_field(name="/report <match_id> <win/loss>", value="Report match results", inline=False)
     embed.add_field(name="/leaderboard", value="View the leaderboard website", inline=False)
     embed.add_field(name="/rank [member]", value="Show your rank or another member's rank", inline=False)
-    embed.add_field(name="/purgechat [number]", value="Clear messages (mod only)", inline=False)
 
     embed.add_field(
         name="How it works:",
         value=(
-            "1. Join the queue with `/join`\n"
+            "1. Join the queue with `/join` in a rank channel\n"
             "2. When 6 players join, voting starts automatically\n"
             "3. Vote by reacting to the vote message\n"
             "4. Teams will be created based on the vote results\n"
