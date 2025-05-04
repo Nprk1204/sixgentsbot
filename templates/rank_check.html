@@ -157,9 +157,28 @@
         const checkRankButton = document.getElementById('checkRankButton');
         let resultModal;
 
-        // Initialize the modal
+        // Initialize the modal with proper cleanup on hide
         if (document.getElementById('resultModal')) {
-            resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
+            resultModal = new bootstrap.Modal(document.getElementById('resultModal'), {
+                backdrop: 'static',  // Prevent closing when clicking outside
+                keyboard: true       // Allow ESC key to close
+            });
+
+            // Add event listener for when modal is hidden
+            document.getElementById('resultModal').addEventListener('hidden.bs.modal', function () {
+                // Re-enable any disabled buttons or forms
+                if (checkRankButton) {
+                    checkRankButton.disabled = false;
+                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                }
+
+                // Make sure the page is scrollable again
+                document.body.classList.remove('modal-open');
+                const modalBackdrops = document.getElementsByClassName('modal-backdrop');
+                while(modalBackdrops.length > 0) {
+                    modalBackdrops[0].parentNode.removeChild(modalBackdrops[0]);
+                }
+            });
         }
 
         // Check for leaderboard resets first
@@ -167,6 +186,15 @@
 
         // Then check for existing rank data
         checkForExistingRankData();
+
+        // Ensure modal close buttons work
+        document.querySelectorAll('[data-bs-dismiss="modal"]').forEach(button => {
+            button.addEventListener('click', function() {
+                if (resultModal) {
+                    resultModal.hide();
+                }
+            });
+        });
 
         if (checkRankButton) {
             checkRankButton.addEventListener('click', function() {
@@ -196,11 +224,23 @@
                     Checking...
                 `;
 
-                // Call API endpoint to get rank data
-                fetchRankData(rocketId, platform, discordUsername);
+                // Set a timeout to re-enable the button if the request takes too long
+                const timeoutId = setTimeout(() => {
+                    checkRankButton.disabled = false;
+                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+
+                    document.getElementById('verificationResult').innerHTML = `
+                        <div class="alert alert-warning mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Request is taking longer than expected. Please try again or check your connection.
+                        </div>
+                    `;
+                }, 15000); // 15 seconds timeout
+
+                // Call our API endpoint to get the rank data
+                fetchRankData(rocketId, platform, discordUsername, timeoutId);
             });
         }
-
 
         // Function to check if leaderboard has been reset
         function checkForLeaderboardReset() {
@@ -231,8 +271,9 @@
                             // Mark that we've checked during this session
                             sessionStorage.setItem('resetCheckedThisSession', 'true');
 
-                            // Reload only if we had stored rank data
+                            // Only reload if we had stored rank data that needed clearing
                             if (localStorage.getItem('rankCheckData')) {
+                                console.log('Had stored rank data, reloading page...');
                                 window.location.reload();
                             }
                         } else {
@@ -281,6 +322,62 @@
                     localStorage.removeItem('rankCheckData');
                 }
             }
+        }
+
+        function fetchRankData(username, platform, discordUsername, timeoutId) {
+            // Build the API URL with query parameters
+            let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
+
+            if (discordUsername) {
+                apiUrl += `&discord_username=${encodeURIComponent(discordUsername)}`;
+            }
+
+            // Make the API request
+            fetch(apiUrl)
+                .then(response => {
+                    // Clear the timeout since we got a response
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Process the API response
+                    if (data.success) {
+                        // Store the rank data for persistence across page refreshes
+                        localStorage.setItem('rankCheckData', JSON.stringify(data));
+
+                        displayRankResults(data, discordUsername);
+
+                        // Permanently disable the button
+                        if (checkRankButton) {
+                            checkRankButton.disabled = true;
+                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Verified`;
+
+                            // Add a small note about refreshing
+                            const buttonContainer = checkRankButton.closest('.d-grid');
+                            if (buttonContainer) {
+                                const noteElement = document.createElement('p');
+                                noteElement.className = 'text-muted small mt-2 text-center';
+                                noteElement.innerHTML = 'To check again, refresh the page and enter new details.';
+                                buttonContainer.appendChild(noteElement);
+                            }
+                        }
+                    } else {
+                        showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showError("An error occurred while checking your rank. Please try again later.");
+                })
+                .finally(() => {
+                    // Re-enable button regardless of outcome
+                    checkRankButton.disabled = false;
+                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                });
         }
 
         // Function to display stored rank result
@@ -334,61 +431,6 @@
             }
         }
 
-        function fetchRankData(username, platform, discordUsername) {
-            // Build the API URL with query parameters
-            let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
-
-            if (discordUsername) {
-                apiUrl += `&discord_username=${encodeURIComponent(discordUsername)}`;
-            }
-
-            // Make the API request
-            fetch(apiUrl)
-                .then(response => response.json())
-                .then(data => {
-                    // Process the API response
-                    if (data.success) {
-                        // Store the rank data for persistence across page refreshes
-                        localStorage.setItem('rankCheckData', JSON.stringify(data));
-
-                        displayRankResults(data, discordUsername);
-
-                        // Permanently disable the button
-                        if (checkRankButton) {
-                            checkRankButton.disabled = true;
-                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Verified`;
-
-                            // Add a small note about refreshing
-                            const buttonContainer = checkRankButton.closest('.d-grid');
-                            if (buttonContainer) {
-                                const noteElement = document.createElement('p');
-                                noteElement.className = 'text-muted small mt-2 text-center';
-                                noteElement.innerHTML = 'To check again, refresh the page and enter new details.';
-                                buttonContainer.appendChild(noteElement);
-                            }
-                        }
-                    } else {
-                        showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
-
-                        // Re-enable button in case of error
-                        if (checkRankButton) {
-                            checkRankButton.disabled = false;
-                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    showError("An error occurred while checking your rank. Please try again later.");
-
-                    // Re-enable button in case of error
-                    if (checkRankButton) {
-                        checkRankButton.disabled = false;
-                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                    }
-                });
-        }
-
         function displayRankResults(data, discordUsername) {
             // Create appropriate rank card based on tier
             let rankCard = createRankCardForTier(data.tier);
@@ -400,12 +442,18 @@
                 </div>
 
                 <p>Your rank has been verified as ${data.rank}.</p>
-                <p>Please check the modal for details or <a href="javascript:window.location.reload()">click here</a> if you closed it.</p>
+                <p>Please check the modal for details or <a href="#" id="showRankDetails">click here</a> to view details.</p>
 
                 ${rankCard}
             `;
 
             document.getElementById('verificationResult').innerHTML = resultHtml;
+
+            // Add event listener to show details button
+            document.getElementById('showRankDetails').addEventListener('click', function(e) {
+                e.preventDefault();
+                showStoredRankDetails(data);
+            });
 
             // Create and display modal content
             let modalContent = createRankModalContent(data);
@@ -470,10 +518,7 @@
                         <strong>Starting MMR:</strong> ${data.mmr}
                     </div>
 
-                    <p>You can now join the 6 Mans queue in our Discord server.</p>
-                    <button type="button" class="btn btn-primary" onclick="window.open('https://discord.gg/your-discord', '_blank');">
-                        <i class="fab fa-discord me-2"></i> Join Our Discord
-                    </button>
+                    <p>You can now join the 6 Mans queue in the server.</p>
                 </div>
             `;
         }
