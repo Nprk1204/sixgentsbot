@@ -68,12 +68,13 @@ async def is_duplicate_command(ctx):
     # Add more detailed logging
     print(f"Command received: {command_name} from {ctx.author.name} (ID: {message_id})")
 
-    # Use a more unique key
+    # Use a more unique key that includes the message ID
     key = f"{user_id}:{command_name}:{channel_id}:{message_id}"
 
     # Use lock to prevent race conditions
     async with command_lock:
-        # Check if we've seen this command recently
+        # Check if we've seen this exact message ID before
+        # This ensures we only detect true duplicates, not repeat attempts
         if key in recent_commands:
             print(f"DUPLICATE FOUND: {command_name} from {ctx.author.name} in {ctx.channel.name} (ID: {message_id})")
             return True
@@ -87,8 +88,9 @@ async def is_duplicate_command(ctx):
             now = datetime.datetime.now().timestamp()
             # Only keep commands from last 5 minutes
             old_size = len(recent_commands)
+            current_records = recent_commands.copy()
             recent_commands.clear()
-            recent_commands.update({k: v for k, v in recent_commands.items() if now - v < 300})
+            recent_commands.update({k: v for k, v in current_records.items() if now - v < 300})
             print(f"Cleaned command cache: {old_size} → {len(recent_commands)} entries")
 
     return False
@@ -282,7 +284,7 @@ async def status(ctx):
 
     channel_id = str(ctx.channel.id)
 
-    # Get all players in this channel's queue
+    # Get all players in this channel's queue directly from the database
     players = list(queue_handler.queue.find({"channel_id": channel_id}))
     count = len(players)
 
@@ -316,9 +318,11 @@ async def status(ctx):
 
     # If queue is full, check if we should start voting
     if count >= 6:
-        # Check if voting is already active for this channel
-        if not vote_system.is_voting_active(channel_id):
-            await vote_system.start_vote(ctx.channel)
+        channel_name = ctx.channel.name.lower()
+        if channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
+            # Check if voting is already active for this channel
+            if not vote_system.is_voting_active(channel_id):
+                await vote_system.start_vote(ctx.channel)
 
 
 # Match commands
@@ -1061,11 +1065,6 @@ async def helpme(ctx):
 # Error handler
 @bot.event
 async def on_command_error(ctx, error):
-    # Check for duplicate command
-    if await is_duplicate_command(ctx):
-        print(f"Duplicate command detected in error handler: {ctx.command}")
-        return
-
     if isinstance(error, commands.CommandNotFound):
         # Get the command that was attempted
         attempted_command = ctx.message.content.split()[0][1:]  # Remove the / prefix
