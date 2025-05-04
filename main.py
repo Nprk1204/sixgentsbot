@@ -808,9 +808,10 @@ async def clearqueue(ctx):
     # Get current players in queue
     channel_id = str(ctx.channel.id)
     players = queue_handler.get_players_for_match(channel_id)
+    count = len(players)
 
     # Clear the queue collection
-    queue_handler.queue.delete_many({})
+    queue_handler.queue_collection.delete_many({})
 
     # Cancel any active votes or selections
     if vote_system.is_voting_active():
@@ -1048,15 +1049,16 @@ async def forcestart(ctx):
     # Get current players in queue
     channel_id = str(ctx.channel.id)
     players = queue_handler.get_players_for_match(channel_id)
+    player_count = len(players)
 
-    if current_count == 0:
+    if player_count == 0:
         await ctx.send("Can't force start: Queue is empty!")
         return
 
     # If fewer than 6 players, add dummy players to reach 6
-    if current_count < 6:
+    if player_count < 6:
         # Create dummy players to fill the queue
-        needed = 6 - current_count
+        needed = 6 - player_count
         await ctx.send(f"Adding {needed} dummy players to fill the queue for testing...")
 
         for i in range(needed):
@@ -1066,10 +1068,11 @@ async def forcestart(ctx):
             dummy_mention = f"@TestPlayer{i + 1}"
 
             # Add dummy player to queue
-            queue_handler.queue.insert_one({
+            queue_handler.queue_collection.insert_one({
                 "id": dummy_id,
                 "name": dummy_name,
-                "mention": dummy_mention
+                "mention": dummy_mention,
+                "channel_id": channel_id
             })
 
     # Force start the vote
@@ -1097,6 +1100,7 @@ async def forcestop(ctx):
     # Get current players in queue
     channel_id = str(ctx.channel.id)
     players = queue_handler.get_players_for_match(channel_id)
+    count = len(players)
 
     # Cancel any active votes
     vote_active = vote_system.is_voting_active()
@@ -1109,7 +1113,7 @@ async def forcestop(ctx):
         captains_system.cancel_selection()
 
     # Clear the queue collection
-    queue_handler.queue.delete_many({})
+    queue_handler.queue_collection.delete_many({})
 
     # Create a response message
     embed = discord.Embed(
