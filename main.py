@@ -285,7 +285,8 @@ async def status(ctx):
     channel_id = str(ctx.channel.id)
 
     # Get all players in this channel's queue directly from the database
-    players = list(queue_handler.queue.find({"channel_id": channel_id}))
+    # Use queue_collection instead of queue
+    players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
     count = len(players)
 
     # Create an embed
