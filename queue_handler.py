@@ -25,11 +25,12 @@ class QueueHandler:
             return f"{player_mention} is already in this queue!"
 
         # Check if player is in any other queue
-        other_queue = self.queue_collection.find_one({"id": player_id, "channel_id": {"$ne": channel_id}})
-        if other_queue:
-            other_channel = other_queue.get("channel_id", "unknown")
-            # Use proper channel mention format
-            return f"{player_mention} is already in a queue in <#{other_channel}>. Please leave that queue first."
+        other_queue = self.queue_collection.find_one({"id": player_id})
+        if other_queue and other_queue.get("channel_id") != channel_id:
+            # Get the channel ID from the other queue
+            other_channel_id = other_queue.get("channel_id", "unknown")
+            # Format the channel mention properly - Discord displays <#123456> as the channel name
+            return f"{player_mention} is already in a queue in <#{other_channel_id}>. Please leave that queue first."
 
         # Store player in queue with channel ID
         self.queue_collection.insert_one({
@@ -43,8 +44,9 @@ class QueueHandler:
         count = self.queue_collection.count_documents({"channel_id": channel_id})
 
         # Start vote if queue is full for this channel
-        if count == 6 and channel_id in self.vote_systems:
-            return f"{player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
+        if count == 6:
+            # This will be handled by the command handler
+            return f"{player_mention} has joined the queue! Queue is now full!"
 
         return f"{player_mention} has joined the queue! There are {count}/6 players"
 
