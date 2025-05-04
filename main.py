@@ -544,31 +544,59 @@ async def resetleaderboard(ctx, confirmation: str = None):
         await ctx.send(embed=embed)
         return
 
-    # Get current player count
+    # Check multiple collections to determine if truly empty
+    db = match_system.players.database
     player_count = match_system.players.count_documents({})
+    match_count = db['matches'].count_documents({})
+    rank_count = db['ranks'].count_documents({})
 
-    if player_count == 0:
-        await ctx.send("Leaderboard is already empty!")
+    total_documents = player_count + match_count + rank_count
+
+    if total_documents == 0:
+        await ctx.send("All collections are already empty!")
         return
 
+    # If we get here, at least one collection has data to reset
     try:
-        # Create backup (optional)
+        # Create backup collections with timestamp
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        backup_collection_name = f"players_backup_{timestamp}"
 
-        # Create backup
-        db = match_system.players.database
-        db.create_collection(backup_collection_name)
-        backup_collection = db[backup_collection_name]
+        # Track what was backed up for reporting
+        backed_up = []
 
-        # Copy data to backup
-        for player in match_system.players.find():
-            backup_collection.insert_one(player)
+        # Backup and reset players
+        if player_count > 0:
+            backup_collection_name = f"players_backup_{timestamp}"
+            db.create_collection(backup_collection_name)
+            backup_collection = db[backup_collection_name]
+            for player in match_system.players.find():
+                backup_collection.insert_one(player)
+            match_system.players.delete_many({})
+            backed_up.append(f"Players ({player_count})")
 
-        # Delete all player records
-        match_system.players.delete_many({})
+        # Backup and reset matches
+        matches_collection = db['matches']
+        if match_count > 0:
+            backup_collection_name = f"matches_backup_{timestamp}"
+            db.create_collection(backup_collection_name)
+            backup_collection = db[backup_collection_name]
+            for match in matches_collection.find():
+                backup_collection.insert_one(match)
+            matches_collection.delete_many({})
+            backed_up.append(f"Matches ({match_count})")
 
-        # Also call the web API to reset the leaderboard
+        # Backup and reset ranks
+        ranks_collection = db['ranks']
+        if rank_count > 0:
+            backup_collection_name = f"ranks_backup_{timestamp}"
+            db.create_collection(backup_collection_name)
+            backup_collection = db[backup_collection_name]
+            for rank in ranks_collection.find():
+                backup_collection.insert_one(rank)
+            ranks_collection.delete_many({})
+            backed_up.append(f"Ranks ({rank_count})")
+
+        # Also call the web API to reset the leaderboard and record the reset
         import requests
         try:
             # Replace with your actual leaderboard app URL and admin token
@@ -596,22 +624,42 @@ async def resetleaderboard(ctx, confirmation: str = None):
         except Exception as e:
             web_reset = f"❌ Error connecting to web leaderboard: {str(e)}"
 
+        # Record the reset event locally
+        resets_collection = db['resets']
+        resets_collection.insert_one({
+            "type": "leaderboard_reset",
+            "timestamp": datetime.datetime.utcnow(),
+            "performed_by": str(ctx.author.id),
+            "performed_by_name": ctx.author.display_name,
+            "reason": "Season reset via Discord command"
+        })
+
         # Send confirmation
         embed = discord.Embed(
             title="✅ Leaderboard Reset Complete",
-            description=f"Reset {player_count} player records.",
+            description=f"Reset {total_documents} documents across {len(backed_up)} collections.",
             color=0x00ff00
         )
+
+        if backed_up:
+            embed.add_field(
+                name="Collections Reset",
+                value="\n".join(backed_up),
+                inline=False
+            )
+
         embed.add_field(
             name="Backup Created",
-            value=f"Backup collection: `{backup_collection_name}`",
+            value=f"Backup timestamp: `{timestamp}`",
             inline=False
         )
+
         embed.add_field(
             name="Web Leaderboard Status",
             value=web_reset,
             inline=False
         )
+
         embed.set_footer(text=f"Reset by {ctx.author.display_name}")
 
         await ctx.send(embed=embed)
