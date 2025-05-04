@@ -718,7 +718,7 @@ async def leaderboard(ctx):
     embed.set_footer(text="Updated after each match")
 
     # Optionally add a thumbnail
-    embed.set_thumbnail(url="https://i.imgur.com/pKd5Sdk.png")  # Replace with a Rocket League icon URL
+    embed.set_thumbnail(url="")  # Replace with a Rocket League icon URL
 
     await ctx.send(embed=embed)
 
