@@ -472,12 +472,13 @@ def get_mmr_from_rank(rank):
         return 1000  # Default MMR for Diamond and below
 
 
-def store_rank_data(discord_username, game_username, platform, rank_data):
+def store_rank_data(discord_username, game_username, platform, rank_data, discord_id=None):
     """Store rank check data in the database"""
     try:
         # Create rank document
         rank_document = {
             "discord_username": discord_username,
+            "discord_id": discord_id,  # Store the verified Discord ID if available
             "game_username": game_username,
             "platform": platform,
             "rank": rank_data.get("rank"),
@@ -647,7 +648,7 @@ def assign_discord_role(username, role_name):
 
 @app.route('/api/rank-check', methods=['GET'])
 def check_rank():
-    """API endpoint to check Rocket League rank"""
+    """API endpoint to check Rocket League rank with Discord username verification"""
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
@@ -664,20 +665,82 @@ def check_rank():
     print(f"API Key length: {len(RLTRACKER_API_KEY)}")
     print(f"========================")
 
+    # Verify Discord username exists in server if provided
+    discord_user_verified = False
+    discord_user_id = None
+    matched_name = None
+
+    if discord_username:
+        print(f"Verifying Discord username: {discord_username}")
+
+        try:
+            # Get all guild members through Discord API
+            api_url_members = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members?limit=1000"
+
+            headers = {
+                "Authorization": f"Bot {DISCORD_TOKEN}",
+                "Content-Type": "application/json"
+            }
+
+            print(f"Making API request to get server members...")
+            response = requests.get(api_url_members, headers=headers)
+
+            if response.status_code == 200:
+                members = response.json()
+                print(f"Successfully retrieved {len(members)} members from server")
+
+                # Find user by username (case-insensitive)
+                search_name = discord_username.lower().strip()
+                for member in members:
+                    member_user = member.get('user', {})
+                    member_username = (member_user.get('username') or '').lower().strip()
+                    member_global_name = (member_user.get('global_name') or '').lower().strip()
+                    member_nickname = (member.get('nick') or '').lower().strip()
+
+                    if (search_name == member_username or
+                            search_name == member_global_name or
+                            search_name == member_nickname or
+                            search_name in member_username or
+                            search_name in member_global_name or
+                            search_name in member_nickname):
+                        discord_user_id = member_user.get('id')
+                        matched_name = member_user.get('username') or member_global_name
+                        discord_user_verified = True
+                        print(f"✓ Found matching Discord user: {matched_name} (ID: {discord_user_id})")
+                        break
+
+                if not discord_user_verified:
+                    print(f"✗ No Discord user found matching '{discord_username}'")
+                    return jsonify({
+                        "success": False,
+                        "message": f"No Discord user found with username: {discord_username}. Please check your spelling and try again."
+                    }), 404
+            else:
+                print(f"API Error: Status code {response.status_code}")
+                print(f"Response body: {response.text[:200]}")
+        except Exception as e:
+            print(f"Exception in Discord user verification: {str(e)}")
+            return jsonify({
+                "success": False,
+                "message": f"Error verifying Discord username: {str(e)}"
+            }), 500
+
     # Use mock data with variety if no API key is provided or API key isn't approved yet
     if not RLTRACKER_API_KEY:
         print("WARNING: No API key provided, using varied mock data")
         mock_data = get_mock_rank_data(username, platform)
 
-        # If Discord username was provided, attempt role assignment and store rank data
-        if discord_username:
+        # If Discord username was verified, attempt role assignment and store rank data
+        if discord_user_verified:
             tier = mock_data.get("tier")
 
-            # Store rank data in database - add this line
-            store_rank_data(discord_username, username, platform, mock_data)
+            # Store rank data in database with verified Discord ID
+            store_rank_data(discord_username, username, platform, mock_data, discord_user_id)
 
             role_result = assign_discord_role(discord_username, tier)
             mock_data["role_assignment"] = role_result
+            mock_data["discord_verified"] = True
+            mock_data["matched_name"] = matched_name
 
         return jsonify(mock_data)
 
@@ -685,15 +748,17 @@ def check_rank():
     rank_data = get_cached_rank(platform, username)
     print(f"Rank data returned: {rank_data}")
 
-    # If Discord username was provided, attempt to assign role and store rank data
-    if discord_username and rank_data.get("success", False):
+    # If Discord username was verified, attempt to assign role and store rank data
+    if discord_user_verified and rank_data.get("success", False):
         tier = rank_data.get("tier")
 
-        # Store rank data in database - add this line
-        store_rank_data(discord_username, username, platform, rank_data)
+        # Store rank data in database with verified Discord ID
+        store_rank_data(discord_username, username, platform, rank_data, discord_user_id)
 
         role_result = assign_discord_role(discord_username, tier)
         rank_data["role_assignment"] = role_result
+        rank_data["discord_verified"] = True
+        rank_data["matched_name"] = matched_name
         print(f"Role assignment result: {role_result}")
 
     return jsonify(rank_data)

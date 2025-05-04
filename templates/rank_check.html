@@ -198,48 +198,59 @@
 
         if (checkRankButton) {
             checkRankButton.addEventListener('click', function() {
-                const rocketId = document.getElementById('rocketId').value.trim();
-                const platform = document.getElementById('platform').value;
-                const discordUsername = document.getElementById('discordUsername').value.trim();
+                // Use the searchPlayers function for improved validation
+                searchPlayers();
+            });
+        }
 
-                if (!rocketId) {
-                    alert('Please enter your Rocket League ID');
-                    return;
-                }
+        function searchPlayers() {
+            const rocketId = document.getElementById('rocketId').value.trim();
+            const platform = document.getElementById('platform').value;
+            const discordUsername = document.getElementById('discordUsername').value.trim();
 
-                // Show loading state
+            if (!rocketId) {
+                alert('Please enter your Rocket League ID');
+                return;
+            }
+
+            // First verify the Discord username exists
+            if (!discordUsername) {
+                alert('Please enter your Discord username for verification');
+                return;
+            }
+
+            // Show loading state
+            document.getElementById('verificationResult').innerHTML = `
+                <div class="text-center py-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-2">Checking your rank via RLTracker...</p>
+                </div>
+            `;
+
+            // Disable the button while checking
+            checkRankButton.disabled = true;
+            checkRankButton.innerHTML = `
+                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                Checking...
+            `;
+
+            // Set a timeout to re-enable the button if the request takes too long
+            const timeoutId = setTimeout(() => {
+                checkRankButton.disabled = false;
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+
                 document.getElementById('verificationResult').innerHTML = `
-                    <div class="text-center py-3">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2">Checking your rank via RLTracker...</p>
+                    <div class="alert alert-warning mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        Request is taking longer than expected. Please try again or check your connection.
                     </div>
                 `;
+            }, 15000); // 15 seconds timeout
 
-                // Disable the button while checking
-                checkRankButton.disabled = true;
-                checkRankButton.innerHTML = `
-                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                    Checking...
-                `;
-
-                // Set a timeout to re-enable the button if the request takes too long
-                const timeoutId = setTimeout(() => {
-                    checkRankButton.disabled = false;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-
-                    document.getElementById('verificationResult').innerHTML = `
-                        <div class="alert alert-warning mb-0">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            Request is taking longer than expected. Please try again or check your connection.
-                        </div>
-                    `;
-                }, 15000); // 15 seconds timeout
-
-                // Call our API endpoint to get the rank data
-                fetchRankData(rocketId, platform, discordUsername, timeoutId);
-            });
+            // Call our API endpoint to get the rank data
+            fetchRankData(rocketId, platform, discordUsername, timeoutId);
         }
 
         // Function to check if leaderboard has been reset

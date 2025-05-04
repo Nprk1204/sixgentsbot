@@ -276,16 +276,46 @@ async def status(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     channel_id = str(ctx.channel.id)
-    response = queue_handler.get_queue_status(channel_id)
-    await ctx.send(embed=response)
 
-    # If queue is full but vote not started, check if we should start voting
-    players = queue_handler.get_players_for_match(channel_id)
-    if len(players) >= 6:
+    # Get all players in this channel's queue
+    players = list(queue_handler.queue.find({"channel_id": channel_id}))
+    count = len(players)
+
+    # Create an embed
+    embed = discord.Embed(
+        title="Queue Status",
+        description=f"**Current Queue: {count}/6 players**",
+        color=0x3498db
+    )
+
+    if count == 0:
+        embed.add_field(name="Status", value="Queue is empty! Use `/join` to join the queue.", inline=False)
+        await ctx.send(embed=embed)
+        return
+
+    # Create a list of player mentions
+    player_mentions = [player['mention'] for player in players]
+
+    # Add player list to embed
+    embed.add_field(name="Players", value=", ".join(player_mentions), inline=False)
+
+    # Add info about how many more players are needed
+    if count < 6:
+        more_needed = 6 - count
+        embed.add_field(name="Info", value=f"{more_needed} more player(s) needed for a match.", inline=False)
+    else:
+        # Queue is full
+        embed.add_field(name="Status", value="**Queue is FULL!** Ready to start match.", inline=False)
+
+    await ctx.send(embed=embed)
+
+    # If queue is full, check if we should start voting
+    if count >= 6:
         # Check if voting is already active for this channel
         if not vote_system.is_voting_active(channel_id):
             await vote_system.start_vote(ctx.channel)
