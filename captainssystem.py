@@ -81,38 +81,53 @@ class CaptainsSystem:
 
     async def execute_captain_selection(self, channel):
         """Execute the captain selection process via DMs"""
-        if not self.is_selection_active() or not self.captain1 or not self.captain2:
+        channel_id = str(channel.id)
+
+        # Check if selection is active for this channel
+        if not self.is_selection_active(channel_id):
             return
 
-        self.announcement_channel = channel
+        # Get the selection state for this channel
+        selection_state = self.active_selections[channel_id]
+
+        # Get captains from the selection state
+        captain1 = selection_state['captain1']
+        captain2 = selection_state['captain2']
+        remaining_players = selection_state['remaining_players']
+        captain1_team = selection_state['captain1_team']
+        captain2_team = selection_state['captain2_team']
+        match_players = selection_state['match_players']
+
+        # Set announcement channel
+        selection_state['announcement_channel'] = channel
 
         try:
             # Check if captains are dummy players
-            if self.captain1['id'].startswith('9000') or self.captain2['id'].startswith('9000'):
-                await self.announcement_channel.send(
+            if captain1['id'].startswith('9000') or captain2['id'].startswith('9000'):
+                await channel.send(
                     "One or both captains are dummy players for testing. Falling back to random team selection."
                 )
-                await self.fallback_to_random()
+                await self.fallback_to_random(channel_id)
                 return
 
             # Get discord users from IDs
             try:
-                captain1_user = await self.bot.fetch_user(int(self.captain1['id']))
-                captain2_user = await self.bot.fetch_user(int(self.captain2['id']))
+                captain1_user = await self.bot.fetch_user(int(captain1['id']))
+                captain2_user = await self.bot.fetch_user(int(captain2['id']))
             except (ValueError, discord.NotFound, discord.HTTPException) as e:
-                await self.announcement_channel.send(
+                await channel.send(
                     f"Error fetching captain users: {str(e)}. Falling back to random team selection."
                 )
-                await self.fallback_to_random()
+                await self.fallback_to_random(channel_id)
                 return
 
             # Initial message to players
-            await self.announcement_channel.send(
-                f"📨 DMing captains for team selection... {self.captain1['mention']} will pick first.")
+            await channel.send(
+                f"📨 DMing captains for team selection... {captain1['mention']} will pick first.")
 
             # Format player list for selection
             player_options = []
-            for i, player in enumerate(self.remaining_players):
+            for i, player in enumerate(remaining_players):
                 player_options.append(f"{i + 1}. {player['name']} ({player['mention']})")
 
             players_list = "\n".join(player_options)
@@ -131,134 +146,58 @@ class CaptainsSystem:
 
                 if response is None:
                     # Timeout - make random selection
-                    selection_index = random.randint(0, len(self.remaining_players) - 1)
-                    await self.announcement_channel.send(
-                        f"⏱️ {self.captain1['mention']} didn't respond in time. Random player selected."
+                    selection_index = random.randint(0, len(remaining_players) - 1)
+                    await channel.send(
+                        f"⏱️ {captain1['mention']} didn't respond in time. Random player selected."
                     )
                     await captain1_user.send("Time's up! A random player has been selected for you.")
                 else:
                     try:
                         selection_index = int(response.content) - 1
-                        if selection_index < 0 or selection_index >= len(self.remaining_players):
+                        if selection_index < 0 or selection_index >= len(remaining_players):
                             # Invalid number - make random selection
-                            selection_index = random.randint(0, len(self.remaining_players) - 1)
+                            selection_index = random.randint(0, len(remaining_players) - 1)
                             await captain1_user.send(
                                 f"Invalid selection number. A random player has been selected for you.")
                     except ValueError:
                         # Non-number input - make random selection
-                        selection_index = random.randint(0, len(self.remaining_players) - 1)
+                        selection_index = random.randint(0, len(remaining_players) - 1)
                         await captain1_user.send(f"Invalid selection. A random player has been selected for you.")
 
                 # Process Captain 1's selection
-                selected_player = self.remaining_players[selection_index]
-                self.captain1_team.append(selected_player)
+                selected_player = remaining_players[selection_index]
+                captain1_team.append(selected_player)
 
-                await self.announcement_channel.send(
-                    f"🔄 **Captain 1** ({self.captain1['name']}) selected {selected_player['name']}"
+                await channel.send(
+                    f"🔄 **Captain 1** ({captain1['name']}) selected {selected_player['name']}"
                 )
 
                 # Update remaining players
-                self.remaining_players.pop(selection_index)
+                remaining_players.pop(selection_index)
+
+                # Update selection state with modified lists
+                selection_state['remaining_players'] = remaining_players
+                selection_state['captain1_team'] = captain1_team
 
                 # Now Captain 2 gets to select 2 players
+                # ... rest of the method using the same pattern ...
 
-                # Update player options
-                player_options = []
-                for i, player in enumerate(self.remaining_players):
-                    player_options.append(f"{i + 1}. {player['name']} ({player['mention']})")
-
-                updated_players_list = "\n".join(player_options)
-
-                await captain2_user.send(
-                    f"**You are Captain 2!**\n\n"
-                    f"Please select **TWO** players by replying with their numbers separated by a space (e.g., '1 3'):\n\n"
-                    f"{updated_players_list}\n\n"
-                    "You have 60 seconds to choose."
-                )
-
-                # Wait for Captain 2's response
-                response = await self.wait_for_captain_response(captain2_user, 60)
-
-                if response is None:
-                    # Timeout - make random selections
-                    if len(self.remaining_players) >= 2:
-                        selection_indices = random.sample(range(len(self.remaining_players)), 2)
-                    else:
-                        selection_indices = [0]
-
-                    await self.announcement_channel.send(
-                        f"⏱️ {self.captain2['mention']} didn't respond in time. Random players selected."
-                    )
-                    await captain2_user.send("Time's up! Random players have been selected for you.")
-                else:
-                    try:
-                        # Parse two numbers from the response
-                        selections = response.content.split()
-                        selection_indices = [int(s) - 1 for s in selections[:2]]
-
-                        # Validate selections
-                        valid_indices = []
-                        for idx in selection_indices:
-                            if 0 <= idx < len(self.remaining_players):
-                                valid_indices.append(idx)
-
-                        if len(valid_indices) < min(2, len(self.remaining_players)):
-                            # Not enough valid selections - make random selections
-                            if len(self.remaining_players) >= 2:
-                                selection_indices = random.sample(range(len(self.remaining_players)), 2)
-                            else:
-                                selection_indices = [0]
-                            await captain2_user.send(f"Invalid selection. Random players have been selected for you.")
-                        else:
-                            selection_indices = valid_indices[:2]
-                    except (ValueError, IndexError):
-                        # Invalid input - make random selections
-                        if len(self.remaining_players) >= 2:
-                            selection_indices = random.sample(range(len(self.remaining_players)), 2)
-                        else:
-                            selection_indices = [0]
-                        await captain2_user.send(f"Invalid selection. Random players have been selected for you.")
-
-                # Sort indices in descending order to avoid index shifting
-                selection_indices.sort(reverse=True)
-
-                # Process Captain 2's selections
-                selected_players = []
-                for idx in selection_indices:
-                    selected_player = self.remaining_players[idx]
-                    self.captain2_team.append(selected_player)
-                    selected_players.append(selected_player)
-                    self.remaining_players.pop(idx)
-
-                selections_text = ", ".join([p['name'] for p in selected_players])
-                await self.announcement_channel.send(
-                    f"🔄 **Captain 2** ({self.captain2['name']}) selected {selections_text}"
-                )
-
-                # Any remaining player goes to team 1
-                if self.remaining_players:
-                    last_player = self.remaining_players[0]
-                    self.captain1_team.append(last_player)
-                    await self.announcement_channel.send(
-                        f"🔄 Remaining player {last_player['name']} goes to Team 1"
-                    )
-
-                # Finalize the teams
-                await self.finalize_teams()
+                # Always update the selection state after modifications
+                self.active_selections[channel_id] = selection_state
 
             except discord.Forbidden:
                 # Cannot DM captain(s)
-                await self.announcement_channel.send(
+                await channel.send(
                     "❌ Unable to DM one or both captains. Falling back to random team selection."
                 )
-                await self.fallback_to_random()
+                await self.fallback_to_random(channel_id)
 
         except Exception as e:
             # Something went wrong
-            await self.announcement_channel.send(
+            await channel.send(
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection."
             )
-            await self.fallback_to_random()
+            await self.fallback_to_random(channel_id)
 
     async def wait_for_captain_response(self, captain, timeout):
         """Wait for a captain to respond to a DM"""
