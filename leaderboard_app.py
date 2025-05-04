@@ -29,6 +29,7 @@ print(f"DISCORD_GUILD_ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
 print(f"DISCORD_GUILD_ID value: '{DISCORD_GUILD_ID}'")
 print("===================================\n")
 
+
 # Simple cache implementation
 class SimpleCache:
     def __init__(self, default_timeout=300):
@@ -91,6 +92,7 @@ try:
     players_collection = db['players']
     matches_collection = db['matches']
     ranks_collection = db['ranks']
+    resets_collection = db['resets']  # New collection for tracking resets
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
@@ -123,10 +125,11 @@ except Exception as e:
             return None
 
 
-    db = {'players': FallbackDB(), 'matches': FallbackDB(), 'ranks': FallbackDB()}
+    db = {'players': FallbackDB(), 'matches': FallbackDB(), 'ranks': FallbackDB(), 'resets': FallbackDB()}
     players_collection = db['players']
     matches_collection = db['matches']
     ranks_collection = db['ranks']
+    resets_collection = db['resets']
 
 
 # Routes
@@ -723,6 +726,36 @@ def get_user_rank(discord_username):
         }), 500
 
 
+# NEW API ENDPOINT: Get the timestamp of the last leaderboard reset
+@app.route('/api/reset-timestamp', methods=['GET'])
+def get_last_reset_timestamp():
+    """Get the timestamp of the last leaderboard reset"""
+    try:
+        last_reset = resets_collection.find_one({"type": "leaderboard_reset"}, sort=[("timestamp", -1)])
+
+        if last_reset:
+            # Convert timestamp to ISO format string
+            timestamp_str = last_reset["timestamp"].isoformat() if isinstance(last_reset["timestamp"],
+                                                                              datetime.datetime) else str(
+                last_reset["timestamp"])
+
+            return jsonify({
+                "success": True,
+                "last_reset": timestamp_str
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "last_reset": None,
+                "message": "No reset events found"
+            })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving reset timestamp: {str(e)}"
+        }), 500
+
+
 def get_mock_rank_data(username, platform):
     """Generate varied mock data for testing"""
     # Use username to deterministically generate different ranks
@@ -784,24 +817,33 @@ def reset_leaderboard():
         rank_count = ranks_collection.count_documents({})
 
         # Create backup collections with timestamp
-        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.utcnow()
+        timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
         # Backup players
         if player_count > 0:
-            db[f'players_backup_{timestamp}'].insert_many(players_collection.find())
+            db[f'players_backup_{timestamp_str}'].insert_many(players_collection.find())
 
         # Backup matches
         if match_count > 0:
-            db[f'matches_backup_{timestamp}'].insert_many(matches_collection.find())
+            db[f'matches_backup_{timestamp_str}'].insert_many(matches_collection.find())
 
         # Backup ranks
         if rank_count > 0:
-            db[f'ranks_backup_{timestamp}'].insert_many(ranks_collection.find())
+            db[f'ranks_backup_{timestamp_str}'].insert_many(ranks_collection.find())
 
         # Clear collections
         players_collection.delete_many({})
         matches_collection.delete_many({})
         ranks_collection.delete_many({})
+
+        # Record the reset event
+        resets_collection.insert_one({
+            "type": "leaderboard_reset",
+            "timestamp": timestamp,
+            "performed_by": request.json.get("admin_id", "unknown"),
+            "reason": request.json.get("reason", "Season reset")
+        })
 
         return jsonify({
             "success": True,
@@ -810,7 +852,7 @@ def reset_leaderboard():
                 "players_removed": player_count,
                 "matches_removed": match_count,
                 "ranks_removed": rank_count,
-                "backup_timestamp": timestamp
+                "backup_timestamp": timestamp_str
             }
         })
 
@@ -819,6 +861,7 @@ def reset_leaderboard():
             "success": False,
             "message": f"Error resetting leaderboard: {str(e)}"
         }), 500
+
 
 @app.errorhandler(404)
 def page_not_found(e):

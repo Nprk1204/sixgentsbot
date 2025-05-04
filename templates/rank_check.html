@@ -153,158 +153,93 @@
 
 {% block extra_js %}
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const checkRankButton = document.getElementById('checkRankButton');
-    let resultModal;
+    document.addEventListener('DOMContentLoaded', function() {
+        const checkRankButton = document.getElementById('checkRankButton');
+        let resultModal;
 
-    // Initialize the modal
-    if (document.getElementById('resultModal')) {
-        resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
-    }
+        // Initialize the modal
+        if (document.getElementById('resultModal')) {
+            resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
+        }
 
-    // Check for existing rank data when page loads
-    checkForExistingRankData();
+        // Check for leaderboard resets first
+        checkForLeaderboardReset();
 
-    if (checkRankButton) {
-        checkRankButton.addEventListener('click', function() {
-            const rocketId = document.getElementById('rocketId').value.trim();
-            const platform = document.getElementById('platform').value;
-            const discordUsername = document.getElementById('discordUsername').value.trim();
+        // Then check for existing rank data
+        checkForExistingRankData();
 
-            if (!rocketId) {
-                alert('Please enter your Rocket League ID');
-                return;
-            }
+        if (checkRankButton) {
+            checkRankButton.addEventListener('click', function() {
+                const rocketId = document.getElementById('rocketId').value.trim();
+                const platform = document.getElementById('platform').value;
+                const discordUsername = document.getElementById('discordUsername').value.trim();
 
-            // Show loading state
-            document.getElementById('verificationResult').innerHTML = `
-                <div class="text-center py-3">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">Checking your rank via RLTracker...</p>
-                </div>
-            `;
-
-            // Disable the button while checking
-            checkRankButton.disabled = true;
-            checkRankButton.innerHTML = `
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                Checking...
-            `;
-
-            // Call API endpoint to get rank data
-            fetchRankData(rocketId, platform, discordUsername);
-        });
-    }
-
-    // Function to check for existing rank data
-    function checkForExistingRankData() {
-        // Try to get stored rank data from localStorage
-        const storedRankData = localStorage.getItem('rankCheckData');
-
-        if (storedRankData) {
-            try {
-                const rankData = JSON.parse(storedRankData);
-                // Display the verification result with stored data
-                displayStoredRankResult(rankData);
-
-                // Disable the check rank button since we already have rank data
-                if (checkRankButton) {
-                    checkRankButton.disabled = true;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
-
-                    // Add a small note about refreshing
-                    const buttonContainer = checkRankButton.closest('.d-grid');
-                    if (buttonContainer) {
-                        const noteElement = document.createElement('p');
-                        noteElement.className = 'text-muted small mt-2 text-center';
-                        noteElement.innerHTML = 'To check again, refresh the page and enter new details.';
-                        buttonContainer.appendChild(noteElement);
-                    }
+                if (!rocketId) {
+                    alert('Please enter your Rocket League ID');
+                    return;
                 }
-            } catch (e) {
-                console.error('Error parsing stored rank data:', e);
-                // Clear invalid data
-                localStorage.removeItem('rankCheckData');
-            }
-        }
-    }
 
-    // Function to display stored rank result
-    function displayStoredRankResult(data) {
-        // Create a rank card based on tier
-        let rankCard = createRankCardForTier(data.tier);
+                // Show loading state
+                document.getElementById('verificationResult').innerHTML = `
+                    <div class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Checking your rank via RLTracker...</p>
+                    </div>
+                `;
 
-        // Create verification result display
-        let resultHtml = `
-            <div class="alert alert-success mb-4">
-                <i class="fas fa-check-circle me-2"></i> Rank verification successful!
-            </div>
+                // Disable the button while checking
+                checkRankButton.disabled = true;
+                checkRankButton.innerHTML = `
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Checking...
+                `;
 
-            <p>Your rank has been verified as ${data.rank}.</p>
-            <p>Please check the modal for details or <a href="#" id="showStoredRankDetails">click here</a> to view details.</p>
-
-            ${rankCard}
-        `;
-
-        document.getElementById('verificationResult').innerHTML = resultHtml;
-
-        // Add event listener to show details
-        document.getElementById('showStoredRankDetails').addEventListener('click', function(e) {
-            e.preventDefault();
-            showStoredRankDetails(data);
-        });
-
-        // Pre-fill the form if possible
-        if (data.username && document.getElementById('rocketId')) {
-            document.getElementById('rocketId').value = data.username;
+                // Call API endpoint to get rank data
+                fetchRankData(rocketId, platform, discordUsername);
+            });
         }
 
-        if (data.platform && document.getElementById('platform')) {
-            const platformSelect = document.getElementById('platform');
-            const platformOption = Array.from(platformSelect.options).find(option => option.value === data.platform);
-            if (platformOption) {
-                platformSelect.value = data.platform;
-            }
-        }
-    }
+        // Function to check if leaderboard has been reset
+        function checkForLeaderboardReset() {
+            fetch('/api/reset-timestamp')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.last_reset) {
+                        console.log('Checking for leaderboard reset...');
 
-    // Function to show detailed rank information in modal
-    function showStoredRankDetails(data) {
-        // Format and show the rank details in modal
-        let modalContent = createRankModalContent(data);
-        document.getElementById('resultModalContent').innerHTML = modalContent;
+                        // Get stored reset timestamp
+                        const lastCheckedReset = localStorage.getItem('lastCheckedReset');
 
-        // Show the modal
-        if (resultModal) {
-            resultModal.show();
-        }
-    }
-
-    function fetchRankData(username, platform, discordUsername) {
-        // Build the API URL with query parameters
-        let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
-
-        if (discordUsername) {
-            apiUrl += `&discord_username=${encodeURIComponent(discordUsername)}`;
+                        // If we have a reset that's newer than our last check, clear localStorage data
+                        if (!lastCheckedReset || new Date(data.last_reset) > new Date(lastCheckedReset)) {
+                            console.log('Leaderboard has been reset. Clearing rank data...');
+                            localStorage.removeItem('rankCheckData');
+                            localStorage.setItem('lastCheckedReset', data.last_reset);
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking for leaderboard reset:', error);
+                });
         }
 
-        // Make the API request
-        fetch(apiUrl)
-            .then(response => response.json())
-            .then(data => {
-                // Process the API response
-                if (data.success) {
-                    // Store the rank data for persistence across page refreshes
-                    localStorage.setItem('rankCheckData', JSON.stringify(data));
+        // Function to check for existing rank data
+        function checkForExistingRankData() {
+            // Try to get stored rank data from localStorage
+            const storedRankData = localStorage.getItem('rankCheckData');
 
-                    displayRankResults(data, discordUsername);
+            if (storedRankData) {
+                try {
+                    const rankData = JSON.parse(storedRankData);
+                    // Display the verification result with stored data
+                    displayStoredRankResult(rankData);
 
-                    // Permanently disable the button
+                    // Disable the check rank button since we already have rank data
                     if (checkRankButton) {
                         checkRankButton.disabled = true;
-                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Verified`;
+                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
 
                         // Add a small note about refreshing
                         const buttonContainer = checkRankButton.closest('.d-grid');
@@ -315,155 +250,247 @@ document.addEventListener('DOMContentLoaded', function() {
                             buttonContainer.appendChild(noteElement);
                         }
                     }
-                } else {
-                    showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+                } catch (e) {
+                    console.error('Error parsing stored rank data:', e);
+                    // Clear invalid data
+                    localStorage.removeItem('rankCheckData');
+                }
+            }
+        }
+
+        // Function to display stored rank result
+        function displayStoredRankResult(data) {
+            // Create a rank card based on tier
+            let rankCard = createRankCardForTier(data.tier);
+
+            // Create verification result display
+            let resultHtml = `
+                <div class="alert alert-success mb-4">
+                    <i class="fas fa-check-circle me-2"></i> Rank verification successful!
+                </div>
+
+                <p>Your rank has been verified as ${data.rank}.</p>
+                <p>Please check the modal for details or <a href="#" id="showStoredRankDetails">click here</a> to view details.</p>
+
+                ${rankCard}
+            `;
+
+            document.getElementById('verificationResult').innerHTML = resultHtml;
+
+            // Add event listener to show details
+            document.getElementById('showStoredRankDetails').addEventListener('click', function(e) {
+                e.preventDefault();
+                showStoredRankDetails(data);
+            });
+
+            // Pre-fill the form if possible
+            if (data.username && document.getElementById('rocketId')) {
+                document.getElementById('rocketId').value = data.username;
+            }
+
+            if (data.platform && document.getElementById('platform')) {
+                const platformSelect = document.getElementById('platform');
+                const platformOption = Array.from(platformSelect.options).find(option => option.value === data.platform);
+                if (platformOption) {
+                    platformSelect.value = data.platform;
+                }
+            }
+        }
+
+        // Function to show detailed rank information in modal
+        function showStoredRankDetails(data) {
+            // Format and show the rank details in modal
+            let modalContent = createRankModalContent(data);
+            document.getElementById('resultModalContent').innerHTML = modalContent;
+
+            // Show the modal
+            if (resultModal) {
+                resultModal.show();
+            }
+        }
+
+        function fetchRankData(username, platform, discordUsername) {
+            // Build the API URL with query parameters
+            let apiUrl = `/api/rank-check?platform=${encodeURIComponent(platform)}&username=${encodeURIComponent(username)}`;
+
+            if (discordUsername) {
+                apiUrl += `&discord_username=${encodeURIComponent(discordUsername)}`;
+            }
+
+            // Make the API request
+            fetch(apiUrl)
+                .then(response => response.json())
+                .then(data => {
+                    // Process the API response
+                    if (data.success) {
+                        // Store the rank data for persistence across page refreshes
+                        localStorage.setItem('rankCheckData', JSON.stringify(data));
+
+                        displayRankResults(data, discordUsername);
+
+                        // Permanently disable the button
+                        if (checkRankButton) {
+                            checkRankButton.disabled = true;
+                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Verified`;
+
+                            // Add a small note about refreshing
+                            const buttonContainer = checkRankButton.closest('.d-grid');
+                            if (buttonContainer) {
+                                const noteElement = document.createElement('p');
+                                noteElement.className = 'text-muted small mt-2 text-center';
+                                noteElement.innerHTML = 'To check again, refresh the page and enter new details.';
+                                buttonContainer.appendChild(noteElement);
+                            }
+                        }
+                    } else {
+                        showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+
+                        // Re-enable button in case of error
+                        if (checkRankButton) {
+                            checkRankButton.disabled = false;
+                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showError("An error occurred while checking your rank. Please try again later.");
 
                     // Re-enable button in case of error
                     if (checkRankButton) {
                         checkRankButton.disabled = false;
                         checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
                     }
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showError("An error occurred while checking your rank. Please try again later.");
-
-                // Re-enable button in case of error
-                if (checkRankButton) {
-                    checkRankButton.disabled = false;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                }
-            });
-    }
-
-    function displayRankResults(data, discordUsername) {
-        // Create appropriate rank card based on tier
-        let rankCard = createRankCardForTier(data.tier);
-
-        // Create verification result display
-        let resultHtml = `
-            <div class="alert alert-success mb-4">
-                <i class="fas fa-check-circle me-2"></i> Rank verification successful!
-            </div>
-
-            <p>Your rank has been verified as ${data.rank}.</p>
-            <p>Please check the modal for details or <a href="javascript:window.location.reload()">click here</a> if you closed it.</p>
-
-            ${rankCard}
-        `;
-
-        document.getElementById('verificationResult').innerHTML = resultHtml;
-
-        // Create and display modal content
-        let modalContent = createRankModalContent(data);
-        document.getElementById('resultModalContent').innerHTML = modalContent;
-
-        // Show the modal
-        if (resultModal) {
-            resultModal.show();
-        }
-    }
-
-    // Create a rank card HTML based on tier
-    function createRankCardForTier(tier) {
-        let rankColor, rankTitle, rankDescription, mmrValue;
-
-        // Set values based on tier
-        if (tier === "Rank A") {
-            rankColor = "rank-a";
-            rankTitle = "Rank A";
-            rankDescription = "Grand Champion & SSL Players";
-            mmrValue = "1500";
-        } else if (tier === "Rank B") {
-            rankColor = "rank-b";
-            rankTitle = "Rank B";
-            rankDescription = "Champion I to Grand Champion I";
-            mmrValue = "1300";
-        } else {
-            rankColor = "rank-c";
-            rankTitle = "Rank C";
-            rankDescription = "Diamond III and below";
-            mmrValue = "1000";
+                });
         }
 
-        // Generate HTML for rank card
-        return `
-            <div class="rank-card">
-                <div class="rank-header ${rankColor}">
-                    <i class="fas fa-trophy fa-2x"></i>
-                </div>
-                <div class="rank-body">
-                    <h5 class="rank-title">${rankTitle}</h5>
-                    <p class="rank-description">${rankDescription}</p>
-                    <p class="rank-mmr">Starting MMR: ${mmrValue}</p>
-                    <span class="badge bg-${getBadgeColor(tier)}">${tier} Role</span>
-                </div>
-            </div>
-        `;
-    }
+        function displayRankResults(data, discordUsername) {
+            // Create appropriate rank card based on tier
+            let rankCard = createRankCardForTier(data.tier);
 
-    // Create modal content
-    function createRankModalContent(data) {
-        return `
-            <div class="text-center">
-                <div class="mb-3">
-                    <i class="fas fa-check-circle fa-4x text-success"></i>
-                </div>
-                <h4>Your rank has been verified!</h4>
-                <p class="mb-3">Based on your ${data.rank} rank in competitive 3v3.</p>
-
-                <div class="alert alert-info">
-                    <strong>Discord Role:</strong> ${data.tier}<br>
-                    <strong>Starting MMR:</strong> ${data.mmr}
+            // Create verification result display
+            let resultHtml = `
+                <div class="alert alert-success mb-4">
+                    <i class="fas fa-check-circle me-2"></i> Rank verification successful!
                 </div>
 
-                <p>You can now join the 6 Mans queue in our Discord server.</p>
-                <button type="button" class="btn btn-primary" onclick="window.open('https://discord.gg/your-discord', '_blank');">
-                    <i class="fab fa-discord me-2"></i> Join Our Discord
-                </button>
-            </div>
-        `;
-    }
+                <p>Your rank has been verified as ${data.rank}.</p>
+                <p>Please check the modal for details or <a href="javascript:window.location.reload()">click here</a> if you closed it.</p>
 
-    function showError(message) {
-        // Update verification result section
-        document.getElementById('verificationResult').innerHTML = `
-            <div class="alert alert-danger mb-0">
-                <i class="fas fa-exclamation-circle me-2"></i> ${message}
-            </div>
-        `;
+                ${rankCard}
+            `;
 
-        // Update modal
-        document.getElementById('resultModalContent').innerHTML = `
-            <div class="text-center">
-                <div class="mb-3">
-                    <i class="fas fa-exclamation-circle fa-4x text-danger"></i>
+            document.getElementById('verificationResult').innerHTML = resultHtml;
+
+            // Create and display modal content
+            let modalContent = createRankModalContent(data);
+            document.getElementById('resultModalContent').innerHTML = modalContent;
+
+            // Show the modal
+            if (resultModal) {
+                resultModal.show();
+            }
+        }
+
+        // Create a rank card HTML based on tier
+        function createRankCardForTier(tier) {
+            let rankColor, rankTitle, rankDescription, mmrValue;
+
+            // Set values based on tier
+            if (tier === "Rank A") {
+                rankColor = "rank-a";
+                rankTitle = "Rank A";
+                rankDescription = "Grand Champion & SSL Players";
+                mmrValue = "1500";
+            } else if (tier === "Rank B") {
+                rankColor = "rank-b";
+                rankTitle = "Rank B";
+                rankDescription = "Champion I to Grand Champion I";
+                mmrValue = "1300";
+            } else {
+                rankColor = "rank-c";
+                rankTitle = "Rank C";
+                rankDescription = "Diamond III and below";
+                mmrValue = "1000";
+            }
+
+            // Generate HTML for rank card
+            return `
+                <div class="rank-card">
+                    <div class="rank-header ${rankColor}">
+                        <i class="fas fa-trophy fa-2x"></i>
+                    </div>
+                    <div class="rank-body">
+                        <h5 class="rank-title">${rankTitle}</h5>
+                        <p class="rank-description">${rankDescription}</p>
+                        <p class="rank-mmr">Starting MMR: ${mmrValue}</p>
+                        <span class="badge bg-${getBadgeColor(tier)}">${tier} Role</span>
+                    </div>
                 </div>
-                <h4>Verification Failed</h4>
+            `;
+        }
+
+        // Create modal content
+        function createRankModalContent(data) {
+            return `
+                <div class="text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-check-circle fa-4x text-success"></i>
+                    </div>
+                    <h4>Your rank has been verified!</h4>
+                    <p class="mb-3">Based on your ${data.rank} rank in competitive 3v3.</p>
+
+                    <div class="alert alert-info">
+                        <strong>Discord Role:</strong> ${data.tier}<br>
+                        <strong>Starting MMR:</strong> ${data.mmr}
+                    </div>
+
+                    <p>You can now join the 6 Mans queue in our Discord server.</p>
+                    <button type="button" class="btn btn-primary" onclick="window.open('https://discord.gg/your-discord', '_blank');">
+                        <i class="fab fa-discord me-2"></i> Join Our Discord
+                    </button>
+                </div>
+            `;
+        }
+
+        function showError(message) {
+            // Update verification result section
+            document.getElementById('verificationResult').innerHTML = `
                 <div class="alert alert-danger mb-0">
-                    ${message}
+                    <i class="fas fa-exclamation-circle me-2"></i> ${message}
                 </div>
-                <p class="mt-3">Please check your Rocket League ID and platform, then try again.</p>
-            </div>
-        `;
+            `;
 
-        // Show modal
-        if (resultModal) {
-            resultModal.show();
+            // Update modal
+            document.getElementById('resultModalContent').innerHTML = `
+                <div class="text-center">
+                    <div class="mb-3">
+                        <i class="fas fa-exclamation-circle fa-4x text-danger"></i>
+                    </div>
+                    <h4>Verification Failed</h4>
+                    <div class="alert alert-danger mb-0">
+                        ${message}
+                    </div>
+                    <p class="mt-3">Please check your Rocket League ID and platform, then try again.</p>
+                </div>
+            `;
+
+            // Show modal
+            if (resultModal) {
+                resultModal.show();
+            }
         }
-    }
 
-    // Utility function to get badge color based on tier
-    function getBadgeColor(tier) {
-        const colors = {
-            'Rank A': 'danger',
-            'Rank B': 'primary',
-            'Rank C': 'success'
-        };
+        // Utility function to get badge color based on tier
+        function getBadgeColor(tier) {
+            const colors = {
+                'Rank A': 'danger',
+                'Rank B': 'primary',
+                'Rank C': 'success'
+            };
 
-        return colors[tier] || 'secondary';
-    }
-});
+            return colors[tier] || 'secondary';
+        }
+    });
 </script>
 {% endblock %}

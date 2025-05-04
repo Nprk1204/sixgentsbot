@@ -520,7 +520,7 @@ async def clearqueue(ctx):
 @bot.command()
 async def resetleaderboard(ctx, confirmation: str = None):
     """Reset the leaderboard (Admin only)"""
-    # Check if this is a duplicate command - note the "await"
+    # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
         return
 
@@ -533,7 +533,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
     if confirmation is None or confirmation.lower() != "confirm":
         embed = discord.Embed(
             title="⚠️ Reset Leaderboard Confirmation",
-            description="This will reset MMR and stats for ALL players. This action cannot be undone!",
+            description="This will reset MMR, stats, rank data, and match history for ALL players. This action cannot be undone!",
             color=0xff9900
         )
         embed.add_field(
@@ -551,11 +551,11 @@ async def resetleaderboard(ctx, confirmation: str = None):
         await ctx.send("Leaderboard is already empty!")
         return
 
-    # Create backup (optional)
-    timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    backup_collection_name = f"players_backup_{timestamp}"
-
     try:
+        # Create backup (optional)
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        backup_collection_name = f"players_backup_{timestamp}"
+
         # Create backup
         db = match_system.players.database
         db.create_collection(backup_collection_name)
@@ -568,6 +568,34 @@ async def resetleaderboard(ctx, confirmation: str = None):
         # Delete all player records
         match_system.players.delete_many({})
 
+        # Also call the web API to reset the leaderboard
+        import requests
+        try:
+            # Replace with your actual leaderboard app URL and admin token
+            webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
+            admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
+
+            headers = {
+                'Authorization': admin_token,
+                'Content-Type': 'application/json'
+            }
+
+            data = {
+                'admin_id': str(ctx.author.id),
+                'reason': 'Season reset via Discord command'
+            }
+
+            response = requests.post(f"{webapp_url}/api/reset-leaderboard",
+                                     headers=headers,
+                                     json=data)
+
+            if response.status_code == 200:
+                web_reset = "✅ Web leaderboard also reset successfully."
+            else:
+                web_reset = f"❌ Failed to reset web leaderboard (Status: {response.status_code}). Please check the logs."
+        except Exception as e:
+            web_reset = f"❌ Error connecting to web leaderboard: {str(e)}"
+
         # Send confirmation
         embed = discord.Embed(
             title="✅ Leaderboard Reset Complete",
@@ -577,6 +605,11 @@ async def resetleaderboard(ctx, confirmation: str = None):
         embed.add_field(
             name="Backup Created",
             value=f"Backup collection: `{backup_collection_name}`",
+            inline=False
+        )
+        embed.add_field(
+            name="Web Leaderboard Status",
+            value=web_reset,
             inline=False
         )
         embed.set_footer(text=f"Reset by {ctx.author.display_name}")
