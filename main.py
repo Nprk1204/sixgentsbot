@@ -15,6 +15,7 @@ from captainssystem import CaptainsSystem
 from matchsystem import MatchSystem
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+from system_coordinators import VoteSystemCoordinator, CaptainSystemCoordinator
 import uuid
 
 # Load environment variables
@@ -119,22 +120,48 @@ except Exception as e:
 # Initialize components
 db = Database(MONGO_URI)
 queue_handler = QueueHandler(db)
-captains_system = CaptainsSystem(db, queue_handler)
-vote_system = VoteSystem(db, queue_handler, captains_system)
 match_system = MatchSystem(db)
 
-# Connect components
-queue_handler.set_vote_system(vote_system)
-queue_handler.set_captains_system(captains_system)
-captains_system.set_match_system(match_system)
-vote_system.set_match_system(match_system)
+# Create channel-specific vote and captain systems
+channel_names = ["rank-a", "rank-b", "rank-c", "global"]
+vote_systems = {}
+captains_systems = {}
+
+for channel_name in channel_names:
+    captains_systems[channel_name] = CaptainsSystem(db, queue_handler)
+    captains_systems[channel_name].set_match_system(match_system)
+
+    vote_systems[channel_name] = VoteSystem(db, queue_handler, captains_systems[channel_name])
+    vote_systems[channel_name].set_match_system(match_system)
+
+# Main vote system coordinator
+vote_system = VoteSystemCoordinator(vote_systems)
+captains_system = CaptainSystemCoordinator(captains_systems)
 
 
 @bot.event
 async def on_ready():
     print(f"{bot.user.name} is now online with ID: {bot.user.id}")
     print(f"Connected to {len(bot.guilds)} guilds")
+
+    # Set bot for all systems
     vote_system.set_bot(bot)
+    captains_system.set_bot(bot)
+
+    # Get all queue channels and initialize systems
+    for guild in bot.guilds:
+        for channel in guild.text_channels:
+            channel_name = channel.name.lower()
+            if channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
+                channel_id = str(channel.id)
+
+                # Initialize queue handler with channel-specific systems
+                if channel_name in vote_systems:
+                    queue_handler.set_vote_system(channel_id, vote_systems[channel_name])
+
+                if channel_name in captains_systems:
+                    queue_handler.set_captains_system(channel_id, captains_systems[channel_name])
+
     print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now()}")
 
 
@@ -158,16 +185,18 @@ async def join(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     player = ctx.author
-    response = queue_handler.add_player(player)
+    channel_id = ctx.channel.id
+    response = queue_handler.add_player(player, channel_id)
     await ctx.send(response)
 
     # Check if queue is full and start voting
-    players = queue_handler.get_players_for_match()
-    if len(players) >= 6 and not vote_system.is_voting_active():
+    players = queue_handler.get_players_for_match(channel_id)
+    if len(players) >= 6 and channel_id in vote_system.vote_systems and not vote_system.is_voting_active(channel_id):
         await vote_system.start_vote(ctx.channel)
 
 
@@ -180,21 +209,24 @@ async def leave(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
-    # Check if voting is active
-    if vote_system.is_voting_active():
+    channel_id = ctx.channel.id
+
+    # Check if voting is active in this channel
+    if vote_system.is_voting_active(channel_id):
         await ctx.send(f"{ctx.author.mention}, you cannot leave the queue while voting is in progress!")
         return
 
-    # Check if captain selection is active
-    if captains_system.is_selection_active():
+    # Check if captain selection is active in this channel
+    if captains_system.is_selection_active(channel_id):
         await ctx.send(f"{ctx.author.mention}, you cannot leave the queue while team selection is in progress!")
         return
 
     player = ctx.author
-    response = queue_handler.remove_player(player)
+    response = queue_handler.remove_player(player, channel_id)
     await ctx.send(response)
 
 
@@ -207,15 +239,17 @@ async def status(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
-    response = queue_handler.get_queue_status()
+    channel_id = ctx.channel.id
+    response = queue_handler.get_queue_status(channel_id)
     await ctx.send(embed=response)
 
     # If queue is full but vote not started, start it
-    players = queue_handler.get_players_for_match()
-    if len(players) >= 6 and not vote_system.is_voting_active():
+    players = queue_handler.get_players_for_match(channel_id)
+    if len(players) >= 6 and channel_id in vote_system.vote_systems and not vote_system.is_voting_active(channel_id):
         await vote_system.start_vote(ctx.channel)
 
 

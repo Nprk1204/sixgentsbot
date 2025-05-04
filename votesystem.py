@@ -5,26 +5,18 @@ import uuid
 
 
 class VoteSystem:
-    def __init__(self, db, queue_handler, captains_system, match_system=None):
+    def __init__(self, db, queue_handler, match_system=None):
+        self.db = db
         self.queue = queue_handler
-        self.captains_system = captains_system
-        self.match_system = match_system  # Store match_system as an instance variable
+        self.match_system = match_system
         self.bot = None
-        self.voting_active = False
-        self.vote_message = None
-        self.vote_channel = None
+
+        # Store voting state by channel
+        self.active_votes = {}  # Map of channel_id to voting state
 
         # Emojis for voting
         self.random_emoji = "🎲"
         self.captains_emoji = "👑"
-
-        # Voters tracking
-        self.voters = set()
-        self.user_votes = {}
-
-        # Vote counts
-        self.random_votes = 0
-        self.captains_votes = 0
 
     def set_match_system(self, match_system):
         """Set the match system reference"""
@@ -33,39 +25,44 @@ class VoteSystem:
     def set_bot(self, bot):
         """Set the bot instance"""
         self.bot = bot
-        self.captains_system.set_bot(bot)
 
-    def is_voting_active(self):
-        """Check if voting is active"""
-        return self.voting_active
+    def is_voting_active(self, channel_id=None):
+        """Check if voting is active in a specific channel or any channel"""
+        if channel_id:
+            return str(channel_id) in self.active_votes
+        else:
+            return len(self.active_votes) > 0
 
-    def cancel_voting(self):
-        """Cancel current voting"""
-        self.voting_active = False
-        self.vote_message = None
-        self.vote_channel = None
-        self.voters.clear()
-        self.user_votes = {}
-        self.random_votes = 0
-        self.captains_votes = 0
+    def cancel_voting(self, channel_id=None):
+        """Cancel current voting in a specific channel or all channels"""
+        if channel_id:
+            if str(channel_id) in self.active_votes:
+                del self.active_votes[str(channel_id)]
+        else:
+            self.active_votes.clear()
 
     async def start_vote(self, channel):
-        """Start a vote for team selection using reactions"""
-        # Make sure any existing vote is canceled first
-        if self.voting_active:
-            self.cancel_voting()
+        """Start a vote for team selection using reactions in a specific channel"""
+        channel_id = str(channel.id)
 
-        players = self.queue.get_players_for_match()
+        # Make sure any existing vote in this channel is canceled first
+        if channel_id in self.active_votes:
+            self.cancel_voting(channel_id)
+
+        players = self.queue.get_players_for_match(channel_id)
         if len(players) < 6:
             await channel.send("Not enough players to start voting!")
             return False
 
-        self.voting_active = True
-        self.vote_channel = channel
-        self.voters.clear()
-        self.user_votes = {}
-        self.random_votes = 0
-        self.captains_votes = 0
+        # Initialize voting state for this channel
+        self.active_votes[channel_id] = {
+            'message': None,
+            'channel': channel,
+            'voters': set(),
+            'user_votes': {},
+            'random_votes': 0,
+            'captains_votes': 0
+        }
 
         # Get mentions of queued players
         player_mentions = [p['mention'] for p in players]
@@ -83,57 +80,59 @@ class VoteSystem:
             color=0x3498db
         )
 
-        # Delete previous vote message if it exists
-        if self.vote_message:
-            try:
-                await self.vote_message.delete()
-            except:
-                pass  # Ignore if message is already deleted
-
-        self.vote_message = await channel.send(embed=embed)
+        # Send the vote message
+        vote_message = await channel.send(embed=embed)
+        self.active_votes[channel_id]['message'] = vote_message
 
         # Add reaction options
-        await self.vote_message.add_reaction(self.random_emoji)
-        await self.vote_message.add_reaction(self.captains_emoji)
+        await vote_message.add_reaction(self.random_emoji)
+        await vote_message.add_reaction(self.captains_emoji)
 
         # Start vote timeout
-        self.bot.loop.create_task(self.vote_timeout(60))
+        self.bot.loop.create_task(self.vote_timeout(channel_id, 60))
 
         return True  # Vote started successfully
 
-    async def vote_timeout(self, seconds):
-        """Handle vote timeout"""
+    async def vote_timeout(self, channel_id, seconds):
+        """Handle vote timeout for a specific channel"""
+        channel_id = str(channel_id)
         await asyncio.sleep(seconds)
 
-        if not self.voting_active or not self.vote_message:
+        # Check if voting is still active
+        if channel_id not in self.active_votes:
             return  # Vote was already completed or canceled
 
+        vote_state = self.active_votes[channel_id]
+
         # Check if voting is complete
-        if len(self.voters) >= 6:
+        if len(vote_state['voters']) >= 6:
             return  # Voting already complete
 
         # If not, announce timeout and create teams based on current votes
-        await self.vote_channel.send("⏱️ The vote has timed out! Creating teams based on current votes...")
+        await vote_state['channel'].send("⏱️ The vote has timed out! Creating teams based on current votes...")
 
-        # Make sure to call finalize_vote regardless of vote count
-        await self.finalize_vote(force=True)
+        # Finalize vote regardless of vote count
+        await self.finalize_vote(channel_id, force=True)
 
     async def handle_reaction(self, reaction, user):
         """Handle reaction to vote message"""
-        if not self.voting_active or self.vote_message is None:
-            return
-
         # Ignore bot reactions
         if user.bot:
             return
 
-        # Check if reaction is on vote message
-        if reaction.message.id != self.vote_message.id:
+        # Find which channel this reaction belongs to
+        message_id = reaction.message.id
+        channel_id = str(reaction.message.channel.id)
+
+        # Check if this is a vote message in any active votes
+        if channel_id not in self.active_votes or self.active_votes[channel_id]['message'].id != message_id:
             return
+
+        vote_state = self.active_votes[channel_id]
 
         # Check if user is in queue
         player_id = str(user.id)
-        if not self.queue.is_player_in_queue(player_id):
+        if not self.queue.is_player_in_queue(player_id, channel_id):
             return
 
         # Check if reaction is valid
@@ -142,33 +141,36 @@ class VoteSystem:
             return
 
         # Add user to voters if not already tracked
-        if user.id not in self.voters:
-            self.voters.add(user.id)
+        if user.id not in vote_state['voters']:
+            vote_state['voters'].add(user.id)
 
         # Update vote counts
-        old_vote = self.user_votes.get(user.id)
+        old_vote = vote_state['user_votes'].get(user.id)
         if old_vote:
             # Remove old vote count
             if old_vote == self.random_emoji:
-                self.random_votes -= 1
+                vote_state['random_votes'] -= 1
             else:
-                self.captains_votes -= 1
+                vote_state['captains_votes'] -= 1
 
         # Update user's vote
-        self.user_votes[user.id] = emoji
+        vote_state['user_votes'][user.id] = emoji
 
         # Add new vote count
         if emoji == self.random_emoji:
-            self.random_votes += 1
+            vote_state['random_votes'] += 1
         else:
-            self.captains_votes += 1
+            vote_state['captains_votes'] += 1
 
         # Update vote message
-        await self.update_vote_message()
+        await self.update_vote_message(channel_id)
 
         # Check if all 6 players have voted
-        if len(self.voters) >= 6:
-            await self.finalize_vote()
+        if len(vote_state['voters']) >= 6:
+            await self.finalize_vote(channel_id)
+
+    # Continue with the rest of the VoteSystem methods (update_vote_message, finalize_vote)
+    # making sure to adapt them to work with channel-specific voting state
 
     async def update_vote_message(self):
         """Update the vote message with current counts"""

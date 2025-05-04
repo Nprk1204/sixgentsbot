@@ -7,16 +7,11 @@ import uuid
 class CaptainsSystem:
     def __init__(self, db, queue_handler, match_system=None):
         self.queue = queue_handler
-        self.match_system = match_system  # Store match_system as an instance variable
-        self.selection_active = False
-        self.captain1 = None
-        self.captain2 = None
-        self.remaining_players = []
-        self.captain1_team = []
-        self.captain2_team = []
-        self.match_players = []
-        self.announcement_channel = None
+        self.match_system = match_system
         self.bot = None
+
+        # Track active selections by channel
+        self.active_selections = {}  # Map of channel_id to selection state
 
     def set_match_system(self, match_system):
         """Set the match system reference"""
@@ -26,44 +21,47 @@ class CaptainsSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def is_selection_active(self):
-        """Check if captain selection is active"""
-        return self.selection_active
+    def is_selection_active(self, channel_id=None):
+        """Check if captain selection is active in a specific channel or any channel"""
+        if channel_id:
+            return str(channel_id) in self.active_selections
+        else:
+            return len(self.active_selections) > 0
 
-    def cancel_selection(self):
-        """Cancel the current selection process"""
-        self.selection_active = False
-        self.captain1 = None
-        self.captain2 = None
-        self.remaining_players = []
-        self.captain1_team = []
-        self.captain2_team = []
-        self.match_players = []
-        self.announcement_channel = None
+    def cancel_selection(self, channel_id=None):
+        """Cancel the current selection process for a specific channel or all channels"""
+        if channel_id:
+            if str(channel_id) in self.active_selections:
+                del self.active_selections[str(channel_id)]
+        else:
+            self.active_selections.clear()
 
-    def start_captains_selection(self, players):
-        """Start the captains selection process"""
+    def start_captains_selection(self, players, channel_id):
+        """Start the captains selection process for a specific channel"""
+        channel_id = str(channel_id)
+
         if len(players) < 6:
             return "Not enough players to start captain selection!"
 
         # Choose two random players as captains
         random.shuffle(players)
-        self.captain1 = players[0]
-        self.captain2 = players[1]
-        self.remaining_players = players[2:]
+        captain1 = players[0]
+        captain2 = players[1]
+        remaining_players = players[2:]
 
-        # Set up captain teams
-        self.captain1_team = [self.captain1]
-        self.captain2_team = [self.captain2]
-
-        # Store all players for later cleanup
-        self.match_players = players
+        # Initialize selection state for this channel
+        self.active_selections[channel_id] = {
+            'captain1': captain1,
+            'captain2': captain2,
+            'remaining_players': remaining_players,
+            'captain1_team': [captain1],
+            'captain2_team': [captain2],
+            'match_players': players,
+            'announcement_channel': None
+        }
 
         # Format remaining players for display
-        remaining_mentions = [p['mention'] for p in self.remaining_players]
-
-        # Set captains selection active
-        self.selection_active = True
+        remaining_mentions = [p['mention'] for p in remaining_players]
 
         # Create an embed instead of plain text
         embed = discord.Embed(
@@ -71,12 +69,15 @@ class CaptainsSystem:
             color=0xf1c40f
         )
 
-        embed.add_field(name="Captain 1", value=self.captain1['mention'], inline=True)
-        embed.add_field(name="Captain 2", value=self.captain2['mention'], inline=True)
+        embed.add_field(name="Captain 1", value=captain1['mention'], inline=True)
+        embed.add_field(name="Captain 2", value=captain2['mention'], inline=True)
         embed.add_field(name="Available Players", value=", ".join(remaining_mentions), inline=False)
         embed.set_footer(text="Captains will be contacted via DM to make their selections.")
 
-        return embed  # Return the embed
+        return embed
+
+    # Continue with the rest of the CaptainsSystem methods (execute_captain_selection, etc.)
+    # making sure to adapt them to work with channel-specific selection state
 
     async def execute_captain_selection(self, channel):
         """Execute the captain selection process via DMs"""
