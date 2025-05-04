@@ -270,20 +270,27 @@ async def leave(ctx):
     player_mention = ctx.author.mention
 
     # DEBUG - Before leaving
-    print(f"DEBUG - LEAVE ATTEMPT: {ctx.author.name} trying to leave queue")
-    existing_entry = queue_handler.queue_collection.find_one({"id": player_id})
-    if existing_entry:
-        print(f"EXISTING QUEUE ENTRY TO REMOVE: {existing_entry}")
+    print(f"DEBUG - LEAVE ATTEMPT: {ctx.author.name} trying to leave queue in channel {channel_id}")
 
-    # First try to find if the player is in any queue
-    existing_queue = queue_handler.queue_collection.find_one({"id": player_id})
+    # Find if the player is in THIS specific channel's queue
+    existing_queue = queue_handler.queue_collection.find_one({"id": player_id, "channel_id": channel_id})
 
     if not existing_queue:
-        await ctx.send(f"{player_mention} was not in any queue!")
+        # Check if they're in any other channel's queue
+        other_queue = queue_handler.queue_collection.find_one({"id": player_id})
+        if other_queue:
+            other_channel_id = other_queue.get("channel_id")
+            if other_channel_id and other_channel_id.isdigit():
+                await ctx.send(
+                    f"{player_mention} is not in this channel's queue. You are in <#{other_channel_id}>'s queue.")
+            else:
+                await ctx.send(f"{player_mention} is in another channel's queue, not this one.")
+        else:
+            await ctx.send(f"{player_mention} is not in any queue!")
         return
 
-    # Delete the player from the queue collection
-    result = queue_handler.queue_collection.delete_one({"id": player_id})
+    # Delete the player from THIS channel's queue
+    result = queue_handler.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
 
     # Check if voting is active in this channel
     if vote_system.is_voting_active(channel_id):
