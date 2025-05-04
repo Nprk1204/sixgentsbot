@@ -227,23 +227,33 @@ class MatchSystem:
             else:
                 new_role = rank_c_role
 
-            # Remove all existing rank roles
-            roles_to_remove = [role for role in member.roles if role in [rank_a_role, rank_b_role, rank_c_role]]
-            if roles_to_remove:
-                await member.remove_roles(*roles_to_remove, reason="MMR rank update")
+            # Check current roles
+            current_rank_role = None
+            for role in member.roles:
+                if role in [rank_a_role, rank_b_role, rank_c_role]:
+                    current_rank_role = role
+                    break
 
-            # Add the new role
-            await member.add_role(new_role, reason=f"MMR update: {new_mmr}")
+            # If role hasn't changed, do nothing
+            if current_rank_role == new_role:
+                return
+
+            # Remove current rank role if they have one
+            if current_rank_role:
+                await member.remove_roles(current_rank_role, reason="MMR rank update")
+
+            # Add the new role - Fixed: using "add_roles" (plural) instead of "add_role"
+            await member.add_roles(new_role, reason=f"MMR update: {new_mmr}")
 
             # Log the role change
-            old_role_names = [role.name for role in roles_to_remove]
-            if old_role_names:
-                print(f"Updated roles for {member.display_name}: {', '.join(old_role_names)} -> {new_role.name}")
-            else:
-                print(f"Assigned {new_role.name} to {member.display_name}")
+            print(
+                f"Updated roles for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
 
             # Announce the rank change if it's a promotion
-            if roles_to_remove and roles_to_remove[0] != new_role:
+            if not current_rank_role or (
+                    (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
+                    (current_rank_role == rank_b_role and new_role == rank_a_role)
+            ):
                 await ctx.send(f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!")
 
         except Exception as e:
