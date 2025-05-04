@@ -90,6 +90,7 @@ try:
     db = client['sixgents_db']
     players_collection = db['players']
     matches_collection = db['matches']
+    ranks_collection = db['ranks']
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
@@ -122,9 +123,10 @@ except Exception as e:
             return None
 
 
-    db = {'players': FallbackDB(), 'matches': FallbackDB()}
+    db = {'players': FallbackDB(), 'matches': FallbackDB(), 'ranks': FallbackDB()}
     players_collection = db['players']
     matches_collection = db['matches']
+    ranks_collection = db['ranks']
 
 
 # Routes
@@ -467,6 +469,39 @@ def get_mmr_from_rank(rank):
         return 1000  # Default MMR for Diamond and below
 
 
+def store_rank_data(discord_username, game_username, platform, rank_data):
+    """Store rank check data in the database"""
+    try:
+        # Create rank document
+        rank_document = {
+            "discord_username": discord_username,
+            "game_username": game_username,
+            "platform": platform,
+            "rank": rank_data.get("rank"),
+            "tier": rank_data.get("tier"),
+            "mmr": rank_data.get("mmr"),
+            "timestamp": datetime.datetime.utcnow()
+        }
+
+        # Check if this user already has a rank record
+        existing_rank = ranks_collection.find_one({"discord_username": discord_username})
+
+        if existing_rank:
+            # Update existing record
+            ranks_collection.update_one(
+                {"discord_username": discord_username},
+                {"$set": rank_document}
+            )
+            print(f"Updated rank record for {discord_username}")
+        else:
+            # Insert new record
+            ranks_collection.insert_one(rank_document)
+            print(f"Created new rank record for {discord_username}")
+
+    except Exception as e:
+        print(f"Error storing rank data: {str(e)}")
+
+
 def assign_discord_role(username, role_name):
     """Assign a Discord role to a user by username"""
     print("\n=== DISCORD ROLE ASSIGNMENT DEBUG ===")
@@ -631,9 +666,13 @@ def check_rank():
         print("WARNING: No API key provided, using varied mock data")
         mock_data = get_mock_rank_data(username, platform)
 
-        # If Discord username was provided, attempt role assignment
+        # If Discord username was provided, attempt role assignment and store rank data
         if discord_username:
             tier = mock_data.get("tier")
+
+            # Store rank data in database - add this line
+            store_rank_data(discord_username, username, platform, mock_data)
+
             role_result = assign_discord_role(discord_username, tier)
             mock_data["role_assignment"] = role_result
 
@@ -643,14 +682,45 @@ def check_rank():
     rank_data = get_cached_rank(platform, username)
     print(f"Rank data returned: {rank_data}")
 
-    # If Discord username was provided, attempt to assign role
+    # If Discord username was provided, attempt to assign role and store rank data
     if discord_username and rank_data.get("success", False):
         tier = rank_data.get("tier")
+
+        # Store rank data in database - add this line
+        store_rank_data(discord_username, username, platform, rank_data)
+
         role_result = assign_discord_role(discord_username, tier)
         rank_data["role_assignment"] = role_result
         print(f"Role assignment result: {role_result}")
 
     return jsonify(rank_data)
+
+
+@app.route('/api/user-rank/<discord_username>')
+def get_user_rank(discord_username):
+    """Get stored rank data for a user"""
+    try:
+        # Find rank record
+        rank_data = ranks_collection.find_one({"discord_username": discord_username}, {"_id": 0})
+
+        if not rank_data:
+            return jsonify({"success": False, "message": "No rank data found for this user"}), 404
+
+        # Format timestamp for output
+        if "timestamp" in rank_data:
+            rank_data["checked_at"] = rank_data["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            del rank_data["timestamp"]
+
+        return jsonify({
+            "success": True,
+            "rank_data": rank_data
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving rank data: {str(e)}"
+        }), 500
 
 
 def get_mock_rank_data(username, platform):
@@ -698,6 +768,57 @@ def get_mock_rank_data(username, platform):
         "timestamp": time.time()
     }
 
+
+@app.route('/api/reset-leaderboard', methods=['POST'])
+def reset_leaderboard():
+    """Reset leaderboard data including ranks"""
+    # Check for authorization (you might want to add an admin password or token)
+    auth_token = request.headers.get('Authorization')
+    if not auth_token or auth_token != os.getenv('ADMIN_TOKEN', 'admin-secret-token'):
+        return jsonify({"success": False, "message": "Unauthorized"}), 401
+
+    try:
+        # Get current counts for reporting
+        player_count = players_collection.count_documents({})
+        match_count = matches_collection.count_documents({})
+        rank_count = ranks_collection.count_documents({})
+
+        # Create backup collections with timestamp
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+
+        # Backup players
+        if player_count > 0:
+            db[f'players_backup_{timestamp}'].insert_many(players_collection.find())
+
+        # Backup matches
+        if match_count > 0:
+            db[f'matches_backup_{timestamp}'].insert_many(matches_collection.find())
+
+        # Backup ranks
+        if rank_count > 0:
+            db[f'ranks_backup_{timestamp}'].insert_many(ranks_collection.find())
+
+        # Clear collections
+        players_collection.delete_many({})
+        matches_collection.delete_many({})
+        ranks_collection.delete_many({})
+
+        return jsonify({
+            "success": True,
+            "message": "Leaderboard data reset successfully",
+            "data": {
+                "players_removed": player_count,
+                "matches_removed": match_count,
+                "ranks_removed": rank_count,
+                "backup_timestamp": timestamp
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error resetting leaderboard: {str(e)}"
+        }), 500
 
 @app.errorhandler(404)
 def page_not_found(e):
