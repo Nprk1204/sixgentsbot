@@ -806,8 +806,8 @@ async def clearqueue(ctx):
         return
 
     # Get current players in queue
-    players = queue_handler.get_players_for_match()
-    count = len(players)
+    channel_id = str(ctx.channel.id)
+    players = queue_handler.get_players_for_match(channel_id)
 
     # Clear the queue collection
     queue_handler.queue.delete_many({})
@@ -1046,8 +1046,8 @@ async def forcestart(ctx):
         captains_system.cancel_selection()
 
     # Get current players in queue
-    players = queue_handler.get_players_for_match()
-    current_count = len(players)
+    channel_id = str(ctx.channel.id)
+    players = queue_handler.get_players_for_match(channel_id)
 
     if current_count == 0:
         await ctx.send("Can't force start: Queue is empty!")
@@ -1095,8 +1095,8 @@ async def forcestop(ctx):
         return
 
     # Get current players in queue
-    players = queue_handler.get_players_for_match()
-    count = len(players)
+    channel_id = str(ctx.channel.id)
+    players = queue_handler.get_players_for_match(channel_id)
 
     # Cancel any active votes
     vote_active = vote_system.is_voting_active()
