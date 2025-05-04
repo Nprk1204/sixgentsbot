@@ -533,7 +533,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
     if confirmation is None or confirmation.lower() != "confirm":
         embed = discord.Embed(
             title="⚠️ Reset Leaderboard Confirmation",
-            description="This will reset MMR, stats, rank data, and match history for ALL players. This action cannot be undone!",
+            description="This will reset MMR, stats, rank data, match history and **remove all rank roles**. This action cannot be undone!",
             color=0xff9900
         )
         embed.add_field(
@@ -552,11 +552,6 @@ async def resetleaderboard(ctx, confirmation: str = None):
 
     total_documents = player_count + match_count + rank_count
 
-    if total_documents == 0:
-        await ctx.send("All collections are already empty!")
-        return
-
-    # If we get here, at least one collection has data to reset
     try:
         # Create backup collections with timestamp
         timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -596,10 +591,9 @@ async def resetleaderboard(ctx, confirmation: str = None):
             ranks_collection.delete_many({})
             backed_up.append(f"Ranks ({rank_count})")
 
-        # Also call the web API to reset the leaderboard and record the reset
-        import requests
+        # Call the web API to reset the leaderboard
+        web_reset = "⚠️ Web reset not attempted"
         try:
-            # Replace with your actual leaderboard app URL and admin token
             webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
             admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
 
@@ -618,11 +612,14 @@ async def resetleaderboard(ctx, confirmation: str = None):
                                      json=data)
 
             if response.status_code == 200:
-                web_reset = "✅ Web leaderboard also reset successfully."
+                web_reset = "✅ Web leaderboard reset successfully."
             else:
-                web_reset = f"❌ Failed to reset web leaderboard (Status: {response.status_code}). Please check the logs."
+                web_reset = f"❌ Failed to reset web leaderboard (Status: {response.status_code})."
         except Exception as e:
             web_reset = f"❌ Error connecting to web leaderboard: {str(e)}"
+
+        # Remove rank roles from all members
+        role_reset = await remove_all_rank_roles(ctx.guild)
 
         # Record the reset event locally
         resets_collection = db['resets']
@@ -637,7 +634,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
         # Send confirmation
         embed = discord.Embed(
             title="✅ Leaderboard Reset Complete",
-            description=f"Reset {total_documents} documents across {len(backed_up)} collections.",
+            description=f"Reset {total_documents} documents across {len(backed_up) if backed_up else 0} collections.",
             color=0x00ff00
         )
 
@@ -660,12 +657,54 @@ async def resetleaderboard(ctx, confirmation: str = None):
             inline=False
         )
 
+        embed.add_field(
+            name="Discord Roles",
+            value=role_reset,
+            inline=False
+        )
+
         embed.set_footer(text=f"Reset by {ctx.author.display_name}")
 
         await ctx.send(embed=embed)
 
     except Exception as e:
         await ctx.send(f"Error resetting leaderboard: {str(e)}")
+
+
+# Add this new helper function to handle role removal
+async def remove_all_rank_roles(guild):
+    """Remove all rank roles from members"""
+    try:
+        # Get the rank roles by name
+        rank_role_names = ["Rank A", "Rank B", "Rank C"]
+        rank_roles = []
+
+        for role_name in rank_role_names:
+            role = discord.utils.get(guild.roles, name=role_name)
+            if role:
+                rank_roles.append(role)
+
+        if not rank_roles:
+            return "⚠️ No rank roles found in server"
+
+        # Count how many members had roles removed
+        member_count = 0
+        role_count = 0
+
+        # Remove roles from all members
+        for member in guild.members:
+            member_updated = False
+            for role in rank_roles:
+                if role in member.roles:
+                    await member.remove_roles(role)
+                    role_count += 1
+                    member_updated = True
+            if member_updated:
+                member_count += 1
+
+        return f"✅ Removed {role_count} rank roles from {member_count} members"
+    except Exception as e:
+        return f"❌ Error removing roles: {str(e)}"
 
 
 @bot.command()

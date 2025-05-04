@@ -201,23 +201,26 @@
             });
         }
 
+
         // Function to check if leaderboard has been reset
         function checkForLeaderboardReset() {
             fetch('/api/reset-timestamp')
                 .then(response => response.json())
                 .then(data => {
+                    console.log('Reset check response:', data);
+
                     if (data.success && data.last_reset) {
-                        console.log('Checking for leaderboard reset...');
+                        console.log('Server reports last reset at:', data.last_reset);
 
-                        // Get stored reset timestamp
-                        const lastCheckedReset = localStorage.getItem('lastCheckedReset');
+                        // Force clear localStorage data regardless of previous checks
+                        console.log('Clearing rank data due to server reset...');
+                        localStorage.removeItem('rankCheckData');
+                        localStorage.setItem('lastCheckedReset', data.last_reset);
 
-                        // If we have a reset that's newer than our last check, clear localStorage data
-                        if (!lastCheckedReset || new Date(data.last_reset) > new Date(lastCheckedReset)) {
-                            console.log('Leaderboard has been reset. Clearing rank data...');
-                            localStorage.removeItem('rankCheckData');
-                            localStorage.setItem('lastCheckedReset', data.last_reset);
-                        }
+                        // Reload the page to ensure a fresh state
+                        window.location.reload();
+                    } else {
+                        console.log('No reset timestamp found or reset check failed');
                     }
                 })
                 .catch(error => {
