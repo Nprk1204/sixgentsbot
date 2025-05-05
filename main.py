@@ -618,22 +618,22 @@ async def report(ctx, match_id: str, result: str):
         try:
             member = await ctx.guild.fetch_member(int(player["id"]))
             name = member.display_name if member else player['name']
-            # Bold the names and add some color with emoji
-            winning_members.append(f"**{name}** {winning_team_mmr_changes[i]}")
+            # Format with MMR change on the next line
+            winning_members.append(f"**{name}**\n{winning_team_mmr_changes[i]}")
         except:
-            winning_members.append(f"**{player['name']}** {winning_team_mmr_changes[i]}")
+            winning_members.append(f"**{player['name']}**\n{winning_team_mmr_changes[i]}")
 
     losing_members = []
     for i, player in enumerate(losing_team):
         try:
             member = await ctx.guild.fetch_member(int(player["id"]))
             name = member.display_name if member else player['name']
-            # Bold the names and add some color with emoji
-            losing_members.append(f"**{name}** {losing_team_mmr_changes[i]}")
+            # Format with MMR change on the next line
+            losing_members.append(f"**{name}**\n{losing_team_mmr_changes[i]}")
         except:
-            losing_members.append(f"**{player['name']}** {losing_team_mmr_changes[i]}")
+            losing_members.append(f"**{player['name']}**\n{losing_team_mmr_changes[i]}")
 
-    # Create an enhanced embed for results
+    # Create the embed with updated formatting
     embed = discord.Embed(
         title="Match Results",
         description=f"Match completed",
@@ -646,14 +646,14 @@ async def report(ctx, match_id: str, result: str):
     # Winners with trophy emoji
     embed.add_field(
         name="🏆 Winners",
-        value=", ".join(winning_members),
+        value="\n\n".join(winning_members),  # Double newline for better spacing
         inline=False
     )
 
     # Losers
     embed.add_field(
         name="😔 Losers",
-        value=", ".join(losing_members),
+        value="\n\n".join(losing_members),  # Double newline for better spacing
         inline=False
     )
 
@@ -666,8 +666,6 @@ async def report(ctx, match_id: str, result: str):
 
     # Footer with reporter info
     embed.set_footer(text=f"Reported by {ctx.author.display_name}")
-
-    await ctx.send(embed=embed)
 
 
 @bot.command()
