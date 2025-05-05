@@ -144,7 +144,7 @@ class MatchSystem:
                 # Get updated MMR from database
                 player_data = self.players.find_one({"id": player_id})
                 if player_data:
-                    mmr = player_data.get("mmr", 1000)
+                    mmr = player_data.get("mmr", 600)
                     # Update Discord role based on new MMR
                     await self.update_discord_role(ctx, player_id, mmr)
 
@@ -158,7 +158,7 @@ class MatchSystem:
                 # Get updated MMR from database
                 player_data = self.players.find_one({"id": player_id})
                 if player_data:
-                    mmr = player_data.get("mmr", 1000)
+                    mmr = player_data.get("mmr", 600)
                     # Update Discord role based on new MMR
                     await self.update_discord_role(ctx, player_id, mmr)
 
@@ -178,7 +178,7 @@ class MatchSystem:
                 # Get updated MMR from database
                 player_data = self.players.find_one({"id": player_id})
                 if player_data:
-                    mmr = player_data.get("mmr", 1000)
+                    mmr = player_data.get("mmr", 600)
                     # Update Discord role if the method exists
                     if hasattr(self, 'update_discord_role'):
                         await self.update_discord_role(ctx, player_id, mmr)
@@ -193,7 +193,7 @@ class MatchSystem:
                 # Get updated MMR from database
                 player_data = self.players.find_one({"id": player_id})
                 if player_data:
-                    mmr = player_data.get("mmr", 1000)
+                    mmr = player_data.get("mmr", 600)
                     # Update Discord role if the method exists
                     if hasattr(self, 'update_discord_role'):
                         await self.update_discord_role(ctx, player_id, mmr)
@@ -204,8 +204,8 @@ class MatchSystem:
         """Update a player's Discord role based on their new MMR"""
         try:
             # Define MMR thresholds for ranks
-            RANK_A_THRESHOLD = 1500
-            RANK_B_THRESHOLD = 1300
+            RANK_A_THRESHOLD = 1600
+            RANK_B_THRESHOLD = 1100
 
             # Get the player's Discord member object
             member = await ctx.guild.fetch_member(int(player_id))
