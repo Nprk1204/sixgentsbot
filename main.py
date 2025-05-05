@@ -540,6 +540,7 @@ async def adjustmmr(ctx, member_input=None, amount: int = 0):
 
 
 # Match commands
+@bot.command()
 async def report(ctx, match_id: str, result: str):
     """Report match results (format: /report <match_id> <win/loss>)"""
     # Check if this is a duplicate command
