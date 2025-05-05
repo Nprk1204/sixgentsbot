@@ -757,6 +757,33 @@ a:hover {
     background: linear-gradient(135deg, #32CD32 0%, #006400 100%);
 }
 
+.rank-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    color: var(--text);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.rank-badge.rank-a {
+    background: linear-gradient(135deg, #FF4500 0%, #8B0000 100%);
+    color: white;
+}
+
+.rank-badge.rank-b {
+    background: linear-gradient(135deg, #1E90FF 0%, #0000CD 100%);
+    color: white;
+}
+
+.rank-badge.rank-c {
+    background: linear-gradient(135deg, #32CD32 0%, #006400 100%);
+    color: white;
+}
+
 /* Original Rocket League ranks */
 .rank-card {
     border-radius: 10px;

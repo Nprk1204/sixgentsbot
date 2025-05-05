@@ -35,6 +35,7 @@
     <div class="leaderboard">
         <div class="leaderboard-header row">
             <div class="col-1">#</div>
+            <div class="col-1">Rank</div>
             <div class="col-md-3 col-4">Player</div>
             <div class="col-md-2 col-3">MMR</div>
             <div class="col-md-2 col-4">Win Rate</div>
@@ -183,11 +184,27 @@
                 medalClass = 'medal-3';
             }
 
+            // Determine rank based on MMR
+            let rankDisplay = '';
+            let rankClass = '';
+
+            if (player.mmr >= 1500) {
+                rankDisplay = 'A';
+                rankClass = 'rank-a';
+            } else if (player.mmr >= 1300) {
+                rankDisplay = 'B';
+                rankClass = 'rank-b';
+            } else {
+                rankDisplay = 'C';
+                rankClass = 'rank-c';
+            }
+
             const playerRow = document.createElement('div');
             playerRow.className = 'player-row row align-items-center';
             playerRow.dataset.playerId = player.id;
             playerRow.innerHTML = `
                 <div class="col-1"><div class="rank ${medalClass}">${rank}</div></div>
+                <div class="col-1"><div class="rank-badge ${rankClass}">${rankDisplay}</div></div>
                 <div class="col-md-3 col-4">${player.name}</div>
                 <div class="col-md-2 col-3"><span class="mmr">${player.mmr}</span></div>
                 <div class="col-md-2 col-4"><span class="win-rate">${player.win_rate}%</span></div>
