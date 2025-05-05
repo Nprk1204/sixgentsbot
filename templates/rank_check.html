@@ -443,36 +443,49 @@
         }
 
         function displayRankResults(data, discordUsername) {
-            // Create appropriate rank card based on tier
-            let rankCard = createRankCardForTier(data.tier);
-
-            // Create verification result display
+            // Update verification result section
             let resultHtml = `
                 <div class="alert alert-success mb-4">
                     <i class="fas fa-check-circle me-2"></i> Rank verification successful!
                 </div>
 
                 <p>Your rank has been verified as ${data.rank}.</p>
-                <p>Please check the modal for details or <a href="#" id="showRankDetails">click here</a> to view details.</p>
+                <p>Please check the modal for details or <a href="#" id="showStoredRankDetails">click here</a> to view details.</p>
 
                 ${rankCard}
             `;
 
             document.getElementById('verificationResult').innerHTML = resultHtml;
 
-            // Add event listener to show details button
-            document.getElementById('showRankDetails').addEventListener('click', function(e) {
+            // Add event listener to show details
+            document.getElementById('showStoredRankDetails').addEventListener('click', function(e) {
                 e.preventDefault();
                 showStoredRankDetails(data);
             });
 
-            // Create and display modal content
+            // Update modal content
             let modalContent = createRankModalContent(data);
             document.getElementById('resultModalContent').innerHTML = modalContent;
 
-            // Show the modal
+            // Show modal
             if (resultModal) {
                 resultModal.show();
+            }
+
+            // IMPORTANT: Update the button immediately
+            if (checkRankButton) {
+                checkRankButton.disabled = true;
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
+                checkRankButton.classList.remove('btn-primary');
+                checkRankButton.classList.add('btn-success');
+
+                // Add a small note about refreshing if needed
+                const buttonContainer = checkRankButton.closest('.d-grid');
+                if (buttonContainer && !document.querySelector('.rank-verified-note')) {
+                    const noteElement = document.createElement('p');
+                    noteElement.className = 'text-muted small mt-2 text-center rank-verified-note';
+                    buttonContainer.appendChild(noteElement);
+                }
             }
         }
 
