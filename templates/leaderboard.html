@@ -36,11 +36,11 @@
         <div class="leaderboard-header row">
             <div class="col-1">#</div>
             <div class="col-1">Rank</div>
-            <div class="col-md-3 col-4">Player</div>
-            <div class="col-md-2 col-3">MMR</div>
-            <div class="col-md-2 col-4">Win Rate</div>
-            <div class="col-md-2 col-md-2 hide-on-mobile">W-L</div>
-            <div class="col-md-2 col-md-2 hide-on-mobile">Matches</div>
+            <div class="col-3">Player</div>
+            <div class="col-2">MMR</div>
+            <div class="col-2">Win Rate</div>
+            <div class="col-1">W-L</div>
+            <div class="col-2">Matches</div>
         </div>
 
         <div id="leaderboardContent">
@@ -205,17 +205,12 @@
             playerRow.innerHTML = `
                 <div class="col-1"><div class="rank ${medalClass}">${rank}</div></div>
                 <div class="col-1"><div class="rank-badge ${rankClass}">${rankDisplay}</div></div>
-                <div class="col-md-3 col-4">${player.name}</div>
-                <div class="col-md-2 col-3"><span class="mmr">${player.mmr}</span></div>
-                <div class="col-md-2 col-4"><span class="win-rate">${player.win_rate}%</span></div>
-                <div class="col-md-2 hide-on-mobile">${player.wins || 0}-${player.losses || 0}</div>
-                <div class="col-md-2 hide-on-mobile">${player.matches || 0}</div>
+                <div class="col-3">${player.name}</div>
+                <div class="col-2"><span class="mmr">${player.mmr}</span></div>
+                <div class="col-2"><span class="win-rate">${player.win_rate}%</span></div>
+                <div class="col-1">${player.wins || 0}-${player.losses || 0}</div>
+                <div class="col-2">${player.matches || 0}</div>
             `;
-
-            // Add click event to show player details
-            playerRow.addEventListener('click', function() {
-                showPlayerDetails(player.id);
-            });
 
             leaderboardContent.appendChild(playerRow);
         });
