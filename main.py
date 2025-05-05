@@ -563,20 +563,13 @@ async def report(ctx, match_id: str, result: str):
     # Get match result
     match_result, error = await match_system.report_match_by_id(match_id, reporter_id, result, ctx)
 
-    # For "already reported" errors, we should still show the match data
     if error:
         await ctx.send(f"Error: {error}")
+        return
 
-        # For some errors we want to abort completely
-        if "No match found" in error or "Failed to update match" in error:
-            return
-
-        # For "already reported" errors, we want to try to display the match data
-        # Get the match data directly since report_match_by_id didn't return it
-        match_result = match_system.matches.find_one({"match_id": match_id})
-
-        if not match_result:
-            return  # If we still can't get the match, give up
+    if not match_result:
+        await ctx.send("Failed to process match report.")
+        return
 
     # Determine winning team
     winner = match_result["winner"]
@@ -619,27 +612,6 @@ async def report(ctx, match_id: str, result: str):
         else:
             losing_team_mmr_changes.append("-??")
 
-    # Format player info for display
-    winning_members = []
-    for i, player in enumerate(winning_team):
-        try:
-            member = await ctx.guild.fetch_member(int(player["id"]))
-            name = member.display_name if member else player['name']
-            # Format with MMR change on the next line
-            winning_members.append(f"**{name}**\n{winning_team_mmr_changes[i]}")
-        except:
-            winning_members.append(f"**{player['name']}**\n{winning_team_mmr_changes[i]}")
-
-    losing_members = []
-    for i, player in enumerate(losing_team):
-        try:
-            member = await ctx.guild.fetch_member(int(player["id"]))
-            name = member.display_name if member else player['name']
-            # Format with MMR change on the next line
-            losing_members.append(f"**{name}**\n{losing_team_mmr_changes[i]}")
-        except:
-            losing_members.append(f"**{player['name']}**\n{losing_team_mmr_changes[i]}")
-
     # Create the embed with updated formatting
     embed = discord.Embed(
         title="Match Results",
@@ -650,19 +622,55 @@ async def report(ctx, match_id: str, result: str):
     # Match ID field
     embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
 
-    # Winners with trophy emoji
-    embed.add_field(
-        name="🏆 Winners",
-        value="\n\n".join(winning_members),  # Double newline for better spacing
-        inline=False
-    )
+    # Add Winners header
+    embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
 
-    # Losers
-    embed.add_field(
-        name="😔 Losers",
-        value="\n\n".join(losing_members),  # Double newline for better spacing
-        inline=False
-    )
+    # Create individual fields for each winning player
+    for i, player in enumerate(winning_team):
+        try:
+            member = await ctx.guild.fetch_member(int(player["id"]))
+            name = member.display_name if member else player['name']
+        except:
+            name = player["name"]
+
+        # Add a field for this player
+        embed.add_field(
+            name=f"**{name}**",
+            value=f"{winning_team_mmr_changes[i]}",
+            inline=True
+        )
+
+    # Spacer field if needed to ensure proper alignment (for 3-column layout)
+    if len(winning_team) % 3 == 1:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+    elif len(winning_team) % 3 == 2:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    # Add Losers header
+    embed.add_field(name="😔 Losers", value="\u200b", inline=False)
+
+    # Create individual fields for each losing player
+    for i, player in enumerate(losing_team):
+        try:
+            member = await ctx.guild.fetch_member(int(player["id"]))
+            name = member.display_name if member else player['name']
+        except:
+            name = player["name"]
+
+        # Add a field for this player
+        embed.add_field(
+            name=f"**{name}**",
+            value=f"{losing_team_mmr_changes[i]}",
+            inline=True
+        )
+
+    # Spacer field if needed to ensure proper alignment (for 3-column layout)
+    if len(losing_team) % 3 == 1:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+    elif len(losing_team) % 3 == 2:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
 
     # MMR System explanation
     embed.add_field(
