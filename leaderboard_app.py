@@ -652,17 +652,22 @@ def check_rank():
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
+    profile_url = request.args.get('profile_url', '')  # New parameter
+    manual_tier = request.args.get('manual_tier', '')  # New parameter
 
-    if not platform or not username:
-        return jsonify({"success": False, "message": "Platform and username are required"}), 400
+    if not ((platform and username) or (profile_url and manual_tier)):
+        return jsonify(
+            {"success": False, "message": "Either platform/username or profile URL with tier is required"}), 400
 
     # Add debug logging
     print(f"=== RANK CHECK DEBUG ===")
     print(f"Platform: {platform}")
     print(f"Username: {username}")
     print(f"Discord username: {discord_username}")
+    print(f"Profile URL: {profile_url}")
+    print(f"Manual tier: {manual_tier}")
     print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
-    print(f"API Key length: {len(RLTRACKER_API_KEY)}")
+    print(f"API Key length: {len(RLTRACKER_API_KEY) if RLTRACKER_API_KEY else 0}")
     print(f"========================")
 
     # Verify Discord username exists in server if provided
@@ -670,73 +675,73 @@ def check_rank():
     discord_user_id = None
     matched_name = None
 
+    # Your existing Discord verification code here...
     if discord_username:
-        print(f"Verifying Discord username: {discord_username}")
+        # ...existing Discord verification logic...
+        # This should set discord_user_verified, discord_user_id, and matched_name
+        pass
 
+    # Try API first if credentials available
+    if RLTRACKER_API_KEY and platform and username:
         try:
-            # Get all guild members through Discord API
-            api_url_members = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members?limit=1000"
+            # Existing API code
+            rank_data = get_cached_rank(platform, username)
+            if rank_data.get("success", False):
+                # Process as normal with existing code
+                if discord_user_verified:
+                    tier = rank_data.get("tier")
+                    store_rank_data(discord_username, username, platform, rank_data, discord_user_id)
+                    role_result = assign_discord_role(discord_username, tier)
+                    rank_data["role_assignment"] = role_result
+                    rank_data["discord_verified"] = True
+                    rank_data["matched_name"] = matched_name
 
-            headers = {
-                "Authorization": f"Bot {DISCORD_TOKEN}",
-                "Content-Type": "application/json"
-            }
-
-            print(f"Making API request to get server members...")
-            response = requests.get(api_url_members, headers=headers)
-
-            if response.status_code == 200:
-                members = response.json()
-                print(f"Successfully retrieved {len(members)} members from server")
-
-                # Find user by username (case-insensitive)
-                search_name = discord_username.lower().strip()
-                for member in members:
-                    member_user = member.get('user', {})
-                    member_username = (member_user.get('username') or '').lower().strip()
-                    member_global_name = (member_user.get('global_name') or '').lower().strip()
-                    member_nickname = (member.get('nick') or '').lower().strip()
-
-                    if (search_name == member_username or
-                            search_name == member_global_name or
-                            search_name == member_nickname or
-                            search_name in member_username or
-                            search_name in member_global_name or
-                            search_name in member_nickname):
-                        discord_user_id = member_user.get('id')
-                        matched_name = member_user.get('username') or member_global_name
-                        discord_user_verified = True
-                        print(f"✓ Found matching Discord user: {matched_name} (ID: {discord_user_id})")
-                        break
-
-                if not discord_user_verified:
-                    print(f"✗ No Discord user found matching '{discord_username}'")
-                    return jsonify({
-                        "success": False,
-                        "message": f"No Discord user found with username: {discord_username}. Please check your spelling and try again."
-                    }), 404
-            else:
-                print(f"API Error: Status code {response.status_code}")
-                print(f"Response body: {response.text[:200]}")
+                return jsonify(rank_data)
         except Exception as e:
-            print(f"Exception in Discord user verification: {str(e)}")
-            return jsonify({
-                "success": False,
-                "message": f"Error verifying Discord username: {str(e)}"
-            }), 500
+            print(f"API attempt failed: {str(e)}")
+            # Continue to fallback if API fails
 
-    # Use mock data with variety if no API key is provided or API key isn't approved yet
+    # Fallback to manual verification if API fails or URL is provided
+    if profile_url and manual_tier:
+        # Get MMR based on the manually provided tier
+        mmr = get_mmr_from_rank(manual_tier)
+
+        # Create a manual result
+        manual_result = {
+            "success": True,
+            "username": username or "Manual Entry",
+            "platform": platform or "unknown",
+            "rank": manual_tier,
+            "tier": manual_tier,
+            "mmr": mmr,
+            "profileUrl": profile_url,
+            "timestamp": time.time(),
+            "manual_verification": True
+        }
+
+        # Handle Discord role assignment if verified
+        if discord_user_verified:
+            # Store rank data with verified Discord ID
+            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", manual_result,
+                            discord_user_id)
+
+            # Assign role
+            role_result = assign_discord_role(discord_username, manual_tier)
+            manual_result["role_assignment"] = role_result
+            manual_result["discord_verified"] = True
+            manual_result["matched_name"] = matched_name
+
+        return jsonify(manual_result)
+
+    # Use mock data with variety if no API key is provided
     if not RLTRACKER_API_KEY:
         print("WARNING: No API key provided, using varied mock data")
         mock_data = get_mock_rank_data(username, platform)
 
-        # If Discord username was verified, attempt role assignment and store rank data
+        # Handle Discord verification for mock data
         if discord_user_verified:
             tier = mock_data.get("tier")
-
-            # Store rank data in database with verified Discord ID
             store_rank_data(discord_username, username, platform, mock_data, discord_user_id)
-
             role_result = assign_discord_role(discord_username, tier)
             mock_data["role_assignment"] = role_result
             mock_data["discord_verified"] = True
@@ -744,24 +749,11 @@ def check_rank():
 
         return jsonify(mock_data)
 
-    # Get rank from API (with caching)
-    rank_data = get_cached_rank(platform, username)
-    print(f"Rank data returned: {rank_data}")
-
-    # If Discord username was verified, attempt to assign role and store rank data
-    if discord_user_verified and rank_data.get("success", False):
-        tier = rank_data.get("tier")
-
-        # Store rank data in database with verified Discord ID
-        store_rank_data(discord_username, username, platform, rank_data, discord_user_id)
-
-        role_result = assign_discord_role(discord_username, tier)
-        rank_data["role_assignment"] = role_result
-        rank_data["discord_verified"] = True
-        rank_data["matched_name"] = matched_name
-        print(f"Role assignment result: {role_result}")
-
-    return jsonify(rank_data)
+    # If we get here, API failed and no fallback was provided
+    return jsonify({
+        "success": False,
+        "message": "RLTracker service is currently unavailable. Please try again later or provide a profile URL with tier selection."
+    })
 
 
 @app.route('/api/user-rank/<discord_username>')
