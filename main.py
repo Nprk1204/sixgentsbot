@@ -224,25 +224,47 @@ async def join(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
-    # ADD DEBUG CODE HERE - Before joining
-    print(f"DEBUG - JOIN ATTEMPT: {ctx.author.name} trying to join channel {ctx.channel.id} ({ctx.channel.name})")
-    existing_entry = queue_handler.queue_collection.find_one({"id": str(ctx.author.id)})
-    if existing_entry:
-        print(f"EXISTING QUEUE ENTRY: {existing_entry}")
-
+    # Check if the player has completed rank verification
     player = ctx.author
+    player_id = str(player.id)
+
+    # Check if player has a rank entry in the ranks collection
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+    if not rank_record:
+        # Player hasn't completed rank verification
+        embed = discord.Embed(
+            title="Rank Verification Required",
+            description="You need to verify your Rocket League rank before joining the queue.",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="How to Verify",
+            value="Visit the rank check page on the website to complete verification.",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+        return
+
+    # Check if the player has the right role for this channel
+    channel_name = ctx.channel.name.lower()
+    if channel_name in ["rank-a", "rank-b", "rank-c"]:
+        required_role_name = f"Rank {channel_name[-1].upper()}"
+        required_role = discord.utils.get(ctx.guild.roles, name=required_role_name)
+
+        if required_role and required_role not in player.roles:
+            await ctx.send(
+                f"{player.mention}, you need the {required_role.name} role to join this queue. Please join the appropriate queue for your rank.")
+            return
+
+    # Continue with regular join process
     channel_id = ctx.channel.id
     response = queue_handler.add_player(player, channel_id)
     await ctx.send(response)
-
-    # ADD DEBUG CODE HERE - After joining
-    print("DEBUG - AFTER JOIN: Current queue state:")
-    all_queued = list(queue_handler.queue_collection.find())
-    for p in all_queued:
-        print(f"Player: {p.get('name')}, Channel: {p.get('channel_id')}")
 
     # Check if queue is full and start voting
     players = queue_handler.get_players_for_match(channel_id)
