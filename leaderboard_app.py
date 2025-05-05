@@ -833,27 +833,27 @@ def get_mock_rank_data(username, platform):
     if hash_value < 10:  # 10% chance
         rank = "Supersonic Legend I"
         tier = "Rank A"
-        mmr = 1500
+        mmr = 1600
     elif hash_value < 20:  # 10% chance
         rank = "Grand Champion III"
         tier = "Rank A"
-        mmr = 1500
+        mmr = 1600
     elif hash_value < 40:  # 20% chance
         rank = "Champion III"
         tier = "Rank B"
-        mmr = 1300
+        mmr = 1100
     elif hash_value < 60:  # 20% chance
         rank = "Champion I"
         tier = "Rank B"
-        mmr = 1300
+        mmr = 1100
     elif hash_value < 80:  # 20% chance
         rank = "Diamond III"
         tier = "Rank C"
-        mmr = 1000
+        mmr = 600
     else:  # 20% chance
         rank = "Platinum II"
         tier = "Rank C"
-        mmr = 1000
+        mmr = 600
 
     return {
         "success": True,
