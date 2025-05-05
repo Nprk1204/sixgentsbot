@@ -1136,6 +1136,244 @@ async def forcestop(ctx):
 
 
 @bot.command()
+async def sub(ctx, action: str = None, player1: discord.Member = None, player2: discord.Member = None):
+    """
+    Substitute players in an active match
+    Usage:
+    - /sub swap @player1 @player2 (swap players between teams)
+    - /sub in @player_in @player_out (sub a new player in for an existing player)
+    """
+    # Check if this is a duplicate command
+    if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
+        return
+
+    # Check if user has permission (match participant or admin)
+    is_admin = ctx.author.guild_permissions.administrator
+    channel_id = str(ctx.channel.id)
+
+    # Get the active match in this channel
+    active_match = match_system.get_active_match_by_channel(channel_id)
+
+    if not active_match:
+        await ctx.send("No active match found in this channel.")
+        return
+
+    # Check if the command user is in the match (or is an admin)
+    user_id = str(ctx.author.id)
+    team1_ids = [p["id"] for p in active_match["team1"]]
+    team2_ids = [p["id"] for p in active_match["team2"]]
+
+    is_participant = user_id in team1_ids or user_id in team2_ids
+
+    if not (is_participant or is_admin):
+        await ctx.send("You must be a participant in this match or an admin to use this command.")
+        return
+
+    # Check proper command usage
+    if not action or not player1:
+        await ctx.send("Invalid command usage. Examples:\n"
+                       "- `/sub swap @player1 @player2` (swap players between teams)\n"
+                       "- `/sub in @new_player @player_out` (sub in a new player)")
+        return
+
+    # Handle the "swap" action - swapping players between teams
+    if action.lower() == "swap":
+        if not player1 or not player2:
+            await ctx.send("You need to specify two players to swap.")
+            return
+
+        player1_id = str(player1.id)
+        player2_id = str(player2.id)
+
+        # Check if both players are in the match but on different teams
+        player1_in_team1 = player1_id in team1_ids
+        player1_in_team2 = player1_id in team2_ids
+        player2_in_team1 = player2_id in team1_ids
+        player2_in_team2 = player2_id in team2_ids
+
+        if not ((player1_in_team1 and player2_in_team2) or (player1_in_team2 and player2_in_team1)):
+            await ctx.send("Both players must be in the match and on different teams.")
+            return
+
+        # Execute the swap
+        await swap_players(ctx, active_match, player1, player2)
+
+    # Handle the "in" action - subbing a new player in
+    elif action.lower() == "in":
+        if not player1 or not player2:
+            await ctx.send("You need to specify both the incoming player and the player to replace.")
+            return
+
+        new_player_id = str(player1.id)
+        out_player_id = str(player2.id)
+
+        # Check if player_out is in the match
+        out_in_team1 = out_player_id in team1_ids
+        out_in_team2 = out_player_id in team2_ids
+
+        if not (out_in_team1 or out_in_team2):
+            await ctx.send(f"{player2.mention} is not in this match.")
+            return
+
+        # Check if new_player is already in the match
+        if new_player_id in team1_ids or new_player_id in team2_ids:
+            await ctx.send(f"{player1.mention} is already in this match.")
+            return
+
+        # Check if new player is eligible for this channel
+        channel_name = ctx.channel.name.lower()
+        if channel_name in ["rank-a", "rank-b", "rank-c"]:
+            # For rank-specific channels, check if the new player has the appropriate role
+            required_role = None
+            if channel_name == "rank-a":
+                required_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+            elif channel_name == "rank-b":
+                required_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+            elif channel_name == "rank-c":
+                required_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+
+            if required_role and required_role not in player1.roles:
+                await ctx.send(
+                    f"{player1.mention} doesn't have the {required_role.name} role required for this channel.")
+                return
+
+        # Execute the substitution
+        await sub_in_player(ctx, active_match, player1, player2)
+
+    else:
+        await ctx.send("Invalid action. Use 'swap' or 'in'.")
+
+
+async def swap_players(ctx, match, player1, player2):
+    """Swap two players between teams"""
+    player1_id = str(player1.id)
+    player2_id = str(player2.id)
+    match_id = match["match_id"]
+
+    # Get player indices
+    team1_ids = [p["id"] for p in match["team1"]]
+    team2_ids = [p["id"] for p in match["team2"]]
+
+    player1_in_team1 = player1_id in team1_ids
+    player1_index = team1_ids.index(player1_id) if player1_in_team1 else team2_ids.index(player1_id)
+    player2_in_team1 = player2_id in team1_ids
+    player2_index = team1_ids.index(player2_id) if player2_in_team1 else team2_ids.index(player2_id)
+
+    # Get player data
+    player1_data = match["team1"][player1_index] if player1_in_team1 else match["team2"][player1_index]
+    player2_data = match["team1"][player2_index] if player2_in_team1 else match["team2"][player2_index]
+
+    # Execute the swap in the database
+    if player1_in_team1 and not player2_in_team1:  # player1 in team1, player2 in team2
+        # Update team1 - replace player1 with player2
+        match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {f"team1.{player1_index}": player2_data}}
+        )
+        # Update team2 - replace player2 with player1
+        match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {f"team2.{player2_index}": player1_data}}
+        )
+    else:  # player1 in team2, player2 in team1
+        # Update team2 - replace player1 with player2
+        match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {f"team2.{player1_index}": player2_data}}
+        )
+        # Update team1 - replace player2 with player1
+        match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {f"team1.{player2_index}": player1_data}}
+        )
+
+    # Create embed to announce the swap
+    embed = discord.Embed(
+        title="Player Swap",
+        description=f"Players have been swapped between teams!",
+        color=0x3498db
+    )
+
+    embed.add_field(name="Swapped Players",
+                    value=f"{player1.mention} ⇄ {player2.mention}",
+                    inline=False)
+
+    # Get the updated match
+    updated_match = match_system.matches.find_one({"match_id": match_id})
+
+    # Format team mentions for display
+    team1_mentions = [player['mention'] for player in updated_match["team1"]]
+    team2_mentions = [player['mention'] for player in updated_match["team2"]]
+
+    embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
+    embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
+
+    await ctx.send(embed=embed)
+
+
+async def sub_in_player(ctx, match, new_player, out_player):
+    """Sub in a new player for an existing player"""
+    new_player_id = str(new_player.id)
+    out_player_id = str(out_player.id)
+    match_id = match["match_id"]
+
+    # Get player indices
+    team1_ids = [p["id"] for p in match["team1"]]
+    team2_ids = [p["id"] for p in match["team2"]]
+
+    out_in_team1 = out_player_id in team1_ids
+    out_index = team1_ids.index(out_player_id) if out_in_team1 else team2_ids.index(out_player_id)
+
+    # Create new player data
+    new_player_data = {
+        "id": new_player_id,
+        "name": new_player.display_name,
+        "mention": new_player.mention
+    }
+
+    # Execute the substitution in the database
+    if out_in_team1:  # player to replace is in team1
+        match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {f"team1.{out_index}": new_player_data}}
+        )
+    else:  # player to replace is in team2
+        match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {f"team2.{out_index}": new_player_data}}
+        )
+
+    # Create embed to announce the substitution
+    embed = discord.Embed(
+        title="Player Substitution",
+        description=f"A player has been substituted!",
+        color=0x3498db
+    )
+
+    embed.add_field(name="Substitution",
+                    value=f"{new_player.mention} IN ↔ {out_player.mention} OUT",
+                    inline=False)
+
+    # Get the updated match
+    updated_match = match_system.matches.find_one({"match_id": match_id})
+
+    # Format team mentions for display
+    team1_mentions = [player['mention'] for player in updated_match["team1"]]
+    team2_mentions = [player['mention'] for player in updated_match["team2"]]
+
+    embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
+    embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
 async def purgechat(ctx, amount_to_delete: int = 10):
     """Clear chat messages"""
     # Check if this is a duplicate command
