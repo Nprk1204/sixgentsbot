@@ -17,7 +17,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-k
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
-RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
+RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '8974589b-396c-4a8b-925f-af173094b353')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
 DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '1365506343015944222')  # Provide hardcoded fallback
 
