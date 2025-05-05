@@ -563,13 +563,20 @@ async def report(ctx, match_id: str, result: str):
     # Get match result
     match_result, error = await match_system.report_match_by_id(match_id, reporter_id, result, ctx)
 
+    # For "already reported" errors, we should still show the match data
     if error:
         await ctx.send(f"Error: {error}")
-        return
 
-    if not match_result:
-        await ctx.send("Failed to process match report.")
-        return
+        # For some errors we want to abort completely
+        if "No match found" in error or "Failed to update match" in error:
+            return
+
+        # For "already reported" errors, we want to try to display the match data
+        # Get the match data directly since report_match_by_id didn't return it
+        match_result = match_system.matches.find_one({"match_id": match_id})
+
+        if not match_result:
+            return  # If we still can't get the match, give up
 
     # Determine winning team
     winner = match_result["winner"]
@@ -666,6 +673,8 @@ async def report(ctx, match_id: str, result: str):
 
     # Footer with reporter info
     embed.set_footer(text=f"Reported by {ctx.author.display_name}")
+
+    await ctx.send(embed=embed)
 
 
 @bot.command()
