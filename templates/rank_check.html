@@ -347,10 +347,17 @@
             fetch(apiUrl)
                 .then(response => {
                     // Clear the timeout since we got a response
-                    clearTimeout(timeoutId);
+                    if (timeoutId) clearTimeout(timeoutId);
 
+                    // Check if the response is OK
                     if (!response.ok) {
-                        throw new Error(`HTTP error ${response.status}`);
+                        if (response.status === 404) {
+                            throw new Error("Player not found on this platform. Please check your ID and platform selection.");
+                        } else if (response.status === 429) {
+                            throw new Error("Too many requests. Please wait a moment and try again.");
+                        } else {
+                            throw new Error(`Server error (${response.status}). Please try again later.`);
+                        }
                     }
                     return response.json();
                 })
@@ -359,30 +366,26 @@
                     if (data.success) {
                         // Store the rank data for persistence across page refreshes
                         localStorage.setItem('rankCheckData', JSON.stringify(data));
-
                         displayRankResults(data, discordUsername);
 
                         // Permanently disable the button
                         if (checkRankButton) {
                             checkRankButton.disabled = true;
-                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Verified`;
-
-                            // Add a small note about refreshing
-                            const buttonContainer = checkRankButton.closest('.d-grid');
-                            if (buttonContainer) {
-                                const noteElement = document.createElement('p');
-                                noteElement.className = 'text-muted small mt-2 text-center';
-                                noteElement.innerHTML = '';
-                                buttonContainer.appendChild(noteElement);
-                            }
+                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
+                            checkRankButton.classList.remove('btn-primary');
+                            checkRankButton.classList.add('btn-success');
                         }
                     } else {
-                        showError(data.message || "Could not retrieve rank information. Please check your ID and platform.");
+                        let errorMsg = data.message || "Could not retrieve rank information. Please check your ID and platform.";
+                        if (data.error && data.error.includes("API")) {
+                            errorMsg = "RLTracker service is currently unavailable. Please try again later.";
+                        }
+                        showError(errorMsg);
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    showError("An error occurred while checking your rank. Please try again later.");
+                    showError(error.message || "An error occurred while checking your rank. Please try again later.");
                 })
                 .finally(() => {
                     // Re-enable button regardless of outcome
@@ -562,10 +565,16 @@
                         <i class="fas fa-exclamation-circle fa-4x text-danger"></i>
                     </div>
                     <h4>Verification Failed</h4>
-                    <div class="alert alert-danger mb-0">
+                    <div class="alert alert-danger mb-3">
                         ${message}
                     </div>
-                    <p class="mt-3">Please check your Rocket League ID and platform, then try again.</p>
+                    <p>Please check your Rocket League ID and platform, then try again.</p>
+                    <p class="mt-2">If you continue to experience issues, you can:</p>
+                    <ul class="text-start">
+                        <li>Make sure your RLTracker profile is public</li>
+                        <li>Try a different platform if you play on multiple platforms</li>
+                        <li>Wait a few minutes and try again</li>
+                    </ul>
                 </div>
             `;
 
