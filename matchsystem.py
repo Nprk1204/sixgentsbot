@@ -1,7 +1,11 @@
+import math
+
 import discord
 from discord.ext import commands
 import datetime
 import uuid
+
+from leaderboard_app import db
 
 
 class MatchSystem:
@@ -260,12 +264,8 @@ class MatchSystem:
             print(f"Error updating Discord role: {str(e)}")
 
     def update_player_mmr(self, winning_team, losing_team):
-        """Update MMR for all players in the match"""
-        # MMR gain/loss values
-        MMR_GAIN = 15
-        MMR_LOSS = 12
-
-        # Update winners
+        """Update MMR for all players in the match with dynamic MMR changes"""
+        # Process winners
         for player in winning_team:
             player_id = player["id"]
 
@@ -274,25 +274,35 @@ class MatchSystem:
 
             if player_data:
                 # Update existing player
-                new_mmr = player_data.get("mmr", 1000) + MMR_GAIN
+                matches_played = player_data.get("matches", 0) + 1
                 wins = player_data.get("wins", 0) + 1
-                matches = player_data.get("matches", 0) + 1
+
+                # Calculate dynamic MMR gain based on matches played
+                mmr_gain = self.calculate_dynamic_mmr(matches_played, is_win=True)
+                new_mmr = player_data.get("mmr", 600) + mmr_gain
 
                 self.players.update_one(
                     {"id": player_id},
                     {"$set": {
                         "mmr": new_mmr,
                         "wins": wins,
-                        "matches": matches,
+                        "matches": matches_played,
                         "last_updated": datetime.datetime.utcnow()
                     }}
                 )
             else:
-                # Create new player
+                # Create new player with default starting values
+                # We'll use the rank-based starting MMR if available
+                starting_mmr = 600  # Default fallback
+                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+                if rank_record and "mmr" in rank_record:
+                    starting_mmr = rank_record["mmr"]
+
                 self.players.insert_one({
                     "id": player_id,
                     "name": player["name"],
-                    "mmr": 1000 + MMR_GAIN,
+                    "mmr": starting_mmr + self.calculate_dynamic_mmr(1, is_win=True),  # First match
                     "wins": 1,
                     "losses": 0,
                     "matches": 1,
@@ -300,7 +310,7 @@ class MatchSystem:
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-        # Update losers
+        # Process losers
         for player in losing_team:
             player_id = player["id"]
 
@@ -309,31 +319,79 @@ class MatchSystem:
 
             if player_data:
                 # Update existing player
-                new_mmr = max(0, player_data.get("mmr", 1000) - MMR_LOSS)  # Don't go below 0
+                matches_played = player_data.get("matches", 0) + 1
                 losses = player_data.get("losses", 0) + 1
-                matches = player_data.get("matches", 0) + 1
+
+                # Calculate dynamic MMR loss based on matches played
+                mmr_loss = self.calculate_dynamic_mmr(matches_played, is_win=False)
+                new_mmr = max(0, player_data.get("mmr", 600) - mmr_loss)  # Don't go below 0
 
                 self.players.update_one(
                     {"id": player_id},
                     {"$set": {
                         "mmr": new_mmr,
                         "losses": losses,
-                        "matches": matches,
+                        "matches": matches_played,
                         "last_updated": datetime.datetime.utcnow()
                     }}
                 )
             else:
-                # Create new player
+                # Create new player with default starting values
+                # We'll use the rank-based starting MMR if available
+                starting_mmr = 600  # Default fallback
+                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+                if rank_record and "mmr" in rank_record:
+                    starting_mmr = rank_record["mmr"]
+
                 self.players.insert_one({
                     "id": player_id,
                     "name": player["name"],
-                    "mmr": max(0, 1000 - MMR_LOSS),
+                    "mmr": max(0, starting_mmr - self.calculate_dynamic_mmr(1, is_win=False)),  # First match
                     "wins": 0,
                     "losses": 1,
                     "matches": 1,
                     "created_at": datetime.datetime.utcnow(),
                     "last_updated": datetime.datetime.utcnow()
                 })
+
+    def calculate_dynamic_mmr(self, matches_played, is_win=True):
+        """
+        Calculate dynamic MMR change based on matches played
+
+        Parameters:
+        - matches_played: Number of matches the player has played (including the current one)
+        - is_win: True if calculating for a win, False for a loss
+
+        Returns:
+        - MMR change amount
+        """
+        # Higher starting values and faster decay
+        BASE_MMR_GAIN = 120  # Starting MMR gain for wins (much higher)
+        BASE_MMR_LOSS = 90  # Starting MMR loss for losses (much higher)
+        MIN_MMR_GAIN = 20  # Minimum MMR gain for wins after many games (higher minimum)
+        MIN_MMR_LOSS = 18  # Minimum MMR loss for losses after many games (higher minimum)
+
+        # Faster decay factor
+        DECAY_RATE = 0.18  # Much quicker drop-off
+
+        # Define a function that gives higher rank spread
+        # Rank A starting MMR: 1600 (was 1500)
+        # Rank B starting MMR: 1100 (was 1300)
+        # Rank C starting MMR: 600 (was 1000)
+
+        if is_win:
+            # Calculate MMR gain (decreasing with more matches)
+            mmr_change = BASE_MMR_GAIN * math.exp(-DECAY_RATE * (matches_played - 1))
+
+            # Ensure it doesn't go below the minimum
+            return max(MIN_MMR_GAIN, round(mmr_change))
+        else:
+            # Calculate MMR loss (decreasing with more matches)
+            mmr_change = BASE_MMR_LOSS * math.exp(-DECAY_RATE * (matches_played - 1))
+
+            # Ensure it doesn't go below the minimum
+            return max(MIN_MMR_LOSS, round(mmr_change))
 
     def get_leaderboard(self, limit=10):
         """Get top players by MMR"""

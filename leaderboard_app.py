@@ -465,11 +465,11 @@ def get_mmr_from_rank(rank):
     rank_lower = rank.lower()
 
     if "grand champion" in rank_lower or "supersonic" in rank_lower:
-        return 1500
+        return 1600
     elif "champion" in rank_lower:
-        return 1300
+        return 1100
     else:
-        return 1000  # Default MMR for Diamond and below
+        return 600  # Default MMR for Diamond and below
 
 
 def store_rank_data(discord_username, game_username, platform, rank_data, discord_id=None):

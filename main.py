@@ -549,7 +549,8 @@ async def report(ctx, match_id: str, result: str):
 
     # Check if command is used in an allowed channel
     if not is_command_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     reporter_id = str(ctx.author.id)
@@ -581,43 +582,66 @@ async def report(ctx, match_id: str, result: str):
 
     # Now proceed with reporting - ONLY ONCE
     print(f"Calling report_match_by_id for match {match_id}")
-    match, error = await match_system.report_match_by_id(match_id, reporter_id, result, ctx)
-    print(f"Report result: match={match is not None}, error={error}")
+    match_result, error = await match_system.report_match_by_id(match_id, reporter_id, result, ctx)
+    print(f"Report result: match={match_result is not None}, error={error}")
 
     if error:
         await ctx.send(f"Error: {error}")
         return
 
-    if not match:
+    if not match_result:
         await ctx.send("Failed to process match report.")
         return
 
     # Determine winning team
-    winner = match["winner"]
+    winner = match_result["winner"]
 
     if winner == 1:
-        winning_team = match["team1"]
-        losing_team = match["team2"]
+        winning_team = match_result["team1"]
+        losing_team = match_result["team2"]
     else:
-        winning_team = match["team2"]
-        losing_team = match["team1"]
+        winning_team = match_result["team2"]
+        losing_team = match_result["team1"]
+
+    # Get MMR changes for display
+    winning_team_mmr_changes = []
+    for player in winning_team:
+        player_id = player["id"]
+        player_data = match_system.players.find_one({"id": player_id})
+        if player_data:
+            matches_played = player_data.get("matches", 0)
+            mmr_change = match_system.calculate_dynamic_mmr(matches_played, is_win=True)
+            winning_team_mmr_changes.append(f"+{mmr_change}")
+        else:
+            winning_team_mmr_changes.append("+??")
+
+    losing_team_mmr_changes = []
+    for player in losing_team:
+        player_id = player["id"]
+        player_data = match_system.players.find_one({"id": player_id})
+        if player_data:
+            matches_played = player_data.get("matches", 0)
+            mmr_change = match_system.calculate_dynamic_mmr(matches_played, is_win=False)
+            losing_team_mmr_changes.append(f"-{mmr_change}")
+        else:
+            losing_team_mmr_changes.append("-??")
 
     # Format team members - using display_name instead of mentions
     winning_members = []
-    for player in winning_team:
+    for i, player in enumerate(winning_team):
         try:
             member = await ctx.guild.fetch_member(int(player["id"]))
-            winning_members.append(member.display_name)
+            winning_members.append(f"{member.display_name} ({winning_team_mmr_changes[i]})")
         except:
-            winning_members.append(player["name"])
+            winning_members.append(f"{player['name']} ({winning_team_mmr_changes[i]})")
 
     losing_members = []
-    for player in losing_team:
+    for i, player in enumerate(losing_team):
         try:
             member = await ctx.guild.fetch_member(int(player["id"]))
-            losing_members.append(member.display_name)
+            losing_members.append(f"{member.display_name} ({losing_team_mmr_changes[i]})")
         except:
-            losing_members.append(player["name"])
+            losing_members.append(f"{player['name']} ({losing_team_mmr_changes[i]})")
 
     # Create results embed
     embed = discord.Embed(
@@ -628,13 +652,14 @@ async def report(ctx, match_id: str, result: str):
 
     embed.add_field(name="Winners", value=", ".join(winning_members), inline=False)
     embed.add_field(name="Losers", value=", ".join(losing_members), inline=False)
-    embed.add_field(name="MMR", value="+15 for winners, -12 for losers", inline=False)
+    embed.add_field(name="MMR System", value="Dynamic MMR: Changes based on games played", inline=False)
     embed.set_footer(text=f"Reported by {ctx.author.display_name}")
 
     await ctx.send(embed=embed)
 
-    # Also send a message encouraging people to check the leaderboard
-    await ctx.send("Check the updated leaderboard with `/leaderboard`!")
+    # Also send a message explaining the dynamic MMR system
+    await ctx.send(
+        "**About Dynamic MMR**: New players gain/lose more MMR while the system determines their skill level. As you play more games, MMR changes become smaller to reflect your established skill level.")
 
 
 @bot.command()
