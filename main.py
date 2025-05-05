@@ -287,6 +287,28 @@ async def leave(ctx):
             f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
+    # Check if the player has completed rank verification
+    player = ctx.author
+    player_id = str(player.id)
+
+    # Check if player has a rank entry in the ranks collection
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+    if not rank_record:
+        # Player hasn't completed rank verification
+        embed = discord.Embed(
+            title="Rank Verification Required",
+            description="You need to verify your Rocket League rank before joining the queue.",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="How to Verify",
+            value="Visit the rank check page on the website to complete verification.",
+            inline=False
+        )
+        await ctx.send(embed=embed)
+        return
+
     channel_id = str(ctx.channel.id)
     player_id = str(ctx.author.id)
     player_mention = ctx.author.mention
@@ -345,6 +367,28 @@ async def status(ctx):
     if not is_queue_channel(ctx):
         await ctx.send(
             f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        return
+
+    # Check if the player has completed rank verification
+    player = ctx.author
+    player_id = str(player.id)
+
+    # Check if player has a rank entry in the ranks collection
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+    if not rank_record:
+        # Player hasn't completed rank verification
+        embed = discord.Embed(
+            title="Rank Verification Required",
+            description="You need to verify your Rocket League rank before joining the queue.",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="How to Verify",
+            value="Visit the rank check page on the website to complete verification.",
+            inline=False
+        )
+        await ctx.send(embed=embed)
         return
 
     channel_id = str(ctx.channel.id)
