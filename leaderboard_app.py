@@ -14,7 +14,7 @@ import re
 # Import Selenium libraries for web scraping
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -356,11 +356,6 @@ def extract_rank_from_url(profile_url, platform, username):
     Extract 3v3 rank information from a RLTracker profile URL
     """
     import requests
-    from selenium import webdriver
-    from selenium.webdriver.chrome.options import Options
-    from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
-    from selenium.webdriver.support import expected_conditions as EC
     import re
     import json
     import time
@@ -377,6 +372,7 @@ def extract_rank_from_url(profile_url, platform, username):
         }
 
         response = requests.get(api_url, headers=headers)
+
         if response.status_code == 200:
             data = response.json()
 
@@ -406,7 +402,8 @@ def extract_rank_from_url(profile_url, platform, username):
         chrome_options.add_argument(
             "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36")
 
-        driver = webdriver.Chrome(options=chrome_options)
+        # Use WebDriver Manager to handle driver installation
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
         driver.get(profile_url)
 
         # Wait for page to load
@@ -430,8 +427,8 @@ def extract_rank_from_url(profile_url, platform, username):
                             'mmr': mmr,
                             'tier_group': tier.split()[0] if tier != "Unranked" else "Unranked"
                         }
-        except:
-            pass
+        except Exception as js_error:
+            print(f"JS extraction error: {js_error}")
 
         # If JS variable extraction fails, try scraping the rendered HTML
         try:
@@ -454,8 +451,8 @@ def extract_rank_from_url(profile_url, platform, username):
                         'mmr': mmr,
                         'tier_group': tier.split()[0] if tier != "Unranked" else "Unranked"
                     }
-        except:
-            pass
+        except Exception as html_error:
+            print(f"HTML scraping error: {html_error}")
 
     except Exception as e:
         print(f"Selenium scraping failed: {e}")
