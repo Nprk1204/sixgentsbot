@@ -360,6 +360,18 @@ def extract_rank_from_url(profile_url, platform, username):
     import json
     import time
 
+    # If the URL doesn't end with the 3v3 playlist, add it
+    if not "/playlists:13" in profile_url:
+        # Check if there's already a playlist parameter
+        if "/playlists:" in profile_url:
+            # Replace existing playlist with 3v3
+            profile_url = re.sub(r'/playlists:\d+', '/playlists:13', profile_url)
+        else:
+            # Add 3v3 playlist parameter
+            profile_url = profile_url + "/playlists:13"
+
+    print(f"Using URL: {profile_url}")
+
     # First try direct API access with proper headers
     try:
         api_url = f"https://api.tracker.gg/api/v2/rocket-league/standard/profile/{platform}/{username}"
@@ -468,7 +480,7 @@ def get_tier_from_rank(rank):
     """Determine 6 Mans tier from Rocket League rank"""
     rank_lower = rank.lower()
 
-    if "grand champion" in rank_lower or "supersonic" in rank_lower:
+    if "grand champion" in rank_lower or "supersonic" in rank_lower or "gc" in rank_lower or "ssl" in rank_lower:
         return "Rank A"
     elif "champion" in rank_lower:
         return "Rank B"
