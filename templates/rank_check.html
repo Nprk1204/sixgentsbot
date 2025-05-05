@@ -343,21 +343,26 @@
                 apiUrl += `&discord_username=${encodeURIComponent(discordUsername)}`;
             }
 
+            // Get the button reference once to ensure we have it
+            const checkRankButton = document.getElementById('checkRankButton');
+
+            // Show loading state
+            if (checkRankButton) {
+                checkRankButton.disabled = true;
+                checkRankButton.innerHTML = `
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    Checking...
+                `;
+            }
+
             // Make the API request
             fetch(apiUrl)
                 .then(response => {
                     // Clear the timeout since we got a response
                     if (timeoutId) clearTimeout(timeoutId);
 
-                    // Check if the response is OK
                     if (!response.ok) {
-                        if (response.status === 404) {
-                            throw new Error("Player not found on this platform. Please check your ID and platform selection.");
-                        } else if (response.status === 429) {
-                            throw new Error("Too many requests. Please wait a moment and try again.");
-                        } else {
-                            throw new Error(`Server error (${response.status}). Please try again later.`);
-                        }
+                        throw new Error(`HTTP error ${response.status}`);
                     }
                     return response.json();
                 })
@@ -366,31 +371,40 @@
                     if (data.success) {
                         // Store the rank data for persistence across page refreshes
                         localStorage.setItem('rankCheckData', JSON.stringify(data));
+
+                        // Display results
                         displayRankResults(data, discordUsername);
 
-                        // Permanently disable the button
+                        // Immediately update button state - this is the key part
                         if (checkRankButton) {
                             checkRankButton.disabled = true;
                             checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
                             checkRankButton.classList.remove('btn-primary');
                             checkRankButton.classList.add('btn-success');
+
+                            // Log to console to verify this code is executing
+                            console.log("Button updated to verified state");
                         }
                     } else {
-                        let errorMsg = data.message || "Could not retrieve rank information. Please check your ID and platform.";
-                        if (data.error && data.error.includes("API")) {
-                            errorMsg = "RLTracker service is currently unavailable. Please try again later.";
+                        // Re-enable button if there's an error
+                        if (checkRankButton) {
+                            checkRankButton.disabled = false;
+                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
                         }
-                        showError(errorMsg);
+
+                        showError(data.message || "Could not retrieve rank information");
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-                    showError(error.message || "An error occurred while checking your rank. Please try again later.");
-                })
-                .finally(() => {
-                    // Re-enable button regardless of outcome
-                    checkRankButton.disabled = false;
-                    checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+
+                    // Re-enable button if there's an error
+                    if (checkRankButton) {
+                        checkRankButton.disabled = false;
+                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+                    }
+
+                    showError("An error occurred while checking your rank. Please try again later.");
                 });
         }
 
