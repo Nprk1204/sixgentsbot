@@ -343,7 +343,7 @@
                 apiUrl += `&discord_username=${encodeURIComponent(discordUsername)}`;
             }
 
-            // Get the button reference once to ensure we have it
+            // Get the button reference
             const checkRankButton = document.getElementById('checkRankButton');
 
             // Show loading state
@@ -372,41 +372,59 @@
                         // Store the rank data for persistence across page refreshes
                         localStorage.setItem('rankCheckData', JSON.stringify(data));
 
+                        // Add a flag to indicate verification is complete
+                        localStorage.setItem('rankVerified', 'true');
+
                         // Display results
                         displayRankResults(data, discordUsername);
 
-                        // Immediately update button state - this is the key part
-                        if (checkRankButton) {
-                            checkRankButton.disabled = true;
-                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
-                            checkRankButton.classList.remove('btn-primary');
-                            checkRankButton.classList.add('btn-success');
-
-                            // Log to console to verify this code is executing
-                            console.log("Button updated to verified state");
-                        }
+                        // Update button state and add a permanent class
+                        updateButtonToVerified();
                     } else {
                         // Re-enable button if there's an error
-                        if (checkRankButton) {
-                            checkRankButton.disabled = false;
-                            checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                        }
-
+                        resetButton();
                         showError(data.message || "Could not retrieve rank information");
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
-
-                    // Re-enable button if there's an error
-                    if (checkRankButton) {
-                        checkRankButton.disabled = false;
-                        checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
-                    }
-
+                    resetButton();
                     showError("An error occurred while checking your rank. Please try again later.");
                 });
         }
+
+        // Separate function to update button to verified state
+        function updateButtonToVerified() {
+            const checkRankButton = document.getElementById('checkRankButton');
+            if (checkRankButton) {
+                // Add a special class that we can check for
+                checkRankButton.classList.add('rank-verified');
+                checkRankButton.disabled = true;
+                checkRankButton.classList.remove('btn-primary');
+                checkRankButton.classList.add('btn-info');
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Rank Already Verified`;
+
+                // Log to console
+                console.log("Button permanently updated to verified state");
+            }
+        }
+
+        // Function to reset button
+        function resetButton() {
+            const checkRankButton = document.getElementById('checkRankButton');
+            if (checkRankButton) {
+                checkRankButton.disabled = false;
+                checkRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Check My Rank`;
+            }
+        }
+
+        // Add this to your document ready function or at the beginning of your script
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if rank is already verified
+            if (localStorage.getItem('rankVerified') === 'true') {
+                updateButtonToVerified();
+            }
+        });
 
         // Function to display stored rank result
         function displayStoredRankResult(data) {
