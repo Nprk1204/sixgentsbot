@@ -540,7 +540,6 @@ async def adjustmmr(ctx, member_input=None, amount: int = 0):
 
 
 # Match commands
-@bot.command()
 async def report(ctx, match_id: str, result: str):
     """Report match results (format: /report <match_id> <win/loss>)"""
     # Check if this is a duplicate command
@@ -560,30 +559,8 @@ async def report(ctx, match_id: str, result: str):
         await ctx.send("Invalid result. Please use 'win' or 'loss'.")
         return
 
-    # Print debug info
-    print(f"Processing report command for match {match_id} by {reporter_id}")
-
-    # Find match by ID with explicit query
-    active_match = match_system.matches.find_one({"match_id": match_id})
-
-    # Debug print match data if found
-    if active_match:
-        print(f"Found match {match_id} with status: {active_match.get('status')}")
-    else:
-        print(f"No match found with ID {match_id}")
-        await ctx.send(f"No match found with ID `{match_id}`.")
-        return
-
-    # Check if match is still in progress
-    if active_match.get("status") != "in_progress":
-        print(f"Match {match_id} is not in progress, status: {active_match.get('status')}")
-        await ctx.send(f"Error: This match has already been reported.")
-        return
-
-    # Now proceed with reporting - ONLY ONCE
-    print(f"Calling report_match_by_id for match {match_id}")
+    # Get match result
     match_result, error = await match_system.report_match_by_id(match_id, reporter_id, result, ctx)
-    print(f"Report result: match={match_result is not None}, error={error}")
 
     if error:
         await ctx.send(f"Error: {error}")
@@ -607,6 +584,10 @@ async def report(ctx, match_id: str, result: str):
     winning_team_mmr_changes = []
     for player in winning_team:
         player_id = player["id"]
+        if player_id.startswith('9000'):  # Skip dummy players
+            winning_team_mmr_changes.append("+0")
+            continue
+
         player_data = match_system.players.find_one({"id": player_id})
         if player_data:
             matches_played = player_data.get("matches", 0)
@@ -618,6 +599,10 @@ async def report(ctx, match_id: str, result: str):
     losing_team_mmr_changes = []
     for player in losing_team:
         player_id = player["id"]
+        if player_id.startswith('9000'):  # Skip dummy players
+            losing_team_mmr_changes.append("-0")
+            continue
+
         player_data = match_system.players.find_one({"id": player_id})
         if player_data:
             matches_played = player_data.get("matches", 0)
@@ -626,40 +611,60 @@ async def report(ctx, match_id: str, result: str):
         else:
             losing_team_mmr_changes.append("-??")
 
-    # Format team members - using display_name instead of mentions
+    # Format player info for display
     winning_members = []
     for i, player in enumerate(winning_team):
         try:
             member = await ctx.guild.fetch_member(int(player["id"]))
-            winning_members.append(f"{member.display_name} ({winning_team_mmr_changes[i]})")
+            name = member.display_name if member else player['name']
+            # Bold the names and add some color with emoji
+            winning_members.append(f"**{name}** {winning_team_mmr_changes[i]}")
         except:
-            winning_members.append(f"{player['name']} ({winning_team_mmr_changes[i]})")
+            winning_members.append(f"**{player['name']}** {winning_team_mmr_changes[i]}")
 
     losing_members = []
     for i, player in enumerate(losing_team):
         try:
             member = await ctx.guild.fetch_member(int(player["id"]))
-            losing_members.append(f"{member.display_name} ({losing_team_mmr_changes[i]})")
+            name = member.display_name if member else player['name']
+            # Bold the names and add some color with emoji
+            losing_members.append(f"**{name}** {losing_team_mmr_changes[i]}")
         except:
-            losing_members.append(f"{player['name']} ({losing_team_mmr_changes[i]})")
+            losing_members.append(f"**{player['name']}** {losing_team_mmr_changes[i]}")
 
-    # Create results embed
+    # Create an enhanced embed for results
     embed = discord.Embed(
         title="Match Results",
         description=f"Match completed",
-        color=0x00ff00
+        color=0x00ff00  # Green color
     )
 
-    embed.add_field(name="Winners", value=", ".join(winning_members), inline=False)
-    embed.add_field(name="Losers", value=", ".join(losing_members), inline=False)
-    embed.add_field(name="MMR System", value="Dynamic MMR: Changes based on games played", inline=False)
+    # Match ID field
+    embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+
+    # Winners with trophy emoji
+    embed.add_field(
+        name="🏆 Winners",
+        value=", ".join(winning_members),
+        inline=False
+    )
+
+    # Losers
+    embed.add_field(
+        name="😔 Losers",
+        value=", ".join(losing_members),
+        inline=False
+    )
+
+    # MMR System explanation
+    embed.add_field(
+        name="📊 MMR System",
+        value="Dynamic MMR: Changes based on games played",
+        inline=False
+    )
+
+    # Footer with reporter info
     embed.set_footer(text=f"Reported by {ctx.author.display_name}")
-
-    await ctx.send(embed=embed)
-
-    # Also send a message explaining the dynamic MMR system
-    await ctx.send(
-        "**About Dynamic MMR**: New players gain/lose more MMR while the system determines their skill level. As you play more games, MMR changes become smaller to reflect your established skill level.")
 
 
 @bot.command()
