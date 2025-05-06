@@ -11,15 +11,6 @@ from dotenv import load_dotenv
 import functools
 import re
 
-# Import Selenium libraries for web scraping
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
@@ -351,131 +342,6 @@ def search_players():
     return jsonify(results)
 
 
-def extract_rank_from_url(profile_url, platform, username):
-    """
-    Extract 3v3 rank information from a RLTracker profile URL
-    """
-    import requests
-    import re
-    import json
-    import time
-
-    # If the URL doesn't end with the 3v3 playlist, add it
-    if not "/playlists:13" in profile_url:
-        # Check if there's already a playlist parameter
-        if "/playlists:" in profile_url:
-            # Replace existing playlist with 3v3
-            profile_url = re.sub(r'/playlists:\d+', '/playlists:13', profile_url)
-        else:
-            # Add 3v3 playlist parameter
-            profile_url = profile_url + "/playlists:13"
-
-    print(f"Using URL: {profile_url}")
-
-    # First try direct API access with proper headers
-    try:
-        api_url = f"https://api.tracker.gg/api/v2/rocket-league/standard/profile/{platform}/{username}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
-            "Accept": "application/json",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://rocketleague.tracker.network/",
-            "Origin": "https://rocketleague.tracker.network"
-        }
-
-        response = requests.get(api_url, headers=headers)
-
-        if response.status_code == 200:
-            data = response.json()
-
-            # Look for the 3v3 standard playlist segment
-            for segment in data.get('data', {}).get('segments', []):
-                if segment.get('metadata', {}).get('name') == 'Ranked Standard 3v3':
-                    tier = segment.get('stats', {}).get('tier', {}).get('metadata', {}).get('name', 'Unranked')
-                    division = segment.get('stats', {}).get('division', {}).get('metadata', {}).get('name', 'I')
-                    mmr = segment.get('stats', {}).get('rating', {}).get('value', 0)
-
-                    return {
-                        'rank': f"{tier} {division}",
-                        'mmr': mmr,
-                        'tier_group': tier.split()[0] if tier != "Unranked" else "Unranked"
-                    }
-    except Exception as e:
-        print(f"API access failed: {e}")
-
-    # If API fails, try Selenium scraping
-    try:
-        # Setup headless Chrome
-        chrome_options = Options()
-        chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument(
-            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36")
-
-        # Use WebDriver Manager to handle driver installation
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-        driver.get(profile_url)
-
-        # Wait for page to load
-        wait = WebDriverWait(driver, 10)
-        wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "body")))
-
-        # Try to extract the JavaScript variable
-        try:
-            js_content = driver.execute_script("return window.__INITIAL_STATE__;")
-            if js_content:
-                # Parse the segments to find 3v3 rank
-                segments = js_content.get('stats', {}).get('segments', [])
-                for segment in segments:
-                    if segment.get('metadata', {}).get('name') == 'Ranked Standard 3v3':
-                        tier = segment.get('stats', {}).get('tier', {}).get('metadata', {}).get('name', 'Unranked')
-                        division = segment.get('stats', {}).get('division', {}).get('metadata', {}).get('name', 'I')
-                        mmr = segment.get('stats', {}).get('rating', {}).get('value', 0)
-
-                        return {
-                            'rank': f"{tier} {division}",
-                            'mmr': mmr,
-                            'tier_group': tier.split()[0] if tier != "Unranked" else "Unranked"
-                        }
-        except Exception as js_error:
-            print(f"JS extraction error: {js_error}")
-
-        # If JS variable extraction fails, try scraping the rendered HTML
-        try:
-            # Find the 3v3 rank element - this selector may need adjustment
-            rank_element = driver.find_element(By.XPATH,
-                                               "//div[contains(text(), 'Ranked Standard 3v3')]/following-sibling::div")
-            if rank_element:
-                rank_text = rank_element.text
-                # Parse the rank text to extract tier, division, and MMR
-                # This regex pattern may need to be adjusted based on the actual format
-                pattern = r"(.*?)\s+(Division\s+[IVX]+)\s+(\d+)"
-                match = re.search(pattern, rank_text)
-                if match:
-                    tier = match.group(1)
-                    division = match.group(2)
-                    mmr = int(match.group(3))
-
-                    return {
-                        'rank': f"{tier} {division}",
-                        'mmr': mmr,
-                        'tier_group': tier.split()[0] if tier != "Unranked" else "Unranked"
-                    }
-        except Exception as html_error:
-            print(f"HTML scraping error: {html_error}")
-
-    except Exception as e:
-        print(f"Selenium scraping failed: {e}")
-    finally:
-        if 'driver' in locals():
-            driver.quit()
-
-    # If all methods fail, return failure
-    return None
-
-
 def get_tier_from_rank(rank):
     """Determine 6 Mans tier from Rocket League rank"""
     rank_lower = rank.lower()
@@ -492,7 +358,7 @@ def get_mmr_from_rank(rank):
     """Determine starting MMR from Rocket League rank"""
     rank_lower = rank.lower()
 
-    if "grand champion" in rank_lower or "supersonic" in rank_lower:
+    if "grand champion" in rank_lower or "supersonic" in rank_lower or "gc" in rank_lower or "ssl" in rank_lower:
         return 1600
     elif "champion" in rank_lower:
         return 1100
@@ -787,144 +653,82 @@ def check_rank():
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
-    profile_url = request.args.get('profile_url', '')  # New parameter
-    manual_tier = request.args.get('manual_tier', '')  # New parameter
+    manual_tier = request.args.get('manual_tier', '')  # For manual tier selection
 
-    if not ((platform and username) or (profile_url and manual_tier)):
+    if not (platform and username) and not manual_tier:
         return jsonify(
-            {"success": False, "message": "Either platform/username or profile URL with tier is required"}), 400
+            {"success": False, "message": "Please provide platform/username or a manual tier selection"}), 400
 
-    # Add debug logging
+    # Debug logging
     print(f"=== RANK CHECK DEBUG ===")
     print(f"Platform: {platform}")
     print(f"Username: {username}")
     print(f"Discord username: {discord_username}")
-    print(f"Profile URL: {profile_url}")
     print(f"Manual tier: {manual_tier}")
     print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
     print(f"API Key length: {len(RLTRACKER_API_KEY) if RLTRACKER_API_KEY else 0}")
     print(f"========================")
 
-    # Verify Discord username exists in server if provided
-    discord_user_verified = False
-    discord_user_id = None
-    matched_name = None
+    # PRIORITY 1: Handle manual tier selection if provided
+    if manual_tier:
+        print(f"Using manually provided tier: {manual_tier}")
+        mmr = get_mmr_from_rank(manual_tier)
 
-    # Your existing Discord verification code here...
-    if discord_username:
-        # ...existing Discord verification logic...
-        # This should set discord_user_verified, discord_user_id, and matched_name
-        pass
+        manual_result = {
+            "success": True,
+            "username": username or "Manual Entry",
+            "platform": platform or "unknown",
+            "rank": manual_tier,
+            "tier": manual_tier,
+            "mmr": mmr,
+            "timestamp": time.time(),
+            "manual_verification": True
+        }
 
-    # Check if this is a direct profile URL check
-    if profile_url and manual_tier:
-        print(f"Processing profile URL: {profile_url}")
-
-        # Extract username and platform from profile_url if not provided
-        if not username or not platform:
-            # Try to extract from URL pattern like https://rocketleague.tracker.network/rocket-league/profile/PLATFORM/USERNAME
-            url_match = re.search(r'profile/([^/]+)/([^/]+)(?:/|$)', profile_url)
-            if url_match:
-                platform = url_match.group(1)
-                username = url_match.group(2)
-                print(f"Extracted platform: {platform} and username: {username} from URL")
-
-        # Try to scrape rank information directly from the profile URL
-        extracted_rank = None
-        if platform and username:
-            try:
-                extracted_rank = extract_rank_from_url(profile_url, platform, username)
-                if extracted_rank:
-                    print(f"Successfully extracted rank from URL: {extracted_rank}")
-                else:
-                    print("Failed to extract rank from URL")
-            except Exception as e:
-                print(f"Error extracting rank from URL: {str(e)}")
-
-        if extracted_rank:
-            # Use the extracted rank information
-            rank_data = {
-                "success": True,
-                "username": username,
-                "platform": platform,
-                "rank": extracted_rank['rank'],
-                "tier": get_tier_from_rank(extracted_rank['rank']),
-                "mmr": get_mmr_from_rank(extracted_rank['rank']),
-                "profileUrl": profile_url,
-                "timestamp": time.time(),
-                "extraction_method": "url_scraping"
-            }
-        else:
-            # Fall back to manual tier if extraction failed
-            mmr = get_mmr_from_rank(manual_tier)
-
-            rank_data = {
-                "success": True,
-                "username": username or "Manual Entry",
-                "platform": platform or "unknown",
-                "rank": manual_tier,
-                "tier": manual_tier,
-                "mmr": mmr,
-                "profileUrl": profile_url,
-                "timestamp": time.time(),
-                "manual_verification": True
-            }
-
-        # Handle Discord role assignment if verified
+        # Handle Discord role assignment if username provided
         if discord_username:
-            # Store rank data with verified Discord ID
-            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", rank_data,
-                            discord_user_id)
+            print(f"Storing manual rank data for Discord user: {discord_username}")
+            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", manual_result)
+            role_result = assign_discord_role(discord_username, manual_tier)
+            manual_result["role_assignment"] = role_result
 
-            # Assign role
-            role_result = assign_discord_role(discord_username, rank_data["tier"])
-            rank_data["role_assignment"] = role_result
-            rank_data["discord_verified"] = True
-            rank_data["matched_name"] = matched_name
+        return jsonify(manual_result)
 
-        return jsonify(rank_data)
-
-    # Try API first if credentials available
+    # PRIORITY 2: Try API if credentials available
     if RLTRACKER_API_KEY and platform and username:
+        print("Attempting to use RLTracker API")
         try:
             # Existing API code
             rank_data = get_cached_rank(platform, username)
             if rank_data.get("success", False):
+                print(f"API call successful: {rank_data}")
+
                 # Process as normal with existing code
                 if discord_username:
                     tier = rank_data.get("tier")
-                    store_rank_data(discord_username, username, platform, rank_data, discord_user_id)
+                    store_rank_data(discord_username, username, platform, rank_data)
                     role_result = assign_discord_role(discord_username, tier)
                     rank_data["role_assignment"] = role_result
-                    rank_data["discord_verified"] = True
-                    rank_data["matched_name"] = matched_name
 
                 return jsonify(rank_data)
+            else:
+                print(f"API call failed: {rank_data.get('message', 'Unknown error')}")
         except Exception as e:
             print(f"API attempt failed: {str(e)}")
-            # Continue to fallback if API fails
 
-    # Use mock data with variety if no API key is provided
-    if not RLTRACKER_API_KEY:
-        print("WARNING: No API key provided, using varied mock data")
-        mock_data = get_mock_rank_data(username, platform)
+    # PRIORITY 3: Use mock data as a last resort
+    print("All other methods failed, using mock data")
+    mock_data = get_mock_rank_data(username, platform)
+    mock_data["fallback_method"] = "This is mock data as API method failed"
 
-        # Handle Discord verification for mock data
-        if discord_username:
-            tier = mock_data.get("tier")
-            store_rank_data(discord_username, username, platform, mock_data, discord_user_id)
-            role_result = assign_discord_role(discord_username, tier)
-            mock_data["role_assignment"] = role_result
-            mock_data["discord_verified"] = True
-            mock_data["matched_name"] = matched_name
+    # Handle Discord verification for mock data
+    if discord_username:
+        tier = mock_data.get("tier")
+        store_rank_data(discord_username, username, platform, mock_data)
+        role_result = assign_discord_role(discord_username, tier)
+        mock_data["role_assignment"] = role_result
 
-        return jsonify(mock_data)
-
-    # If we get here, API failed and no fallback was provided
-    return jsonify({
-        "success": False,
-        "message": "RLTracker service is currently unavailable. Please try again later or provide a profile URL with tier selection."
-    })
+    return jsonify(mock_data)
 
 
 @app.route('/api/user-rank/<discord_username>')
