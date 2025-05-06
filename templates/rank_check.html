@@ -383,33 +383,183 @@
         }
 
         function processRankVerification() {
-            const rlRankSelect = document.getElementById('rlRank');
-            const discordUsername = document.getElementById('discordUsername').value.trim();
+    const rlRankSelect = document.getElementById('rlRank');
+    const discordUsername = document.getElementById('discordUsername').value.trim();
 
-            // Get the selected rank details
-            const selectedOption = rlRankSelect.options[rlRankSelect.selectedIndex];
-            const rankTier = selectedOption.getAttribute('data-tier');
-            const startingMMR = selectedOption.getAttribute('data-mmr');
-            const rankName = selectedOption.textContent;
-            const rankValue = rlRankSelect.value;
+    // Get the selected rank details
+    const selectedOption = rlRankSelect.options[rlRankSelect.selectedIndex];
+    const rankTier = selectedOption.getAttribute('data-tier');
+    const startingMMR = selectedOption.getAttribute('data-mmr');
+    const rankName = selectedOption.textContent;
+    const rankValue = rlRankSelect.value;
 
-            // Show loading state
+    // Show loading state
+    document.getElementById('verificationResult').innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Processing your rank verification...</p>
+        </div>
+    `;
+
+    // Disable the button while processing
+    const verifyRankButton = document.getElementById('verifyRankButton');
+    verifyRankButton.disabled = true;
+    verifyRankButton.innerHTML = `
+        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+        Verifying...
+    `;
+
+    // Make API call to verify rank and update Discord role
+    fetch('/api/verify-rank', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            discord_username: discordUsername,
+            rank: rankName,
+            tier: rankTier,
+            mmr: startingMMR,
+            rankValue: rankValue
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Store the rank data for persistence
+            localStorage.setItem('rankCheckData', JSON.stringify({
+                username: discordUsername,
+                rank: rankName,
+                tier: rankTier,
+                mmr: startingMMR,
+                rankValue: rankValue,
+                success: true,
+                discord_updated: data.discord_updated || false
+            }));
+            localStorage.setItem('rankVerified', 'true');
+
+            // Display results
+            displayRankResults({
+                username: discordUsername,
+                rank: rankName,
+                tier: rankTier,
+                mmr: startingMMR,
+                rankValue: rankValue,
+                discord_updated: data.discord_updated || false
+            });
+
+            // Update button
+            updateButtonToVerified();
+        } else {
+            // Show error but still store local verification
             document.getElementById('verificationResult').innerHTML = `
-                <div class="text-center py-3">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">Processing your rank verification...</p>
+                <div class="alert alert-warning mb-3">
+                    <i class="fas fa-exclamation-triangle me-2"></i> Your rank was verified, but there was an issue updating your Discord role: ${data.message}
                 </div>
             `;
 
-            // Disable the button while processing
-            const verifyRankButton = document.getElementById('verifyRankButton');
-            verifyRankButton.disabled = true;
-            verifyRankButton.innerHTML = `
-                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                Verifying...
-            `;
+            // Still store the verification data locally
+            localStorage.setItem('rankCheckData', JSON.stringify({
+                username: discordUsername,
+                rank: rankName,
+                tier: rankTier,
+                mmr: startingMMR,
+                rankValue: rankValue,
+                success: true,
+                discord_updated: false
+            }));
+            localStorage.setItem('rankVerified', 'true');
+
+            // Also display the verification result
+            displayRankResults({
+                username: discordUsername,
+                rank: rankName,
+                tier: rankTier,
+                mmr: startingMMR,
+                rankValue: rankValue,
+                discord_updated: false
+            });
+
+            // Update button
+            updateButtonToVerified();
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+
+        // Show error message but continue with local verification
+        document.getElementById('verificationResult').innerHTML = `
+            <div class="alert alert-warning mb-3">
+                <i class="fas fa-exclamation-triangle me-2"></i> Your rank was verified locally, but there was an issue connecting to the server for Discord role update.
+            </div>
+        `;
+
+        // Still store the verification data locally
+        localStorage.setItem('rankCheckData', JSON.stringify({
+            username: discordUsername,
+            rank: rankName,
+            tier: rankTier,
+            mmr: startingMMR,
+            rankValue: rankValue,
+            success: true,
+            discord_updated: false
+        }));
+        localStorage.setItem('rankVerified', 'true');
+
+        // Also display the verification result
+        displayRankResults({
+            username: discordUsername,
+            rank: rankName,
+            tier: rankTier,
+            mmr: startingMMR,
+            rankValue: rankValue,
+            discord_updated: false
+        });
+
+        // Update button
+        updateButtonToVerified();
+    });
+}
+
+// Update the showRankDetails function to show Discord role status
+function showRankDetails(data) {
+    // Create modal content with discord status
+    let modalContent = `
+        <div class="text-center">
+            <div class="mb-3">
+                <img src="/static/img/ranks/${data.rankValue}.png" alt="${data.rank}" class="img-fluid" style="max-width: 80px;">
+            </div>
+            <h4>Your rank has been verified!</h4>
+            <p class="mb-3">${data.rank}</p>
+
+            <div class="alert alert-info">
+                <strong>Tier:</strong> ${data.tier}<br>
+                <strong>Starting MMR:</strong> ${data.mmr}
+            </div>
+
+            ${data.discord_updated ? `
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle me-2"></i> Your Discord role has been updated successfully!
+            </div>
+            ` : `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle me-2"></i> Note: Your Discord role could not be updated automatically. Please contact an admin if you need this updated.
+            </div>
+            `}
+
+            <p>You can now join the 6 Gents queue in the Discord server.</p>
+        </div>
+    `;
+
+    document.getElementById('resultModalContent').innerHTML = modalContent;
+
+    // Show the modal
+    if (resultModal) {
+        resultModal.show();
+    }
+}
 
             // Simulate API call with a timeout (replace with actual API call if needed)
             setTimeout(() => {
