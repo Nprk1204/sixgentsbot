@@ -411,57 +411,17 @@
                 Verifying...
             `;
 
-            fetch('/api/update-discord-rank', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    discord_username: discordUsername,
+            // Simulate API call with a timeout (replace with actual API call if needed)
+            setTimeout(() => {
+                // Create a data object to store the verification result
+                const data = {
+                    username: discordUsername,
                     rank: rankName,
                     tier: rankTier,
                     mmr: startingMMR,
-                    rank_value: rankValue
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Store the rank data for persistence
-                    localStorage.setItem('rankCheckData', JSON.stringify({
-                        username: discordUsername,
-                        rank: rankName,
-                        tier: rankTier,
-                        mmr: startingMMR,
-                        rankValue: rankValue,
-                        success: true
-                    }));
-                    localStorage.setItem('rankVerified', 'true');
-
-                    // Display results
-                    displayRankResults(data);
-
-                    // Update button
-                    updateButtonToVerified();
-                } else {
-                    // Handle error
-                    alert('Error updating Discord rank: ' + (data.message || 'Unknown error'));
-
-                    // Re-enable the button
-                    const verifyRankButton = document.getElementById('verifyRankButton');
-                    verifyRankButton.disabled = false;
-                    verifyRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Verify My Rank`;
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error connecting to server. Please try again later.');
-
-                // Re-enable the button
-                const verifyRankButton = document.getElementById('verifyRankButton');
-                verifyRankButton.disabled = false;
-                verifyRankButton.innerHTML = `<i class="fas fa-check-circle me-2"></i> Verify My Rank`;
-            });
+                    rankValue: rankValue,
+                    success: true
+                };
 
                 // Store the rank data for persistence
                 localStorage.setItem('rankCheckData', JSON.stringify(data));
