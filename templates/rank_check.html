@@ -37,7 +37,6 @@
                             <option value="" selected disabled>Select your 3v3 competitive rank</option>
 
                             <!-- Rank C -->
-                            <optgroup label="Rank C">
                                 <!-- Bronze -->
                                 <option value="bronze_1" data-mmr="50" data-tier="Rank C">Bronze I</option>
                                 <option value="bronze_2" data-mmr="100" data-tier="Rank C">Bronze II</option>
@@ -62,10 +61,8 @@
                                 <option value="diamond_1" data-mmr="500" data-tier="Rank C">Diamond I</option>
                                 <option value="diamond_2" data-mmr="550" data-tier="Rank C">Diamond II</option>
                                 <option value="diamond_3" data-mmr="600" data-tier="Rank C">Diamond III</option>
-                            </optgroup>
 
                             <!-- Rank B -->
-                            <optgroup label="Rank B">
                                 <!-- Champion -->
                                 <option value="champion_1" data-mmr="700" data-tier="Rank B">Champion I</option>
                                 <option value="champion_2" data-mmr="800" data-tier="Rank B">Champion II</option>
@@ -73,14 +70,11 @@
 
                                 <!-- Grand Champion -->
                                 <option value="grand_champion_1" data-mmr="1100" data-tier="Rank B">Grand Champion I</option>
-                            </optgroup>
 
                             <!-- Rank A -->
-                            <optgroup label="Rank A">
                                 <option value="grand_champion_2" data-mmr="1300" data-tier="Rank A">Grand Champion II</option>
                                 <option value="grand_champion_3" data-mmr="1450" data-tier="Rank A">Grand Champion III</option>
                                 <option value="ssl" data-mmr="1600" data-tier="Rank A">Supersonic Legend</option>
-                            </optgroup>
                         </select>
                         <div id="rankPreview" class="mt-3 text-center d-none">
                             <img id="rankImage" src="" alt="Rank Icon" class="img-fluid mb-2" style="max-width: 80px;">
@@ -107,7 +101,7 @@
         </div>
 
         <div class="col-lg-6 mt-4 mt-lg-0">
-            <h4 class="mb-3">Rank Tiers & Starting MMR</h4>
+            <h4 class="mb-3">Rank Tiers</h4>
 
             <div class="row">
                 <div class="col-md-4 mb-3">
@@ -118,7 +112,7 @@
                         <div class="rank-body">
                             <h5 class="rank-title">Rank A</h5>
                             <p class="rank-description">Grand Champion II & Above</p>
-                            <p class="rank-mmr">Starting MMR: 1600</p>
+                            <p class="rank-mmr">MMR Range: 1100+</p>
                             <span class="badge bg-danger">Rank A Role</span>
                         </div>
                     </div>
@@ -132,7 +126,7 @@
                         <div class="rank-body">
                             <h5 class="rank-title">Rank B</h5>
                             <p class="rank-description">Champion I to Grand Champion I</p>
-                            <p class="rank-mmr">Starting MMR: 1100</p>
+                            <p class="rank-mmr">MMR Range: 600 - 1100</p>
                             <span class="badge bg-primary">Rank B Role</span>
                         </div>
                     </div>
@@ -146,7 +140,7 @@
                         <div class="rank-body">
                             <h5 class="rank-title">Rank C</h5>
                             <p class="rank-description">Diamond III and below</p>
-                            <p class="rank-mmr">Starting MMR: 600</p>
+                            <p class="rank-mmr">MMR Range: 0 - 600</p>
                             <span class="badge bg-success">Rank C Role</span>
                         </div>
                     </div>
