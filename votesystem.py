@@ -1,7 +1,9 @@
 import discord
+from discord.ext import commands
 import asyncio
 import random
 import uuid
+from discord.ui import Button, View
 
 
 class VoteSystem:
@@ -14,10 +16,6 @@ class VoteSystem:
 
         # Store voting state by channel
         self.active_votes = {}  # Map of channel_id to voting state
-
-        # Emojis for voting
-        self.random_emoji = "🎲"
-        self.captains_emoji = "👑"
 
     def set_match_system(self, match_system):
         """Set the match system reference"""
@@ -47,7 +45,7 @@ class VoteSystem:
             self.active_votes.clear()
 
     async def start_vote(self, channel):
-        """Start a vote for team selection using reactions in a specific channel"""
+        """Start a vote for team selection using buttons in a specific channel"""
         channel_id = str(channel.id)
 
         # Make sure any existing vote in this channel is canceled first
@@ -66,106 +64,105 @@ class VoteSystem:
             'voters': set(),
             'user_votes': {},
             'random_votes': 0,
-            'captains_votes': 0
+            'captains_votes': 0,
+            'view': None  # Store the View object
         }
 
         # Get mentions of queued players
         player_mentions = [p['mention'] for p in players]
 
-        # Create and send vote message
+        # Create and send vote message with buttons
         embed = discord.Embed(
             title="🗳️ Team Selection Vote",
             description=(
-                "Vote for team selection method:\n\n"
-                f"{self.random_emoji} - Random Teams\n"
-                f"{self.captains_emoji} - Captains Pick\n\n"
-                f"Queued players: {', '.join(player_mentions)}\n"
-                "All 6 players must vote! (60 second timeout)"
+                    "Vote for team selection method:\n\n"
+                    "Queued players: " + ", ".join(player_mentions) + "\n"
+                                                                      "All 6 players must vote! (60 second timeout)"
             ),
             color=0x3498db
         )
 
-        # Send the vote message
-        vote_message = await channel.send(embed=embed)
-        self.active_votes[channel_id]['message'] = vote_message
+        # Create buttons
+        random_button = Button(style=discord.ButtonStyle.primary, custom_id="random", label="Random Teams", emoji="🎲")
+        captains_button = Button(style=discord.ButtonStyle.primary, custom_id="captains", label="Captains Pick",
+                                 emoji="👑")
 
-        # Add reaction options
-        await vote_message.add_reaction(self.random_emoji)
-        await vote_message.add_reaction(self.captains_emoji)
+        # Create View
+        view = View(timeout=60)
+        view.add_item(random_button)
+        view.add_item(captains_button)
+
+        # Set up button callbacks
+        async def random_callback(interaction):
+            await self.handle_button_vote(interaction, "random")
+
+        async def captains_callback(interaction):
+            await self.handle_button_vote(interaction, "captains")
+
+        random_button.callback = random_callback
+        captains_button.callback = captains_callback
+
+        # Send the vote message
+        vote_message = await channel.send(embed=embed, view=view)
+        self.active_votes[channel_id]['message'] = vote_message
+        self.active_votes[channel_id]['view'] = view
 
         # Start vote timeout
         self.bot.loop.create_task(self.vote_timeout(channel_id, 60))
 
         return True  # Vote started successfully
 
-    async def vote_timeout(self, channel_id, seconds):
-        """Handle vote timeout for a specific channel"""
-        channel_id = str(channel_id)
-        await asyncio.sleep(seconds)
-
-        # Check if voting is still active for this channel
-        if channel_id not in self.active_votes:
-            return  # Vote was already completed or canceled
-
-        vote_state = self.active_votes[channel_id]
-
-        # Check if voting is complete
-        if len(vote_state['voters']) >= 6:
-            return  # Voting already complete
-
-        # If not, announce timeout and create teams based on current votes
-        await vote_state['channel'].send("⏱️ The vote has timed out! Creating teams based on current votes...")
-
-        # Finalize vote regardless of vote count
-        await self.finalize_vote(channel_id, force=True)
-
-    async def handle_reaction(self, reaction, user):
-        """Handle reaction to vote message"""
-        # Ignore bot reactions
-        if user.bot:
-            return
-
-        # Find which channel this reaction belongs to
-        message_id = reaction.message.id
-        channel_id = str(reaction.message.channel.id)
+    async def handle_button_vote(self, interaction, vote_type):
+        """Handle button presses for voting"""
+        # Get the channel_id from the interaction
+        channel_id = str(interaction.channel.id)
+        user_id = interaction.user.id
 
         # Check if this is a vote message in any active votes
-        if channel_id not in self.active_votes or self.active_votes[channel_id]['message'].id != message_id:
+        if channel_id not in self.active_votes:
+            await interaction.response.send_message("This vote is no longer active.", ephemeral=True)
             return
 
         vote_state = self.active_votes[channel_id]
 
         # Check if user is in queue
-        player_id = str(user.id)
+        player_id = str(user_id)
         if not self.queue.is_player_in_queue(player_id, channel_id):
-            return
-
-        # Check if reaction is valid
-        emoji = str(reaction.emoji)
-        if emoji not in [self.random_emoji, self.captains_emoji]:
+            await interaction.response.send_message("Only players in the queue can vote!", ephemeral=True)
             return
 
         # Add user to voters if not already tracked
-        if user.id not in vote_state['voters']:
-            vote_state['voters'].add(user.id)
+        new_vote = False
+        if user_id not in vote_state['voters']:
+            vote_state['voters'].add(user_id)
+            new_vote = True
 
         # Update vote counts
-        old_vote = vote_state['user_votes'].get(user.id)
-        if old_vote:
+        old_vote = vote_state['user_votes'].get(user_id)
+        if old_vote and old_vote != vote_type:
             # Remove old vote count
-            if old_vote == self.random_emoji:
+            if old_vote == "random":
                 vote_state['random_votes'] -= 1
             else:
                 vote_state['captains_votes'] -= 1
 
         # Update user's vote
-        vote_state['user_votes'][user.id] = emoji
+        vote_state['user_votes'][user_id] = vote_type
 
         # Add new vote count
-        if emoji == self.random_emoji:
-            vote_state['random_votes'] += 1
+        if vote_type == "random":
+            if not old_vote or old_vote != vote_type:
+                vote_state['random_votes'] += 1
         else:
-            vote_state['captains_votes'] += 1
+            if not old_vote or old_vote != vote_type:
+                vote_state['captains_votes'] += 1
+
+        # Acknowledge the interaction
+        if new_vote:
+            await interaction.response.send_message(f"You voted for {vote_type.capitalize()} teams!", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"Changed your vote to {vote_type.capitalize()} teams!",
+                                                    ephemeral=True)
 
         # Update vote message
         await self.update_vote_message(channel_id)
@@ -189,8 +186,8 @@ class VoteSystem:
             title="🗳️ Team Selection Vote",
             description=(
                 "Vote for team selection method:\n\n"
-                f"{self.random_emoji} Random Teams: **{vote_state['random_votes']}** votes\n"
-                f"{self.captains_emoji} Captains Pick: **{vote_state['captains_votes']}** votes\n\n"
+                f"🎲 Random Teams: **{vote_state['random_votes']}** votes\n"
+                f"👑 Captains Pick: **{vote_state['captains_votes']}** votes\n\n"
                 f"Votes received: **{total_votes}/6**\n"
                 f"Votes needed: **{votes_needed}**"
             ),
@@ -198,6 +195,33 @@ class VoteSystem:
         )
 
         await vote_state['message'].edit(embed=embed)
+
+    async def vote_timeout(self, channel_id, seconds):
+        """Handle vote timeout for a specific channel"""
+        channel_id = str(channel_id)
+        await asyncio.sleep(seconds)
+
+        # Check if voting is still active for this channel
+        if channel_id not in self.active_votes:
+            return  # Vote was already completed or canceled
+
+        vote_state = self.active_votes[channel_id]
+
+        # Check if voting is complete
+        if len(vote_state['voters']) >= 6:
+            return  # Voting already complete
+
+        # If not, announce timeout and create teams based on current votes
+        await vote_state['channel'].send("⏱️ The vote has timed out! Creating teams based on current votes...")
+
+        # Disable the buttons in the view
+        for item in vote_state['view'].children:
+            item.disabled = True
+
+        await vote_state['message'].edit(view=vote_state['view'])
+
+        # Finalize vote regardless of vote count
+        await self.finalize_vote(channel_id, force=True)
 
     async def finalize_vote(self, channel_id, force=False):
         """Finalize the vote and create teams for a specific channel"""
@@ -218,6 +242,12 @@ class VoteSystem:
 
         # Get players from the queue
         players = self.queue.get_players_for_match(channel_id)
+
+        # Disable the buttons in the view
+        for item in vote_state['view'].children:
+            item.disabled = True
+
+        await vote_state['message'].edit(view=vote_state['view'])
 
         # Determine winner (default to random if tied or no votes)
         if vote_state['captains_votes'] > vote_state['random_votes']:

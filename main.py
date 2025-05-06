@@ -313,30 +313,17 @@ async def leave(ctx):
     player = ctx.author
     player_id = str(player.id)
 
-    # Check if player has a rank entry in the ranks collection
-    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
-
-    if not rank_record:
-        # Player hasn't completed rank verification
-        embed = discord.Embed(
-            title="Rank Verification Required",
-            description="You need to verify your Rocket League rank before joining the queue.",
-            color=0xf1c40f
-        )
-        embed.add_field(
-            name="How to Verify",
-            value="Visit the rank check page on the website to complete verification.",
-            inline=False
-        )
-        await ctx.send(embed=embed)
-        return
-
     channel_id = str(ctx.channel.id)
     player_id = str(ctx.author.id)
     player_mention = ctx.author.mention
 
     # DEBUG - Before leaving
     print(f"DEBUG - LEAVE ATTEMPT: {ctx.author.name} trying to leave queue in channel {channel_id}")
+
+    # Check if voting is active in this channel - NEW CODE
+    if vote_system.is_voting_active(channel_id):
+        await ctx.send(f"{player_mention} cannot leave the queue while voting is in progress!")
+        return
 
     # Find if the player is in THIS specific channel's queue
     existing_queue = queue_handler.queue_collection.find_one({"id": player_id, "channel_id": channel_id})
@@ -357,10 +344,6 @@ async def leave(ctx):
 
     # Delete the player from THIS channel's queue
     result = queue_handler.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
-
-    # Check if voting is active in this channel
-    if vote_system.is_voting_active(channel_id):
-        vote_system.cancel_voting(channel_id)
 
     # Check if captain selection is active in this channel
     if captains_system.is_selection_active(channel_id):
