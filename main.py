@@ -309,13 +309,34 @@ async def leave(ctx):
             f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
-    # Check if the player has completed rank verification
-    player = ctx.author
-    player_id = str(player.id)
+        # Check if the player has completed rank verification
+        player = ctx.author
+        player_id = str(player.id)
 
-    channel_id = str(ctx.channel.id)
-    player_id = str(ctx.author.id)
-    player_mention = ctx.author.mention
+        # Get all rank roles
+        rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+        rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+        rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+        has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
+
+        # Check if player has a rank entry in the database OR has a rank role
+        rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+        # Fix: Allow joining if either database record exists OR player has a rank role
+        if not (rank_record or has_rank_role):
+            # Player hasn't completed rank verification either way
+            embed = discord.Embed(
+                title="Rank Verification Required",
+                description="You need to verify your Rocket League rank before joining the queue.",
+                color=0xf1c40f
+            )
+            embed.add_field(
+                name="How to Verify",
+                value="Visit the rank check page on the website to complete verification.",
+                inline=False
+            )
+            await ctx.send(embed=embed)
+            return
 
     # DEBUG - Before leaving
     print(f"DEBUG - LEAVE ATTEMPT: {ctx.author.name} trying to leave queue in channel {channel_id}")
