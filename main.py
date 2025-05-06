@@ -85,7 +85,7 @@ async def is_duplicate_command(ctx):
 
         # Keep dict size manageable
         if len(recent_commands) > 100:
-            now = datetime.datetime.now().timestamp()
+            now = datetime.datetime.now(datetime.UTC).timestamp()
             # Only keep commands from last 5 minutes
             old_size = len(recent_commands)
             current_records = recent_commands.copy()
@@ -201,7 +201,7 @@ async def on_ready():
                 if channel_name in captains_systems:
                     queue_handler.set_captains_system(channel_id, captains_systems[channel_name])
 
-    print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now()}")
+    print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
 
 @bot.event
@@ -494,8 +494,8 @@ async def adjustmmr(ctx, member_input=None, amount: int = 0):
             "wins": 0,
             "losses": 0,
             "matches": 0,
-            "created_at": datetime.datetime.utcnow(),
-            "last_updated": datetime.datetime.utcnow()
+            "created_at": datetime.datetime.now(datetime.UTC),
+            "last_updated": datetime.datetime.now(datetime.UTC)
         })
 
         old_mmr = 1000
@@ -509,7 +509,7 @@ async def adjustmmr(ctx, member_input=None, amount: int = 0):
             {"id": player_id},
             {"$set": {
                 "mmr": new_mmr,
-                "last_updated": datetime.datetime.utcnow()
+                "last_updated": datetime.datetime.now(datetime.UTC)
             }}
         )
 
@@ -744,7 +744,7 @@ async def adminreport(ctx, team_number: int, result: str, match_id: str = None):
             "status": "completed",
             "winner": team_number,
             "score": {"team1": team1_score, "team2": team2_score},
-            "completed_at": datetime.datetime.utcnow(),
+            "completed_at": datetime.datetime.now(datetime.UTC),
             "reported_by": str(ctx.author.id)
         }}
     )
@@ -983,7 +983,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
 
     try:
         # Create backup collections with timestamp
-        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
 
         # Track what was backed up for reporting
         backed_up = []
@@ -1054,7 +1054,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
         resets_collection = db['resets']
         resets_collection.insert_one({
             "type": "leaderboard_reset",
-            "timestamp": datetime.datetime.utcnow(),
+            "timestamp": datetime.datetime.now(datetime.UTC),
             "performed_by": str(ctx.author.id),
             "performed_by_name": ctx.author.display_name,
             "reason": "Season reset via Discord command"
