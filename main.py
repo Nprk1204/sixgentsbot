@@ -232,11 +232,18 @@ async def join(ctx):
     player = ctx.author
     player_id = str(player.id)
 
-    # Check if player has a rank entry in the ranks collection
+    # Get all rank roles
+    rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+    rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+    rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+    has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
+
+    # Check if player has a rank entry in the database OR has a rank role
     rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
-    if not rank_record:
-        # Player hasn't completed rank verification
+    # Fix: Allow joining if either database record exists OR player has a rank role
+    if not (rank_record or has_rank_role):
+        # Player hasn't completed rank verification either way
         embed = discord.Embed(
             title="Rank Verification Required",
             description="You need to verify your Rocket League rank before joining the queue.",
@@ -250,16 +257,31 @@ async def join(ctx):
         await ctx.send(embed=embed)
         return
 
-    # Check if the player has the right role for this channel
-    channel_name = ctx.channel.name.lower()
-    if channel_name in ["rank-a", "rank-b", "rank-c"]:
-        required_role_name = f"Rank {channel_name[-1].upper()}"
-        required_role = discord.utils.get(ctx.guild.roles, name=required_role_name)
+    # If player has role but no database record, create one based on their role
+    if has_rank_role and not rank_record:
+        print(f"Player {player.display_name} has rank role but no database record. Creating one.")
 
-        if required_role and required_role not in player.roles:
-            await ctx.send(
-                f"{player.mention}, you need the {required_role.name} role to join this queue. Please join the appropriate queue for your rank.")
-            return
+        # Determine which role they have
+        tier = None
+        if rank_a_role in player.roles:
+            tier = "Rank A"
+            mmr = 1600
+        elif rank_b_role in player.roles:
+            tier = "Rank B"
+            mmr = 1100
+        elif rank_c_role in player.roles:
+            tier = "Rank C"
+            mmr = 600
+
+        # Create a record in the database
+        db.get_collection('ranks').insert_one({
+            "discord_id": player_id,
+            "discord_username": player.display_name,
+            "tier": tier,
+            "mmr": mmr,
+            "timestamp": datetime.datetime.utcnow()
+        })
+        print(f"Created rank record for {player.display_name} with tier {tier}")
 
     # Continue with regular join process
     channel_id = ctx.channel.id
