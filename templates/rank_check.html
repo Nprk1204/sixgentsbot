@@ -181,14 +181,27 @@
 {% block extra_js %}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize the rank selector and button
-    setupRankSelector();
+    try {
+        // Check if required elements exist before initializing
+        const rankSelect = document.getElementById('rlRank');
+        const verifyButton = document.getElementById('verifyRankButton');
+        const verificationResult = document.getElementById('verificationResult');
 
-    // Try the API reset check first
-    checkResetStatus();
+        if (rankSelect && verifyButton && verificationResult) {
+            // Initialize the rank selector and button
+            setupRankSelector();
 
-    // Also check the age of the verification as a fallback
-    checkLastVerificationAge();
+            // Check for a reset
+            checkResetStatus();
+
+            // Fallback check for very old verifications
+            checkLastVerificationAge();
+        } else {
+            console.warn('Required elements not found in DOM');
+        }
+    } catch (error) {
+        console.error('Error initializing rank check page:', error);
+    }
 });
 
 // Function to set up the rank selector and verification button
@@ -196,8 +209,6 @@ function setupRankSelector() {
     const rankSelect = document.getElementById('rlRank');
     const verifyButton = document.getElementById('verifyRankButton');
     const rankPreview = document.getElementById('rankPreview');
-
-    if (!rankSelect || !verifyButton) return;
 
     // Show rank image when selection changes
     rankSelect.addEventListener('change', function() {
@@ -359,7 +370,7 @@ function displayVerifiedRank(data) {
     `;
 }
 
-// More robust reset status check that handles server errors
+// Force a reset regardless of timestamp comparison
 async function checkResetStatus() {
     console.log("Checking leaderboard reset status...");
 
@@ -370,108 +381,80 @@ async function checkResetStatus() {
     }
 
     try {
-        // Get verification time
-        let data;
-        try {
-            data = JSON.parse(localStorage.getItem('rankData') || '{}');
-            console.log("Loaded rank data:", data);
-        } catch (e) {
-            console.error("Error parsing stored rank data:", e);
-            clearVerificationData();
+        // Fetch the reset timestamp
+        console.log("Fetching reset timestamp...");
+        const response = await fetch('/api/reset-timestamp', {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        });
+
+        if (!response.ok) {
+            console.error("API error:", response.status, response.statusText);
             return;
         }
 
-        const verifiedTime = data.verified_at;
-        if (!verifiedTime) {
-            console.log("No verification timestamp, clearing data as precaution");
-            clearVerificationData();
+        const responseText = await response.text();
+        console.log("Raw response:", responseText);
+
+        let resetData;
+        try {
+            resetData = JSON.parse(responseText);
+            console.log("Reset data received:", resetData);
+        } catch (jsonError) {
+            console.error("Error parsing reset data:", jsonError);
             return;
         }
 
-        // Try fetching reset status with explicit cache control
-        try {
-            console.log("Fetching reset timestamp...");
-            const response = await fetch('/api/reset-timestamp', {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'Cache-Control': 'no-cache, no-store, must-revalidate',
-                    'Pragma': 'no-cache',
-                    'Expires': '0'
-                }
-            });
+        // If we get any valid reset data, force a verification reset
+        if (resetData.success && resetData.last_reset) {
+            // Get verification time for logging only
+            const data = JSON.parse(localStorage.getItem('rankData') || '{}');
+            const verifiedTime = data.verified_at;
 
-            if (!response.ok) {
-                console.error("API error:", response.status, response.statusText);
-                return;
+            if (verifiedTime) {
+                // For comparison logging only
+                const resetTimestamp = new Date(resetData.last_reset).getTime();
+                const verifiedTimestamp = new Date(verifiedTime).getTime();
+
+                console.log("Reset timestamp string:", resetData.last_reset);
+                console.log("Reset timestamp (ms):", resetTimestamp);
+                console.log("Verification timestamp (ms):", verifiedTimestamp);
+                console.log("Difference (ms):", verifiedTimestamp - resetTimestamp);
             }
 
-            const responseText = await response.text();
-            console.log("Raw response:", responseText);
+            // ALWAYS reset when any reset data is received
+            console.log("Reset data found, forcing verification reset");
 
-            let resetData;
-            try {
-                resetData = JSON.parse(responseText);
-                console.log("Reset data received:", resetData);
-            } catch (jsonError) {
-                console.error("Error parsing reset data:", jsonError);
-                return;
-            }
-
-            if (!resetData.success || !resetData.last_reset) {
-                console.log("No valid reset data received");
-                return;
-            }
-
-            // Get the reset timestamp
-            const resetTimeStr = resetData.last_reset;
-            console.log("Reset timestamp string:", resetTimeStr);
-
-            // Convert both times to Unix timestamps (milliseconds since epoch)
-            // This removes any timezone issues
-            const resetTimestamp = new Date(resetTimeStr).getTime();
-            const verifiedTimestamp = new Date(verifiedTime).getTime();
-
-            console.log("Reset timestamp (ms):", resetTimestamp);
-            console.log("Verification timestamp (ms):", verifiedTimestamp);
-            console.log("Difference (ms):", verifiedTimestamp - resetTimestamp);
-            console.log("Time should reset?", resetTimestamp > verifiedTimestamp);
-
-            // Force a reset if reset time is more recent than verification time
-            // (or if they happened less than 5 seconds apart - to avoid edge cases)
-            if (resetTimestamp > verifiedTimestamp ||
-                Math.abs(resetTimestamp - verifiedTimestamp) < 5000) {
-                console.log("RESET NEEDED! Clearing verification data");
-
-                // Show reset notification
-                document.getElementById('verificationResult').innerHTML = `
+            // Show reset notification
+            const resultDiv = document.getElementById('verificationResult');
+            if (resultDiv) {
+                resultDiv.innerHTML = `
                     <div class="alert alert-info">
                         <i class="fas fa-sync-alt me-2"></i>
                         Leaderboard reset detected. Refreshing verification status...
                     </div>
                 `;
-
-                // Clear data and reload
-                clearVerificationData();
-                console.log("Reloading page...");
-
-                // Force a hard reload of the page
-                setTimeout(() => {
-                    window.location.href = window.location.pathname +
-                        '?reset=' + new Date().getTime();
-                }, 1000);
-            } else {
-                console.log("Verification is newer than reset, no action needed");
             }
-        } catch (apiError) {
-            console.error("Error fetching reset status:", apiError);
+
+            // Clear data and reload
+            clearVerificationData();
+
+            // Force a hard reload of the page
+            setTimeout(() => {
+                window.location.href = window.location.pathname + '?reset=' + new Date().getTime();
+            }, 1000);
         }
     } catch (error) {
-        console.error('Error in checkResetStatus:', error);
+        console.error('Error checking reset status:', error);
     }
 }
 
-// Add a fallback method for reset detection
+// Fallback verification check based on age
 function checkLastVerificationAge() {
     try {
         // Get verification time
