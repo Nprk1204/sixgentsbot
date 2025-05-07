@@ -1050,31 +1050,50 @@ async def resetleaderboard(ctx, confirmation: str = None):
             backed_up.append(f"Ranks ({rank_count})")
 
         # Call the web API to reset the leaderboard
-        web_reset = "⚠️ Web reset not attempted"
-        try:
-            webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
-            admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
+            # Call the web API to reset the leaderboard
+            web_reset = "⚠️ Web reset not attempted"
+            verification_reset = "⚠️ Verification reset not attempted"
 
-            headers = {
-                'Authorization': admin_token,
-                'Content-Type': 'application/json'
-            }
+            try:
+                webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
+                admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
 
-            data = {
-                'admin_id': str(ctx.author.id),
-                'reason': 'Season reset via Discord command'
-            }
+                headers = {
+                    'Authorization': admin_token,
+                    'Content-Type': 'application/json'
+                }
 
-            response = requests.post(f"{webapp_url}/api/reset-leaderboard",
-                                     headers=headers,
-                                     json=data)
+                data = {
+                    'admin_id': str(ctx.author.id),
+                    'reason': 'Season reset via Discord command'
+                }
 
-            if response.status_code == 200:
-                web_reset = "✅ Web leaderboard reset successfully."
-            else:
-                web_reset = f"❌ Failed to reset web leaderboard (Status: {response.status_code})."
-        except Exception as e:
-            web_reset = f"❌ Error connecting to web leaderboard: {str(e)}"
+                # Reset leaderboard
+                leaderboard_response = requests.post(
+                    f"{webapp_url}/api/reset-leaderboard",
+                    headers=headers,
+                    json=data
+                )
+
+                # Also reset verification
+                verification_response = requests.post(
+                    f"{webapp_url}/api/reset-verification",
+                    headers=headers,
+                    json=data
+                )
+
+                if leaderboard_response.status_code == 200:
+                    web_reset = "✅ Web leaderboard reset successfully."
+                else:
+                    web_reset = f"❌ Failed to reset web leaderboard (Status: {leaderboard_response.status_code})."
+
+                if verification_response.status_code == 200:
+                    verification_reset = "✅ Rank verification reset successfully."
+                else:
+                    verification_reset = f"❌ Failed to reset rank verification (Status: {verification_response.status_code})."
+
+            except Exception as e:
+                web_reset = f"❌ Error connecting to web services: {str(e)}"
 
         # Remove rank roles from all members
         role_reset = await remove_all_rank_roles(ctx.guild)

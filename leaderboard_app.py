@@ -761,19 +761,24 @@ def get_user_rank(discord_username):
 # NEW API ENDPOINT: Get the timestamp of the last leaderboard reset
 @app.route('/api/reset-timestamp', methods=['GET'])
 def get_last_reset_timestamp():
-    """Get the timestamp of the last leaderboard reset"""
+    """Get the timestamp of the last reset (leaderboard or verification)"""
     try:
-        last_reset = resets_collection.find_one({"type": "leaderboard_reset"}, sort=[("timestamp", -1)])
+        # Find the most recent reset of any type
+        last_reset = resets_collection.find_one(
+            {"type": {"$in": ["leaderboard_reset", "verification_reset"]}},
+            sort=[("timestamp", -1)]
+        )
 
         if last_reset:
             # Convert timestamp to ISO format string
             timestamp_str = last_reset["timestamp"].isoformat() if isinstance(last_reset["timestamp"],
-                                                                              datetime.datetime) else str(
+                                                                            datetime.datetime) else str(
                 last_reset["timestamp"])
 
             return jsonify({
                 "success": True,
-                "last_reset": timestamp_str
+                "last_reset": timestamp_str,
+                "reset_type": last_reset.get("type", "unknown")
             })
         else:
             return jsonify({
@@ -894,6 +899,38 @@ def reset_leaderboard():
             "message": f"Error resetting leaderboard: {str(e)}"
         }), 500
 
+
+@app.route('/api/reset-verification', methods=['POST'])
+def reset_verification():
+    """Reset all rank verification status - called during leaderboard reset"""
+    try:
+        # Check for authorization
+        auth_token = request.headers.get('Authorization')
+        if not auth_token or auth_token != os.getenv('ADMIN_TOKEN', 'admin-secret-token'):
+            return jsonify({"success": False, "message": "Unauthorized"}), 401
+
+        # Create a record of the reset
+        reset_timestamp = datetime.datetime.utcnow()
+
+        # Store reset event in the resets collection
+        resets_collection.insert_one({
+            "type": "verification_reset",
+            "timestamp": reset_timestamp,
+            "performed_by": request.json.get("admin_id", "unknown"),
+            "reason": request.json.get("reason", "Rank verification reset")
+        })
+
+        return jsonify({
+            "success": True,
+            "message": "Verification reset successful",
+            "timestamp": reset_timestamp.isoformat()
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error resetting verification: {str(e)}"
+        }), 500
 
 @app.route('/api/verify-rank', methods=['POST'])
 def verify_rank():

@@ -186,7 +186,53 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Fix verification button
     fixVerifyButton();
+
+    // Check if there's been a reset
+    checkResetStatus();
 });
+
+// Check if a reset has occurred since last verification
+async function checkResetStatus() {
+    try {
+        // Fetch the last reset timestamp
+        const response = await fetch('/api/reset-timestamp');
+        const data = await response.json();
+
+        if (data.success && data.last_reset) {
+            // Get the stored verification timestamp
+            const verifiedTime = localStorage.getItem('rankVerifiedTime');
+
+            // If verification time is earlier than the reset time, clear local storage
+            if (verifiedTime) {
+                const resetTime = new Date(data.last_reset);
+                const verifiedDate = new Date(verifiedTime);
+
+                if (verifiedDate < resetTime) {
+                    console.log("Verification data reset detected - clearing local storage");
+                    // Clear the stored data
+                    localStorage.removeItem('rankVerified');
+                    localStorage.removeItem('rankCheckData');
+                    localStorage.removeItem('rankVerifiedTime');
+
+                    // Reset UI elements
+                    const verifyButton = document.getElementById('verifyRankButton');
+                    if (verifyButton) {
+                        verifyButton.disabled = false;
+                        verifyButton.classList.remove('btn-success');
+                        verifyButton.classList.add('btn-primary');
+                        verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+                    }
+
+                    document.getElementById('verificationResult').innerHTML = `
+                        <p class="text-center text-muted">Select your Rocket League rank and click "Verify My Rank" to see your results</p>
+                    `;
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error checking reset status:', error);
+    }
+}
 
 // Fix rank images
 function fixRankImages() {
@@ -291,6 +337,8 @@ function fixVerifyButton() {
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false
                     }));
+                    // Add timestamp for reset checking
+                    localStorage.setItem('rankVerifiedTime', new Date().toISOString());
 
                     // Update button
                     verifyButton.classList.remove('btn-primary');
