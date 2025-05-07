@@ -193,56 +193,87 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Check if a reset has occurred since last verification - improved version
 async function checkResetStatus() {
-    try {
-        console.log("Checking reset status...");
+    console.log("Checking reset status...");
 
+    // Don't check if no verification exists
+    if (!localStorage.getItem('rankVerified')) {
+        console.log("No verification data found, skipping reset check");
+        return;
+    }
+
+    try {
         // Fetch the last reset timestamp
         const response = await fetch('/api/reset-timestamp');
+        console.log("Reset API raw response:", response);
+
+        if (!response.ok) {
+            console.error("API error:", response.status, response.statusText);
+            return;
+        }
+
         const data = await response.json();
-        console.log("Reset API response:", data);
+        console.log("Reset API data:", data);
 
-        if (data.success && data.last_reset) {
-            // Get the stored verification timestamp
-            const verifiedTime = localStorage.getItem('rankVerifiedTime');
-            console.log("Local verification time:", verifiedTime);
+        if (!data.success || !data.last_reset) {
+            console.log("No valid reset data received");
+            return;
+        }
 
-            // If verification time is earlier than the reset time, clear local storage
-            if (verifiedTime) {
-                const resetTime = new Date(data.last_reset);
-                const verifiedDate = new Date(verifiedTime);
+        // Get the stored verification timestamp
+        const verifiedTime = localStorage.getItem('rankVerifiedTime');
+        console.log("Local verification time:", verifiedTime);
 
-                console.log("Reset time:", resetTime);
-                console.log("Verified time:", verifiedDate);
-                console.log("Is verified earlier than reset?", verifiedDate < resetTime);
+        if (!verifiedTime) {
+            console.log("No verification timestamp, forcing reset");
+            clearVerificationData();
+            return;
+        }
 
-                if (verifiedDate < resetTime) {
-                    console.log("RESET DETECTED! Clearing local storage");
-                    // Clear the stored data
-                    localStorage.removeItem('rankVerified');
-                    localStorage.removeItem('rankCheckData');
-                    localStorage.removeItem('rankVerifiedTime');
+        // Compare timestamps
+        const resetTime = new Date(data.last_reset);
+        const verifiedDate = new Date(verifiedTime);
 
-                    // Reset UI elements
-                    const verifyButton = document.getElementById('verifyRankButton');
-                    if (verifyButton) {
-                        verifyButton.disabled = false;
-                        verifyButton.classList.remove('btn-success');
-                        verifyButton.classList.add('btn-primary');
-                        verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
-                    }
+        console.log("Reset time:", resetTime);
+        console.log("Verified time:", verifiedDate);
+        console.log("Is verified earlier than reset?", verifiedDate < resetTime);
 
-                    document.getElementById('verificationResult').innerHTML = `
-                        <p class="text-center text-muted">Select your Rocket League rank and click "Verify My Rank" to see your results</p>
-                    `;
-
-                    // Force refresh the page to ensure clean state
-                    location.reload();
-                }
-            }
+        if (verifiedDate < resetTime) {
+            console.log("RESET DETECTED! Clearing all verification data");
+            clearVerificationData();
+        } else {
+            console.log("Verification is newer than reset, no action needed");
         }
     } catch (error) {
         console.error('Error checking reset status:', error);
     }
+}
+
+// Helper function to clear verification data and reload
+function clearVerificationData() {
+    // Clear the stored data
+    localStorage.removeItem('rankVerified');
+    localStorage.removeItem('rankCheckData');
+    localStorage.removeItem('rankVerifiedTime');
+
+    // Reset UI elements
+    const verifyButton = document.getElementById('verifyRankButton');
+    if (verifyButton) {
+        verifyButton.disabled = false;
+        verifyButton.classList.remove('btn-success');
+        verifyButton.classList.add('btn-primary');
+        verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+    }
+
+    const verificationResult = document.getElementById('verificationResult');
+    if (verificationResult) {
+        verificationResult.innerHTML = `
+            <p class="text-center text-muted">Select your Rocket League rank and click "Verify My Rank" to see your results</p>
+        `;
+    }
+
+    console.log("Reloading page to complete reset");
+    // Force reload the page
+    window.location.href = window.location.pathname + '?reset=' + Date.now();
 }
 
 // Fix rank images
@@ -280,6 +311,7 @@ function fixRankImages() {
 }
 
 // Fix verify button
+// Improved verify button function
 function fixVerifyButton() {
     const verifyButton = document.getElementById('verifyRankButton');
     if (!verifyButton) return;
@@ -299,7 +331,7 @@ function fixVerifyButton() {
                 displayVerifiedRank(data);
             } catch (e) {
                 console.error('Error parsing stored rank data:', e);
-                // If there's an error parsing, clear storage to force re-verification
+                // Clear storage on error
                 localStorage.removeItem('rankVerified');
                 localStorage.removeItem('rankCheckData');
                 localStorage.removeItem('rankVerifiedTime');
@@ -332,16 +364,15 @@ function fixVerifyButton() {
         const rankTier = selectedOption.getAttribute('data-tier');
         const rankName = selectedOption.text;
         const rankValue = rankSelect.value;
-        const rocketLeagueMMR = selectedOption.getAttribute('data-mmr');
 
-        // Get corresponding 6Gents MMR based on tier
-        let sixGentsMMR;
+        // Get correct 6 Gents MMR based on tier
+        let mmr;
         if (rankTier === "Rank A") {
-            sixGentsMMR = "1600";
+            mmr = "1600";
         } else if (rankTier === "Rank B") {
-            sixGentsMMR = "1100";
+            mmr = "1100";
         } else {
-            sixGentsMMR = "600";
+            mmr = "600";
         }
 
         // Show loading state
@@ -359,8 +390,7 @@ function fixVerifyButton() {
                         username: discordUsername,
                         rank: rankName,
                         tier: rankTier,
-                        mmr: rocketLeagueMMR,
-                        sixGentsMMR: sixGentsMMR,
+                        mmr: mmr,
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false
                     }));
@@ -377,8 +407,7 @@ function fixVerifyButton() {
                         username: discordUsername,
                         rank: rankName,
                         tier: rankTier,
-                        mmr: rocketLeagueMMR,
-                        sixGentsMMR: sixGentsMMR,
+                        mmr: mmr,
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false
                     });
@@ -406,7 +435,7 @@ function fixVerifyButton() {
     });
 }
 
-// Display the verified rank - Updated to show both MMR values
+// Simplified display function that only shows the 6 Gents MMR
 function displayVerifiedRank(data) {
     const verificationResult = document.getElementById('verificationResult');
     if (!verificationResult) return;
@@ -424,15 +453,7 @@ function displayVerifiedRank(data) {
             <img src="${imagePath}" alt="${data.rank}" class="img-fluid mb-3" style="max-width: 100px;" onerror="this.style.display='none'">
             <h4 class="mb-2">${data.rank}</h4>
             <span class="badge bg-${getBadgeColor(data.tier)} fs-6 mb-3">${data.tier}</span>
-        </div>
-
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <div>Rocket League MMR:</div>
-            <div><strong>${data.mmr}</strong></div>
-        </div>
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <div>6 Gents Starting MMR:</div>
-            <div><strong>${data.sixGentsMMR}</strong></div>
+            <p class="text-muted">Starting MMR: ${data.mmr}</p>
         </div>
     `;
 
