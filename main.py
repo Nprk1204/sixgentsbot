@@ -979,7 +979,8 @@ async def resetleaderboard(ctx, confirmation: str = None):
 
     # Check if command is used in an allowed channel
     if not is_command_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     # Check if user has admin permissions
@@ -1011,6 +1012,10 @@ async def resetleaderboard(ctx, confirmation: str = None):
     total_documents = player_count + match_count + rank_count
 
     try:
+        # Initialize variables that will be used throughout the function
+        web_reset = "⚠️ Web reset not attempted"
+        verification_reset = "⚠️ Verification reset not attempted"
+
         # Create backup collections with timestamp
         timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
 
@@ -1049,51 +1054,48 @@ async def resetleaderboard(ctx, confirmation: str = None):
             ranks_collection.delete_many({})
             backed_up.append(f"Ranks ({rank_count})")
 
-        # Call the web API to reset the leaderboard
-        web_reset = "⚠️ Web reset not attempted"
-        verification_reset = "⚠️ Verification reset not attempted"
-
-
+        # Call the web API to reset the leaderboard and verification status
         try:
-                webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
-                admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
+            webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
+            admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
 
-                headers = {
-                    'Authorization': admin_token,
-                    'Content-Type': 'application/json'
-                }
+            headers = {
+                'Authorization': admin_token,
+                'Content-Type': 'application/json'
+            }
 
-                data = {
-                    'admin_id': str(ctx.author.id),
-                    'reason': 'Season reset via Discord command'
-                }
+            data = {
+                'admin_id': str(ctx.author.id),
+                'reason': 'Season reset via Discord command'
+            }
 
-                # Reset leaderboard
-                leaderboard_response = requests.post(
-                    f"{webapp_url}/api/reset-leaderboard",
-                    headers=headers,
-                    json=data
-                )
+            # Reset leaderboard
+            leaderboard_response = requests.post(
+                f"{webapp_url}/api/reset-leaderboard",
+                headers=headers,
+                json=data
+            )
 
-                # Also reset verification
-                verification_response = requests.post(
-                    f"{webapp_url}/api/reset-verification",
-                    headers=headers,
-                    json=data
-                )
+            # Also reset verification
+            verification_response = requests.post(
+                f"{webapp_url}/api/reset-verification",
+                headers=headers,
+                json=data
+            )
 
-                if leaderboard_response.status_code == 200:
-                    web_reset = "✅ Web leaderboard reset successfully."
-                else:
-                    web_reset = f"❌ Failed to reset web leaderboard (Status: {leaderboard_response.status_code})."
+            if leaderboard_response.status_code == 200:
+                web_reset = "✅ Web leaderboard reset successfully."
+            else:
+                web_reset = f"❌ Failed to reset web leaderboard (Status: {leaderboard_response.status_code})."
 
-                if verification_response.status_code == 200:
-                    verification_reset = "✅ Rank verification reset successfully."
-                else:
-                    verification_reset = f"❌ Failed to reset rank verification (Status: {verification_response.status_code})."
+            if verification_response.status_code == 200:
+                verification_reset = "✅ Rank verification reset successfully."
+            else:
+                verification_reset = f"❌ Failed to reset rank verification (Status: {verification_response.status_code})."
 
         except Exception as e:
             web_reset = f"❌ Error connecting to web services: {str(e)}"
+            # Keep verification_reset with its default value
 
         # Remove rank roles from all members
         role_reset = await remove_all_rank_roles(ctx.guild)
@@ -1107,6 +1109,9 @@ async def resetleaderboard(ctx, confirmation: str = None):
             "performed_by_name": ctx.author.display_name,
             "reason": "Season reset via Discord command"
         })
+
+        # Debug - print variable values before creating embed
+        print(f"Debug - web_reset: {web_reset}, verification_reset: {verification_reset}")
 
         # Send confirmation
         embed = discord.Embed(
@@ -1131,6 +1136,12 @@ async def resetleaderboard(ctx, confirmation: str = None):
         embed.add_field(
             name="Web Leaderboard Status",
             value=web_reset,
+            inline=False
+        )
+
+        embed.add_field(
+            name="Verification Reset Status",
+            value=verification_reset,
             inline=False
         )
 
