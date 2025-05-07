@@ -184,8 +184,11 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize the rank selector and button
     setupRankSelector();
 
-    // Check if a reset has occurred
+    // Try the API reset check first
     checkResetStatus();
+
+    // Also check the age of the verification as a fallback
+    checkLastVerificationAge();
 });
 
 // Function to set up the rank selector and verification button
@@ -213,16 +216,24 @@ function setupRankSelector() {
 
     // Check if already verified
     if (localStorage.getItem('rankVerified')) {
-        const data = JSON.parse(localStorage.getItem('rankData'));
-        if (data) {
-            // Update button state
-            verifyButton.disabled = true;
-            verifyButton.classList.remove('btn-primary');
-            verifyButton.classList.add('btn-success');
-            verifyButton.innerHTML = 'Rank Verified';
+        try {
+            const data = JSON.parse(localStorage.getItem('rankData'));
+            if (data) {
+                // Update button state
+                verifyButton.disabled = true;
+                verifyButton.classList.remove('btn-primary');
+                verifyButton.classList.add('btn-success');
+                verifyButton.innerHTML = 'Rank Verified';
 
-            // Display saved data
-            displayVerifiedRank(data);
+                // Display saved data
+                displayVerifiedRank(data);
+            } else {
+                // Invalid data, clear it
+                clearVerificationData();
+            }
+        } catch (error) {
+            console.error("Error loading saved verification:", error);
+            clearVerificationData();
         }
     }
 
@@ -293,7 +304,7 @@ function setupRankSelector() {
                     verifyButton.disabled = false;
                     verifyButton.classList.remove('btn-success');
                     verifyButton.classList.add('btn-primary');
-                    verifyButton.innerHTML = 'Verify My Rank';
+                    verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
 
                     const resultDiv = document.getElementById('verificationResult');
                     if (resultDiv) {
@@ -308,7 +319,7 @@ function setupRankSelector() {
             .catch(error => {
                 console.error('Error:', error);
                 verifyButton.disabled = false;
-                verifyButton.innerHTML = 'Verify My Rank';
+                verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
 
                 const resultDiv = document.getElementById('verificationResult');
                 if (resultDiv) {
@@ -348,7 +359,7 @@ function displayVerifiedRank(data) {
     `;
 }
 
-// Simplified reset status check
+// More robust reset status check that handles server errors
 async function checkResetStatus() {
     console.log("Checking leaderboard reset status...");
 
@@ -360,52 +371,120 @@ async function checkResetStatus() {
 
     try {
         // Get verification time
-        const data = JSON.parse(localStorage.getItem('rankData') || '{}');
-        const verifiedTime = data.verified_at;
+        let data;
+        try {
+            data = JSON.parse(localStorage.getItem('rankData') || '{}');
+            console.log("Loaded rank data:", data);
+        } catch (e) {
+            console.error("Error parsing stored rank data:", e);
+            clearVerificationData();
+            return;
+        }
 
+        const verifiedTime = data.verified_at;
         if (!verifiedTime) {
             console.log("No verification timestamp, clearing data as precaution");
             clearVerificationData();
             return;
         }
 
-        // Fetch the last reset timestamp
-        const response = await fetch('/api/reset-timestamp');
-        if (!response.ok) {
-            console.error("API error:", response.status);
-            return;
-        }
+        // Try alternative approach for fetching reset status
+        try {
+            console.log("Fetching reset timestamp...");
+            const response = await fetch('/api/reset-timestamp', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Cache-Control': 'no-cache'
+                },
+                cache: 'no-store'
+            });
 
-        const resetData = await response.json();
-        if (!resetData.success || !resetData.last_reset) {
-            console.log("No valid reset data received");
-            return;
-        }
+            if (!response.ok) {
+                console.error("API error:", response.status, response.statusText);
+                // Continue with existing verification instead of failing
+                console.log("Continuing with existing verification");
+                return;
+            }
 
-        // Compare timestamps
-        const resetTime = new Date(resetData.last_reset);
-        const verifiedDate = new Date(verifiedTime);
+            const responseText = await response.text();
+            console.log("Raw response:", responseText);
 
-        console.log("Reset time:", resetTime);
-        console.log("Verified time:", verifiedDate);
+            let resetData;
+            try {
+                resetData = JSON.parse(responseText);
+                console.log("Reset data received:", resetData);
+            } catch (jsonError) {
+                console.error("Error parsing reset data:", jsonError);
+                return;
+            }
 
-        if (verifiedDate < resetTime) {
-            console.log("RESET DETECTED! Clearing verification data and reloading");
-            clearVerificationData();
-            // Force reload the page after a short delay
-            setTimeout(function() {
-                window.location.reload();
-            }, 500);
-        } else {
-            console.log("Verification is newer than reset, no action needed");
+            if (!resetData.success || !resetData.last_reset) {
+                console.log("No valid reset data received");
+                return;
+            }
+
+            // Compare timestamps
+            const resetTime = new Date(resetData.last_reset);
+            const verifiedDate = new Date(verifiedTime);
+
+            console.log("Reset time:", resetTime);
+            console.log("Verified time:", verifiedDate);
+            console.log("Reset time > Verified time?", resetTime > verifiedDate);
+
+            if (resetTime > verifiedDate) {
+                console.log("RESET DETECTED! Clearing verification data");
+                clearVerificationData();
+                console.log("Reloading page...");
+                // Use a timeout to ensure the UI updates before reload
+                setTimeout(() => {
+                    window.location.href = window.location.pathname + '?reset=' + new Date().getTime();
+                }, 500);
+            } else {
+                console.log("Verification is newer than reset, no action needed");
+            }
+        } catch (apiError) {
+            // If API fails, just log the error and continue with existing verification
+            console.error("Error fetching reset status:", apiError);
         }
     } catch (error) {
-        console.error('Error checking reset status:', error);
+        console.error('Error in checkResetStatus:', error);
+    }
+}
+
+// Add a fallback method for reset detection
+function checkLastVerificationAge() {
+    try {
+        // Get verification time
+        const data = JSON.parse(localStorage.getItem('rankData') || '{}');
+        const verifiedTime = data.verified_at;
+
+        if (!verifiedTime) return false;
+
+        const verifiedDate = new Date(verifiedTime);
+        const now = new Date();
+
+        // Calculate days since verification
+        const daysSinceVerification = (now - verifiedDate) / (1000 * 60 * 60 * 24);
+        console.log("Days since last verification:", daysSinceVerification);
+
+        // If verification is older than 30 days, consider it stale
+        if (daysSinceVerification > 30) {
+            console.log("Verification is older than 30 days, forcing reset");
+            clearVerificationData();
+            return true;
+        }
+
+        return false;
+    } catch (error) {
+        console.error("Error checking verification age:", error);
+        return false;
     }
 }
 
 // Clear verification data
 function clearVerificationData() {
+    console.log("Clearing verification data");
     localStorage.removeItem('rankVerified');
     localStorage.removeItem('rankData');
 

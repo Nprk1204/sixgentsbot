@@ -1,3 +1,9 @@
+import random
+import asyncio
+import discord
+import uuid
+
+
 class CaptainsSystem:
     def __init__(self, db, queue_handler, match_system=None):
         self.queue = queue_handler
