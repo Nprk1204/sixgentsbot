@@ -1053,6 +1053,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
         web_reset = "⚠️ Web reset not attempted"
         verification_reset = "⚠️ Verification reset not attempted"
 
+
         try:
                 webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
                 admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
