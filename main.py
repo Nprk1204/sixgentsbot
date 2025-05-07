@@ -1050,11 +1050,10 @@ async def resetleaderboard(ctx, confirmation: str = None):
             backed_up.append(f"Ranks ({rank_count})")
 
         # Call the web API to reset the leaderboard
-            # Call the web API to reset the leaderboard
-            web_reset = "⚠️ Web reset not attempted"
-            verification_reset = "⚠️ Verification reset not attempted"
+        web_reset = "⚠️ Web reset not attempted"
+        verification_reset = "⚠️ Verification reset not attempted"
 
-            try:
+        try:
                 webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
                 admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
 
@@ -1092,8 +1091,8 @@ async def resetleaderboard(ctx, confirmation: str = None):
                 else:
                     verification_reset = f"❌ Failed to reset rank verification (Status: {verification_response.status_code})."
 
-            except Exception as e:
-                web_reset = f"❌ Error connecting to web services: {str(e)}"
+        except Exception as e:
+            web_reset = f"❌ Error connecting to web services: {str(e)}"
 
         # Remove rank roles from all members
         role_reset = await remove_all_rank_roles(ctx.guild)
