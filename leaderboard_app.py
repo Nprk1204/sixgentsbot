@@ -895,6 +895,46 @@ def reset_leaderboard():
         }), 500
 
 
+@app.route('/api/verify-rank', methods=['POST'])
+def verify_rank():
+    """API endpoint to verify a player's rank and assign a Discord role"""
+    data = request.json
+    if not data:
+        return jsonify({"success": False, "message": "No data provided"}), 400
+
+    discord_username = data.get('discord_username')
+    rank = data.get('rank')
+    tier = data.get('tier')
+    mmr = data.get('mmr')
+
+    if not discord_username or not rank or not tier or not mmr:
+        return jsonify({"success": False, "message": "Missing required fields"}), 400
+
+    try:
+        # Store the rank data in the database
+        ranks_collection.insert_one({
+            "discord_username": discord_username,
+            "rank": rank,
+            "tier": tier,
+            "mmr": int(mmr),
+            "timestamp": datetime.datetime.utcnow()
+        })
+
+        # Try to assign the Discord role
+        role_result = assign_discord_role(discord_username, tier)
+
+        return jsonify({
+            "success": True,
+            "message": "Rank verified successfully",
+            "role_assignment": role_result
+        })
+    except Exception as e:
+        print(f"Error in verify_rank: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }), 500
+
 @app.errorhandler(404)
 def page_not_found(e):
     return render_template('404.html'), 404

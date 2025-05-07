@@ -1126,3 +1126,75 @@ a:hover {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary);
 }
+
+/* Custom rank select styling */
+.rank-select-wrapper {
+    position: relative;
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+.custom-rank-select {
+    position: relative;
+    width: 100%;
+}
+
+.selected-rank {
+    background-color: var(--dark-medium);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 5px;
+    padding: 10px 15px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+}
+
+.selected-rank:after {
+    content: '▼';
+    position: absolute;
+    right: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.rank-options {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: var(--dark-medium);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 5px 5px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 100;
+    display: none;
+}
+
+.rank-options.show {
+    display: block;
+}
+
+.rank-option {
+    padding: 10px 15px;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+}
+
+.rank-option:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.rank-icon {
+    width: 25px;
+    height: 25px;
+    margin-right: 10px;
+    object-fit: contain;
+}
