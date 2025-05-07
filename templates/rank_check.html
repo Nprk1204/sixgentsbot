@@ -62,15 +62,15 @@
                             <option value="diamond_3" data-mmr="600" data-tier="Rank C" data-icon="/static/img/ranks/diamond_3.png">Diamond III</option>
 
                             <!-- Champion -->
-                            <option value="champion_1" data-mmr="1100" data-tier="Rank B" data-icon="/static/img/ranks/champion_1.png">Champion I</option>
-                            <option value="champion_2" data-mmr="1350" data-tier="Rank B" data-icon="/static/img/ranks/champion_2.png">Champion II</option>
-                            <option value="champion_3" data-mmr="1600" data-tier="Rank B" data-icon="/static/img/ranks/champion_3.png">Champion III</option>
+                            <option value="champion_1" data-mmr="800" data-tier="Rank B" data-icon="/static/img/ranks/champion_1.png">Champion I</option>
+                            <option value="champion_2" data-mmr="950" data-tier="Rank B" data-icon="/static/img/ranks/champion_2.png">Champion II</option>
+                            <option value="champion_3" data-mmr="1100" data-tier="Rank B" data-icon="/static/img/ranks/champion_3.png">Champion III</option>
 
                             <!-- Grand Champion -->
-                            <option value="grand_champion_1" data-mmr="1600" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_1.png">Grand Champion I</option>
-                            <option value="grand_champion_2" data-mmr="1800" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_2.png">Grand Champion II</option>
-                            <option value="grand_champion_3" data-mmr="2000" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_3.png">Grand Champion III</option>
-                            <option value="ssl" data-mmr="2200" data-tier="Rank A" data-icon="/static/img/ranks/ssl.png">Supersonic Legend</option>
+                            <option value="grand_champion_1" data-mmr="1300" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_1.png">Grand Champion I</option>
+                            <option value="grand_champion_2" data-mmr="1500" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_2.png">Grand Champion II</option>
+                            <option value="grand_champion_3" data-mmr="1750" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_3.png">Grand Champion III</option>
+                            <option value="ssl" data-mmr="2000" data-tier="Rank A" data-icon="/static/img/ranks/ssl.png">Supersonic Legend</option>
                         </select>
                         <div id="rankPreview" class="mt-3 text-center d-none">
                             <img id="rankImage" src="" alt="Rank Icon" class="img-fluid mb-2" style="max-width: 80px;">
@@ -107,7 +107,7 @@
                         </div>
                         <div class="rank-body">
                             <h5 class="rank-title">Rank A</h5>
-                            <p class="rank-description">Grand Champion II & Above</p>
+                            <p class="rank-description">Grand Champion I & Above</p>
                             <p class="rank-mmr">MMR Range: 1600+</p>
                             <span class="badge bg-danger">Rank A Role</span>
                         </div>
@@ -121,7 +121,7 @@
                         </div>
                         <div class="rank-body">
                             <h5 class="rank-title">Rank B</h5>
-                            <p class="rank-description">Champion I to Grand Champion I</p>
+                            <p class="rank-description">Champion I to Champion III</p>
                             <p class="rank-mmr">MMR Range: 1100 - 1600</p>
                             <span class="badge bg-primary">Rank B Role</span>
                         </div>
@@ -136,7 +136,7 @@
                         <div class="rank-body">
                             <h5 class="rank-title">Rank C</h5>
                             <p class="rank-description">Diamond III and below</p>
-                            <p class="rank-mmr">MMR Range:    0 - 1100</p>
+                            <p class="rank-mmr">MMR Range: 0 - 1100</p>
                             <span class="badge bg-success">Rank C Role</span>
                         </div>
                     </div>
@@ -187,15 +187,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // Fix verification button
     fixVerifyButton();
 
-    // Check if there's been a reset
+    // Check if there's been a reset - improved implementation
     checkResetStatus();
 });
 
-// Check if a reset has occurred since last verification
+// Check if a reset has occurred since last verification - improved version
 async function checkResetStatus() {
     try {
-        // Clear console for debugging
-        console.clear();
         console.log("Checking reset status...");
 
         // Fetch the last reset timestamp
@@ -238,7 +236,7 @@ async function checkResetStatus() {
                     `;
 
                     // Force refresh the page to ensure clean state
-                    // location.reload();
+                    location.reload();
                 }
             }
         }
@@ -301,6 +299,11 @@ function fixVerifyButton() {
                 displayVerifiedRank(data);
             } catch (e) {
                 console.error('Error parsing stored rank data:', e);
+                // If there's an error parsing, clear storage to force re-verification
+                localStorage.removeItem('rankVerified');
+                localStorage.removeItem('rankCheckData');
+                localStorage.removeItem('rankVerifiedTime');
+                location.reload();
             }
         }
     }
@@ -329,7 +332,17 @@ function fixVerifyButton() {
         const rankTier = selectedOption.getAttribute('data-tier');
         const rankName = selectedOption.text;
         const rankValue = rankSelect.value;
-        const startingMMR = selectedOption.getAttribute('data-mmr');
+        const rocketLeagueMMR = selectedOption.getAttribute('data-mmr');
+
+        // Get corresponding 6Gents MMR based on tier
+        let sixGentsMMR;
+        if (rankTier === "Rank A") {
+            sixGentsMMR = "1600";
+        } else if (rankTier === "Rank B") {
+            sixGentsMMR = "1100";
+        } else {
+            sixGentsMMR = "600";
+        }
 
         // Show loading state
         verifyButton.disabled = true;
@@ -346,7 +359,8 @@ function fixVerifyButton() {
                         username: discordUsername,
                         rank: rankName,
                         tier: rankTier,
-                        mmr: startingMMR,
+                        mmr: rocketLeagueMMR,
+                        sixGentsMMR: sixGentsMMR,
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false
                     }));
@@ -363,7 +377,8 @@ function fixVerifyButton() {
                         username: discordUsername,
                         rank: rankName,
                         tier: rankTier,
-                        mmr: startingMMR,
+                        mmr: rocketLeagueMMR,
+                        sixGentsMMR: sixGentsMMR,
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false
                     });
@@ -391,7 +406,7 @@ function fixVerifyButton() {
     });
 }
 
-// Display the verified rank
+// Display the verified rank - Updated to show both MMR values
 function displayVerifiedRank(data) {
     const verificationResult = document.getElementById('verificationResult');
     if (!verificationResult) return;
@@ -409,9 +424,29 @@ function displayVerifiedRank(data) {
             <img src="${imagePath}" alt="${data.rank}" class="img-fluid mb-3" style="max-width: 100px;" onerror="this.style.display='none'">
             <h4 class="mb-2">${data.rank}</h4>
             <span class="badge bg-${getBadgeColor(data.tier)} fs-6 mb-3">${data.tier}</span>
-            <p class="text-muted">Starting MMR: ${data.mmr}</p>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>Rocket League MMR:</div>
+            <div><strong>${data.mmr}</strong></div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>6 Gents Starting MMR:</div>
+            <div><strong>${data.sixGentsMMR}</strong></div>
         </div>
     `;
+
+    // Add Discord role status if available
+    if (data.discord_updated !== undefined) {
+        html += `
+            <div class="alert alert-${data.discord_updated ? 'success' : 'warning'} mt-3">
+                <i class="fab fa-discord me-2"></i>
+                ${data.discord_updated
+                    ? 'Discord role assigned successfully!'
+                    : 'Could not assign Discord role automatically. Please contact an admin.'}
+            </div>
+        `;
+    }
 
     verificationResult.innerHTML = html;
 }
