@@ -194,21 +194,31 @@ document.addEventListener('DOMContentLoaded', function() {
 // Check if a reset has occurred since last verification
 async function checkResetStatus() {
     try {
+        // Clear console for debugging
+        console.clear();
+        console.log("Checking reset status...");
+
         // Fetch the last reset timestamp
         const response = await fetch('/api/reset-timestamp');
         const data = await response.json();
+        console.log("Reset API response:", data);
 
         if (data.success && data.last_reset) {
             // Get the stored verification timestamp
             const verifiedTime = localStorage.getItem('rankVerifiedTime');
+            console.log("Local verification time:", verifiedTime);
 
             // If verification time is earlier than the reset time, clear local storage
             if (verifiedTime) {
                 const resetTime = new Date(data.last_reset);
                 const verifiedDate = new Date(verifiedTime);
 
+                console.log("Reset time:", resetTime);
+                console.log("Verified time:", verifiedDate);
+                console.log("Is verified earlier than reset?", verifiedDate < resetTime);
+
                 if (verifiedDate < resetTime) {
-                    console.log("Verification data reset detected - clearing local storage");
+                    console.log("RESET DETECTED! Clearing local storage");
                     // Clear the stored data
                     localStorage.removeItem('rankVerified');
                     localStorage.removeItem('rankCheckData');
@@ -226,6 +236,9 @@ async function checkResetStatus() {
                     document.getElementById('verificationResult').innerHTML = `
                         <p class="text-center text-muted">Select your Rocket League rank and click "Verify My Rank" to see your results</p>
                     `;
+
+                    // Force refresh the page to ensure clean state
+                    // location.reload();
                 }
             }
         }
