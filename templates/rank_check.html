@@ -388,22 +388,21 @@ async function checkResetStatus() {
             return;
         }
 
-        // Try alternative approach for fetching reset status
+        // Try fetching reset status with explicit cache control
         try {
             console.log("Fetching reset timestamp...");
             const response = await fetch('/api/reset-timestamp', {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json',
-                    'Cache-Control': 'no-cache'
-                },
-                cache: 'no-store'
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache',
+                    'Expires': '0'
+                }
             });
 
             if (!response.ok) {
                 console.error("API error:", response.status, response.statusText);
-                // Continue with existing verification instead of failing
-                console.log("Continuing with existing verification");
                 return;
             }
 
@@ -424,27 +423,47 @@ async function checkResetStatus() {
                 return;
             }
 
-            // Compare timestamps
-            const resetTime = new Date(resetData.last_reset);
-            const verifiedDate = new Date(verifiedTime);
+            // Get the reset timestamp
+            const resetTimeStr = resetData.last_reset;
+            console.log("Reset timestamp string:", resetTimeStr);
 
-            console.log("Reset time:", resetTime);
-            console.log("Verified time:", verifiedDate);
-            console.log("Reset time > Verified time?", resetTime > verifiedDate);
+            // Convert both times to Unix timestamps (milliseconds since epoch)
+            // This removes any timezone issues
+            const resetTimestamp = new Date(resetTimeStr).getTime();
+            const verifiedTimestamp = new Date(verifiedTime).getTime();
 
-            if (resetTime > verifiedDate) {
-                console.log("RESET DETECTED! Clearing verification data");
+            console.log("Reset timestamp (ms):", resetTimestamp);
+            console.log("Verification timestamp (ms):", verifiedTimestamp);
+            console.log("Difference (ms):", verifiedTimestamp - resetTimestamp);
+            console.log("Time should reset?", resetTimestamp > verifiedTimestamp);
+
+            // Force a reset if reset time is more recent than verification time
+            // (or if they happened less than 5 seconds apart - to avoid edge cases)
+            if (resetTimestamp > verifiedTimestamp ||
+                Math.abs(resetTimestamp - verifiedTimestamp) < 5000) {
+                console.log("RESET NEEDED! Clearing verification data");
+
+                // Show reset notification
+                document.getElementById('verificationResult').innerHTML = `
+                    <div class="alert alert-info">
+                        <i class="fas fa-sync-alt me-2"></i>
+                        Leaderboard reset detected. Refreshing verification status...
+                    </div>
+                `;
+
+                // Clear data and reload
                 clearVerificationData();
                 console.log("Reloading page...");
-                // Use a timeout to ensure the UI updates before reload
+
+                // Force a hard reload of the page
                 setTimeout(() => {
-                    window.location.href = window.location.pathname + '?reset=' + new Date().getTime();
-                }, 500);
+                    window.location.href = window.location.pathname +
+                        '?reset=' + new Date().getTime();
+                }, 1000);
             } else {
                 console.log("Verification is newer than reset, no action needed");
             }
         } catch (apiError) {
-            // If API fails, just log the error and continue with existing verification
             console.error("Error fetching reset status:", apiError);
         }
     } catch (error) {
