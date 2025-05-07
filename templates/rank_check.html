@@ -289,7 +289,10 @@ function setupRankSelector() {
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    // Save verification data
+                    // Save verification data - use server timestamp for verification
+                    const now = new Date().toISOString();
+                    console.log("Setting verification timestamp to:", now);
+
                     const saveData = {
                         username: discordUsername,
                         rank: rankName,
@@ -297,7 +300,7 @@ function setupRankSelector() {
                         mmr: mmr,
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false,
-                        verified_at: new Date().toISOString()
+                        verified_at: now
                     };
 
                     localStorage.setItem('rankVerified', 'true');
@@ -370,7 +373,7 @@ function displayVerifiedRank(data) {
     `;
 }
 
-// Force a reset regardless of timestamp comparison
+// Check reset status, but store reset info in localStorage
 async function checkResetStatus() {
     console.log("Checking leaderboard reset status...");
 
@@ -410,25 +413,20 @@ async function checkResetStatus() {
             return;
         }
 
-        // If we get any valid reset data, force a verification reset
-        if (resetData.success && resetData.last_reset) {
-            // Get verification time for logging only
-            const data = JSON.parse(localStorage.getItem('rankData') || '{}');
-            const verifiedTime = data.verified_at;
+        if (!resetData.success || !resetData.last_reset) {
+            console.log("No valid reset data received");
+            return;
+        }
 
-            if (verifiedTime) {
-                // For comparison logging only
-                const resetTimestamp = new Date(resetData.last_reset).getTime();
-                const verifiedTimestamp = new Date(verifiedTime).getTime();
+        // Store the last known reset timestamp
+        const currentResetTime = resetData.last_reset;
+        const storedResetTime = localStorage.getItem('lastResetTime');
 
-                console.log("Reset timestamp string:", resetData.last_reset);
-                console.log("Reset timestamp (ms):", resetTimestamp);
-                console.log("Verification timestamp (ms):", verifiedTimestamp);
-                console.log("Difference (ms):", verifiedTimestamp - resetTimestamp);
-            }
-
-            // ALWAYS reset when any reset data is received
-            console.log("Reset data found, forcing verification reset");
+        // If there's no stored reset time or it's different from the current one,
+        // then we need to reset verification
+        if (!storedResetTime || storedResetTime !== currentResetTime) {
+            console.log("New reset detected:", currentResetTime);
+            console.log("Previous stored reset:", storedResetTime);
 
             // Show reset notification
             const resultDiv = document.getElementById('verificationResult');
@@ -441,13 +439,18 @@ async function checkResetStatus() {
                 `;
             }
 
-            // Clear data and reload
+            // Store the new reset time
+            localStorage.setItem('lastResetTime', currentResetTime);
+
+            // Clear verification data
             clearVerificationData();
 
             // Force a hard reload of the page
             setTimeout(() => {
                 window.location.href = window.location.pathname + '?reset=' + new Date().getTime();
             }, 1000);
+        } else {
+            console.log("No new reset detected, verification remains valid");
         }
     } catch (error) {
         console.error('Error checking reset status:', error);
@@ -489,6 +492,7 @@ function clearVerificationData() {
     console.log("Clearing verification data");
     localStorage.removeItem('rankVerified');
     localStorage.removeItem('rankData');
+    // Don't remove lastResetTime as we need it for comparisons
 
     // Reset UI elements
     const verifyButton = document.getElementById('verifyRankButton');
