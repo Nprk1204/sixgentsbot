@@ -654,6 +654,7 @@ def check_rank():
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
     manual_tier = request.args.get('manual_tier', '')  # For manual tier selection
+    manual_mmr = request.args.get('manual_mmr', '')  # Add this parameter to capture MMR from HTML
 
     if not (platform and username) and not manual_tier:
         return jsonify(
@@ -665,6 +666,7 @@ def check_rank():
     print(f"Username: {username}")
     print(f"Discord username: {discord_username}")
     print(f"Manual tier: {manual_tier}")
+    print(f"Manual MMR: {manual_mmr}")  # Add debug logging for MMR
     print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
     print(f"API Key length: {len(RLTRACKER_API_KEY) if RLTRACKER_API_KEY else 0}")
     print(f"========================")
@@ -672,7 +674,10 @@ def check_rank():
     # PRIORITY 1: Handle manual tier selection if provided
     if manual_tier:
         print(f"Using manually provided tier: {manual_tier}")
-        mmr = get_mmr_from_rank(manual_tier)
+
+        # Use the provided MMR if available, otherwise fall back to the function
+        mmr = int(manual_mmr) if manual_mmr and manual_mmr.isdigit() else get_mmr_from_rank(manual_tier)
+        print(f"Using MMR value: {mmr} (from {'manual input' if manual_mmr and manual_mmr.isdigit() else 'function'})")
 
         manual_result = {
             "success": True,

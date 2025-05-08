@@ -267,25 +267,24 @@ function setupRankSelector() {
         // Get rank details
         const selectedOption = rankSelect.options[rankSelect.selectedIndex];
         const rankTier = selectedOption.getAttribute('data-tier');
+        const rankMMR = selectedOption.getAttribute('data-mmr');  // Get MMR from data attribute
         const rankName = selectedOption.text;
         const rankValue = rankSelect.value;
-
-        // Get MMR based on tier
-        let mmr;
-        if (rankTier === "Rank A") {
-            mmr = 1600;
-        } else if (rankTier === "Rank B") {
-            mmr = 1100;
-        } else {
-            mmr = 600;
-        }
 
         // Show loading
         verifyButton.disabled = true;
         verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
 
-        // Call API
-        fetch(`/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}`)
+        // Call API with the MMR value included
+        let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}`;
+
+        // Add the MMR parameter from the data attribute
+        if (rankMMR) {
+            apiUrl += `&manual_mmr=${encodeURIComponent(rankMMR)}`;
+        }
+
+        // Make the API request
+        fetch(apiUrl)
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -297,7 +296,7 @@ function setupRankSelector() {
                         username: discordUsername,
                         rank: rankName,
                         tier: rankTier,
-                        mmr: mmr,
+                        mmr: data.mmr,  // Use the MMR from the response
                         rankValue: rankValue,
                         discord_updated: data.role_assignment?.success || false,
                         verified_at: now
