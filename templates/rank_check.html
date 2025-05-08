@@ -276,10 +276,12 @@ function setupRankSelector() {
         verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
 
         // Call API with the MMR value included
+        console.log(`Getting MMR from selected rank: ${rankMMR}`);
         let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}`;
 
         // Add the MMR parameter from the data attribute
         if (rankMMR) {
+            console.log(`Sending MMR value to server: ${rankMMR}`);
             apiUrl += `&manual_mmr=${encodeURIComponent(rankMMR)}`;
         }
 

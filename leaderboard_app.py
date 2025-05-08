@@ -476,6 +476,9 @@ def extract_3v3_rank(api_data):
 def store_rank_data(discord_username, game_username, platform, rank_data, discord_id=None):
     """Store rank check data in the database"""
     try:
+        # Debug print
+        print(f"Storing rank data for {discord_username} with MMR: {rank_data.get('mmr')}")
+
         # Create rank document
         rank_document = {
             "discord_username": discord_username,
@@ -487,6 +490,9 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
             "mmr": rank_data.get("mmr"),  # This should be the MMR from manual input
             "timestamp": datetime.datetime.utcnow()
         }
+
+        # Debug print
+        print(f"Rank document to store: {rank_document}")
 
         # Check if this user already has a rank record
         existing_rank = ranks_collection.find_one({"discord_username": discord_username})
@@ -687,11 +693,15 @@ def check_rank():
             "manual_verification": True
         }
 
+        # NEW: Add debug print to confirm MMR
+        print(f"DEBUG: Setting MMR to {mmr} for player with Discord username {discord_username}")
+
         # Handle Discord role assignment if username provided
         if discord_username:
             print(f"Storing manual rank data for Discord user: {discord_username}")
             # Pass the Discord ID if available
-            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", manual_result, discord_id=discord_id)
+            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", manual_result,
+                            discord_id=discord_id)
             role_result = assign_discord_role(discord_username, manual_tier)
             manual_result["role_assignment"] = role_result
 

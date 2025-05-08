@@ -262,19 +262,29 @@ class MatchSystem:
                 # We'll use the rank-based starting MMR if available
                 starting_mmr = 600  # Default fallback
 
-                # Check for rank record by discord_id
+                # MODIFY THIS SECTION - Better rank record lookup
+                print(f"Looking for rank record for player: {player['name']} (ID: {player_id})")
+                # First try by discord_id
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
-
-                # If not found, try by discord_username
-                if not rank_record:
-                    # Try some alternative lookup methods
-                    # Check by username in ranks collection
+                if rank_record:
+                    print(f"Found rank record by discord_id with MMR: {rank_record.get('mmr')}")
+                else:
+                    # Try by discord_username - exact match
                     rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
-
-                    if not rank_record:
-                        # Just use the default MMR
-                        print(
-                            f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
+                    if rank_record:
+                        print(f"Found rank record by exact discord_username with MMR: {rank_record.get('mmr')}")
+                    else:
+                        # Try case-insensitive username match
+                        import re
+                        name_pattern = re.compile(f"^{re.escape(player['name'])}$", re.IGNORECASE)
+                        rank_record = db.get_collection('ranks').find_one(
+                            {"discord_username": {"$regex": name_pattern}})
+                        if rank_record:
+                            print(f"Found rank record by case-insensitive username with MMR: {rank_record.get('mmr')}")
+                        else:
+                            print(
+                                f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
+                # END MODIFY
 
                 # Use found MMR if available
                 if rank_record and "mmr" in rank_record:
@@ -322,19 +332,29 @@ class MatchSystem:
                 # We'll use the rank-based starting MMR if available
                 starting_mmr = 600  # Default fallback
 
-                # Check for rank record by discord_id
+                # MODIFY THIS SECTION - Better rank record lookup
+                print(f"Looking for rank record for player: {player['name']} (ID: {player_id})")
+                # First try by discord_id
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
-
-                # If not found, try by discord_username
-                if not rank_record:
-                    # Try some alternative lookup methods
-                    # Check by username in ranks collection
+                if rank_record:
+                    print(f"Found rank record by discord_id with MMR: {rank_record.get('mmr')}")
+                else:
+                    # Try by discord_username - exact match
                     rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
-
-                    if not rank_record:
-                        # Just use the default MMR
-                        print(
-                            f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
+                    if rank_record:
+                        print(f"Found rank record by exact discord_username with MMR: {rank_record.get('mmr')}")
+                    else:
+                        # Try case-insensitive username match
+                        import re
+                        name_pattern = re.compile(f"^{re.escape(player['name'])}$", re.IGNORECASE)
+                        rank_record = db.get_collection('ranks').find_one(
+                            {"discord_username": {"$regex": name_pattern}})
+                        if rank_record:
+                            print(f"Found rank record by case-insensitive username with MMR: {rank_record.get('mmr')}")
+                        else:
+                            print(
+                                f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
+                # END MODIFY
 
                 # Use found MMR if available
                 if rank_record and "mmr" in rank_record:
