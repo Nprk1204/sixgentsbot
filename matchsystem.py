@@ -284,11 +284,9 @@ class MatchSystem:
             player_data = self.players.find_one({"id": player_id})
 
             if player_data:
-                # Update existing player
+                # Existing player logic remains the same
                 matches_played = player_data.get("matches", 0) + 1
                 wins = player_data.get("wins", 0) + 1
-
-                # Calculate dynamic MMR gain based on matches played
                 mmr_gain = self.calculate_dynamic_mmr(matches_played, is_win=True)
                 new_mmr = player_data.get("mmr", 600) + mmr_gain
                 print(f"Player {player['name']} MMR update: {player_data.get('mmr', 600)} + {mmr_gain} = {new_mmr}")
@@ -312,50 +310,23 @@ class MatchSystem:
                     rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
 
                 # Default values
-                tier = "Rank C"  # Default tier
                 starting_mmr = 600  # Default MMR
 
                 if rank_record:
-                    # Print full rank record for debugging
                     print(f"Found rank record: {rank_record}")
 
-                    tier = rank_record.get("tier", "Rank C")
-
-                    # PRIORITY 1: Check for exact rank value
-                    rank_value = rank_record.get("rank_value")
-                    if rank_value and rank_value in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[rank_value]
-                        print(f"Using MMR for rank value {rank_value}: {starting_mmr}")
-
-                    # PRIORITY 2: If explicit MMR is set, use that instead
+                    # SIMPLIFIED PRIORITY:
+                    # 1. Use rank_value if present
+                    if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
+                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
+                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
+                    # 2. Use MMR if present
                     elif "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
                         print(f"Using explicit MMR from rank record: {starting_mmr}")
-
-                    # PRIORITY 3: Check for game_username that might be a rank
-                    elif rank_record.get("game_username") and rank_record.get("game_username") in self.EXACT_RANK_MMR:
-                        game_rank = rank_record.get("game_username")
-                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
-                        print(f"Using MMR for game_username as rank {game_rank}: {starting_mmr}")
-
-                    # PRIORITY 4: Fall back to tier-based MMR
+                    # 3. Otherwise use default
                     else:
-                        # Try to map tier to an appropriate rank
-                        if tier == "Rank A":
-                            tier_rank = "grand_champion_1"
-                        elif tier == "Rank B":
-                            tier_rank = "champion_1"
-                        elif tier == "Rank C":
-                            tier_rank = "diamond_3"
-                        else:
-                            tier_rank = None
-
-                        if tier_rank and tier_rank in self.EXACT_RANK_MMR:
-                            starting_mmr = self.EXACT_RANK_MMR[tier_rank]
-                            print(f"Using mapped rank {tier_rank} for tier {tier}: {starting_mmr}")
-                        else:
-                            starting_mmr = self.TIER_MMR.get(tier, 600)
-                            print(f"Using tier-based MMR for {tier}: {starting_mmr}")
+                        print(f"No specific MMR found, using default: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
@@ -375,7 +346,7 @@ class MatchSystem:
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-        # Process losers
+        # Process losers with the same simplified logic
         for player in losing_team:
             player_id = player["id"]
 
@@ -386,8 +357,6 @@ class MatchSystem:
                 # Update existing player
                 matches_played = player_data.get("matches", 0) + 1
                 losses = player_data.get("losses", 0) + 1
-
-                # Calculate dynamic MMR loss based on matches played
                 mmr_loss = self.calculate_dynamic_mmr(matches_played, is_win=False)
                 new_mmr = max(0, player_data.get("mmr", 600) - mmr_loss)  # Don't go below 0
                 print(f"Player {player['name']} MMR update: {player_data.get('mmr', 600)} - {mmr_loss} = {new_mmr}")
@@ -411,50 +380,23 @@ class MatchSystem:
                     rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
 
                 # Default values
-                tier = "Rank C"  # Default tier
                 starting_mmr = 600  # Default MMR
 
                 if rank_record:
-                    # Print full rank record for debugging
                     print(f"Found rank record: {rank_record}")
 
-                    tier = rank_record.get("tier", "Rank C")
-
-                    # PRIORITY 1: Check for exact rank value
-                    rank_value = rank_record.get("rank_value")
-                    if rank_value and rank_value in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[rank_value]
-                        print(f"Using MMR for rank value {rank_value}: {starting_mmr}")
-
-                    # PRIORITY 2: If explicit MMR is set, use that instead
+                    # SIMPLIFIED PRIORITY:
+                    # 1. Use rank_value if present
+                    if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
+                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
+                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
+                    # 2. Use MMR if present
                     elif "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
                         print(f"Using explicit MMR from rank record: {starting_mmr}")
-
-                    # PRIORITY 3: Check for game_username that might be a rank
-                    elif rank_record.get("game_username") and rank_record.get("game_username") in self.EXACT_RANK_MMR:
-                        game_rank = rank_record.get("game_username")
-                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
-                        print(f"Using MMR for game_username as rank {game_rank}: {starting_mmr}")
-
-                    # PRIORITY 4: Fall back to tier-based MMR
+                    # 3. Otherwise use default
                     else:
-                        # Try to map tier to an appropriate rank
-                        if tier == "Rank A":
-                            tier_rank = "grand_champion_1"
-                        elif tier == "Rank B":
-                            tier_rank = "champion_1"
-                        elif tier == "Rank C":
-                            tier_rank = "diamond_3"
-                        else:
-                            tier_rank = None
-
-                        if tier_rank and tier_rank in self.EXACT_RANK_MMR:
-                            starting_mmr = self.EXACT_RANK_MMR[tier_rank]
-                            print(f"Using mapped rank {tier_rank} for tier {tier}: {starting_mmr}")
-                        else:
-                            starting_mmr = self.TIER_MMR.get(tier, 600)
-                            print(f"Using tier-based MMR for {tier}: {starting_mmr}")
+                        print(f"No specific MMR found, using default: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
