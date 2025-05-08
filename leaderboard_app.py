@@ -484,7 +484,7 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
             "platform": platform,
             "rank": rank_data.get("rank"),
             "tier": rank_data.get("tier"),
-            "mmr": rank_data.get("mmr"),
+            "mmr": rank_data.get("mmr"),  # This should be the MMR from manual input
             "timestamp": datetime.datetime.utcnow()
         }
 
@@ -497,11 +497,11 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
                 {"discord_username": discord_username},
                 {"$set": rank_document}
             )
-            print(f"Updated rank record for {discord_username}")
+            print(f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
         else:
             # Insert new record
             ranks_collection.insert_one(rank_document)
-            print(f"Created new rank record for {discord_username}")
+            print(f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
 
     except Exception as e:
         print(f"Error storing rank data: {str(e)}")
@@ -653,20 +653,18 @@ def check_rank():
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
-    manual_tier = request.args.get('manual_tier', '')  # For manual tier selection
-    manual_mmr = request.args.get('manual_mmr', '')  # Add this parameter to capture MMR from HTML
+    discord_id = request.args.get('discord_id', '')  # Add this if possible
+    manual_tier = request.args.get('manual_tier', '')
+    manual_mmr = request.args.get('manual_mmr', '')
 
-    if not (platform and username) and not manual_tier:
-        return jsonify(
-            {"success": False, "message": "Please provide platform/username or a manual tier selection"}), 400
-
-    # Debug logging
+    # Debug logging - add MMR
     print(f"=== RANK CHECK DEBUG ===")
     print(f"Platform: {platform}")
     print(f"Username: {username}")
     print(f"Discord username: {discord_username}")
+    print(f"Discord ID: {discord_id}")
     print(f"Manual tier: {manual_tier}")
-    print(f"Manual MMR: {manual_mmr}")  # Add debug logging for MMR
+    print(f"Manual MMR: {manual_mmr}")  # Log the MMR
     print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
     print(f"API Key length: {len(RLTRACKER_API_KEY) if RLTRACKER_API_KEY else 0}")
     print(f"========================")
@@ -674,10 +672,9 @@ def check_rank():
     # PRIORITY 1: Handle manual tier selection if provided
     if manual_tier:
         print(f"Using manually provided tier: {manual_tier}")
-
-        # Use the provided MMR if available, otherwise fall back to the function
+        # Use provided MMR if available, otherwise fallback
         mmr = int(manual_mmr) if manual_mmr and manual_mmr.isdigit() else get_mmr_from_rank(manual_tier)
-        print(f"Using MMR value: {mmr} (from {'manual input' if manual_mmr and manual_mmr.isdigit() else 'function'})")
+        print(f"Using MMR: {mmr}")  # Debug MMR value
 
         manual_result = {
             "success": True,
@@ -693,7 +690,8 @@ def check_rank():
         # Handle Discord role assignment if username provided
         if discord_username:
             print(f"Storing manual rank data for Discord user: {discord_username}")
-            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", manual_result)
+            # Pass the Discord ID if available
+            store_rank_data(discord_username, username or "Manual Entry", platform or "unknown", manual_result, discord_id=discord_id)
             role_result = assign_discord_role(discord_username, manual_tier)
             manual_result["role_assignment"] = role_result
 

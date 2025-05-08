@@ -6,6 +6,7 @@ import datetime
 import uuid
 
 from leaderboard_app import db
+from main import bot_status
 
 
 class MatchSystem:
@@ -130,8 +131,6 @@ class MatchSystem:
         # Update MMR
         self.update_player_mmr(winning_team, losing_team)
 
-        # In report_match_by_id method in MatchSystem class
-
         # After updating MMR for winners and losers:
         if ctx:
             # Update roles for winners
@@ -165,38 +164,6 @@ class MatchSystem:
         # Remove from active matches
         if match["match_id"] in self.active_matches:
             del self.active_matches[match["match_id"]]
-
-        # Update roles if context is provided
-        if ctx:
-            # Update roles for winners
-            for player in winning_team:
-                player_id = player["id"]
-                # Skip dummy players (those with IDs starting with 9000)
-                if player_id.startswith('9000'):
-                    continue
-
-                # Get updated MMR from database
-                player_data = self.players.find_one({"id": player_id})
-                if player_data:
-                    mmr = player_data.get("mmr", 600)
-                    # Update Discord role if the method exists
-                    if hasattr(self, 'update_discord_role'):
-                        await self.update_discord_role(ctx, player_id, mmr)
-
-            # Update roles for losers
-            for player in losing_team:
-                player_id = player["id"]
-                # Skip dummy players
-                if player_id.startswith('9000'):
-                    continue
-
-                # Get updated MMR from database
-                player_data = self.players.find_one({"id": player_id})
-                if player_data:
-                    mmr = player_data.get("mmr", 600)
-                    # Update Discord role if the method exists
-                    if hasattr(self, 'update_discord_role'):
-                        await self.update_discord_role(ctx, player_id, mmr)
 
         return updated_match, None
 
@@ -294,10 +261,25 @@ class MatchSystem:
                 # Create new player with default starting values
                 # We'll use the rank-based starting MMR if available
                 starting_mmr = 600  # Default fallback
+
+                # Check for rank record by discord_id
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
+                # If not found, try by discord_username
+                if not rank_record:
+                    # Try some alternative lookup methods
+                    # Check by username in ranks collection
+                    rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
+
+                    if not rank_record:
+                        # Just use the default MMR
+                        print(
+                            f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
+
+                # Use found MMR if available
                 if rank_record and "mmr" in rank_record:
                     starting_mmr = rank_record["mmr"]
+                    print(f"Found rank record for player {player['name']} with MMR: {starting_mmr}")
 
                 self.players.insert_one({
                     "id": player_id,
@@ -339,10 +321,25 @@ class MatchSystem:
                 # Create new player with default starting values
                 # We'll use the rank-based starting MMR if available
                 starting_mmr = 600  # Default fallback
+
+                # Check for rank record by discord_id
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
+                # If not found, try by discord_username
+                if not rank_record:
+                    # Try some alternative lookup methods
+                    # Check by username in ranks collection
+                    rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
+
+                    if not rank_record:
+                        # Just use the default MMR
+                        print(
+                            f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
+
+                # Use found MMR if available
                 if rank_record and "mmr" in rank_record:
                     starting_mmr = rank_record["mmr"]
+                    print(f"Found rank record for player {player['name']} with MMR: {starting_mmr}")
 
                 self.players.insert_one({
                     "id": player_id,
