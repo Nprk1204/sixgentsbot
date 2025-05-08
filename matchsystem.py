@@ -316,34 +316,46 @@ class MatchSystem:
                 starting_mmr = 600  # Default MMR
 
                 if rank_record:
+                    # Print full rank record for debugging
+                    print(f"Found rank record: {rank_record}")
+
                     tier = rank_record.get("tier", "Rank C")
 
-                    # Try to get the exact rank value first
-                    game_rank = None
+                    # PRIORITY 1: Check for exact rank value
                     rank_value = rank_record.get("rank_value")
-                    game_username = rank_record.get("game_username")
-
-                    # First try to use the rank_value if available
                     if rank_value and rank_value in self.EXACT_RANK_MMR:
-                        game_rank = rank_value
+                        starting_mmr = self.EXACT_RANK_MMR[rank_value]
+                        print(f"Using MMR for rank value {rank_value}: {starting_mmr}")
 
-                    # If not found, try the game_username
-                    elif game_username and game_username in self.EXACT_RANK_MMR:
-                        game_rank = game_username
-
-                    # If we have a game_rank, use its exact MMR
-                    if game_rank and game_rank in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
-                        print(f"Using exact rank MMR for {game_rank}: {starting_mmr}")
-                    else:
-                        # Otherwise use the tier-based MMR
-                        starting_mmr = self.TIER_MMR.get(tier, 600)
-                        print(f"Using tier-based MMR for {tier}: {starting_mmr}")
-
-                    # If MMR is explicitly stored in the rank record, prioritize that
-                    if "mmr" in rank_record and rank_record["mmr"] is not None:
+                    # PRIORITY 2: If explicit MMR is set, use that instead
+                    elif "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
-                        print(f"Found explicit MMR in rank record: {starting_mmr}")
+                        print(f"Using explicit MMR from rank record: {starting_mmr}")
+
+                    # PRIORITY 3: Check for game_username that might be a rank
+                    elif rank_record.get("game_username") and rank_record.get("game_username") in self.EXACT_RANK_MMR:
+                        game_rank = rank_record.get("game_username")
+                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
+                        print(f"Using MMR for game_username as rank {game_rank}: {starting_mmr}")
+
+                    # PRIORITY 4: Fall back to tier-based MMR
+                    else:
+                        # Try to map tier to an appropriate rank
+                        if tier == "Rank A":
+                            tier_rank = "grand_champion_1"
+                        elif tier == "Rank B":
+                            tier_rank = "champion_1"
+                        elif tier == "Rank C":
+                            tier_rank = "diamond_3"
+                        else:
+                            tier_rank = None
+
+                        if tier_rank and tier_rank in self.EXACT_RANK_MMR:
+                            starting_mmr = self.EXACT_RANK_MMR[tier_rank]
+                            print(f"Using mapped rank {tier_rank} for tier {tier}: {starting_mmr}")
+                        else:
+                            starting_mmr = self.TIER_MMR.get(tier, 600)
+                            print(f"Using tier-based MMR for {tier}: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
@@ -403,34 +415,46 @@ class MatchSystem:
                 starting_mmr = 600  # Default MMR
 
                 if rank_record:
+                    # Print full rank record for debugging
+                    print(f"Found rank record: {rank_record}")
+
                     tier = rank_record.get("tier", "Rank C")
 
-                    # Try to get the exact rank value first
-                    game_rank = None
+                    # PRIORITY 1: Check for exact rank value
                     rank_value = rank_record.get("rank_value")
-                    game_username = rank_record.get("game_username")
-
-                    # First try to use the rank_value if available
                     if rank_value and rank_value in self.EXACT_RANK_MMR:
-                        game_rank = rank_value
+                        starting_mmr = self.EXACT_RANK_MMR[rank_value]
+                        print(f"Using MMR for rank value {rank_value}: {starting_mmr}")
 
-                    # If not found, try the game_username
-                    elif game_username and game_username in self.EXACT_RANK_MMR:
-                        game_rank = game_username
-
-                    # If we have a game_rank, use its exact MMR
-                    if game_rank and game_rank in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
-                        print(f"Using exact rank MMR for {game_rank}: {starting_mmr}")
-                    else:
-                        # Otherwise use the tier-based MMR
-                        starting_mmr = self.TIER_MMR.get(tier, 600)
-                        print(f"Using tier-based MMR for {tier}: {starting_mmr}")
-
-                    # If MMR is explicitly stored in the rank record, prioritize that
-                    if "mmr" in rank_record and rank_record["mmr"] is not None:
+                    # PRIORITY 2: If explicit MMR is set, use that instead
+                    elif "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
-                        print(f"Found explicit MMR in rank record: {starting_mmr}")
+                        print(f"Using explicit MMR from rank record: {starting_mmr}")
+
+                    # PRIORITY 3: Check for game_username that might be a rank
+                    elif rank_record.get("game_username") and rank_record.get("game_username") in self.EXACT_RANK_MMR:
+                        game_rank = rank_record.get("game_username")
+                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
+                        print(f"Using MMR for game_username as rank {game_rank}: {starting_mmr}")
+
+                    # PRIORITY 4: Fall back to tier-based MMR
+                    else:
+                        # Try to map tier to an appropriate rank
+                        if tier == "Rank A":
+                            tier_rank = "grand_champion_1"
+                        elif tier == "Rank B":
+                            tier_rank = "champion_1"
+                        elif tier == "Rank C":
+                            tier_rank = "diamond_3"
+                        else:
+                            tier_rank = None
+
+                        if tier_rank and tier_rank in self.EXACT_RANK_MMR:
+                            starting_mmr = self.EXACT_RANK_MMR[tier_rank]
+                            print(f"Using mapped rank {tier_rank} for tier {tier}: {starting_mmr}")
+                        else:
+                            starting_mmr = self.TIER_MMR.get(tier, 600)
+                            print(f"Using tier-based MMR for {tier}: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 

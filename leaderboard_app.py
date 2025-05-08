@@ -478,24 +478,24 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
     try:
         # Debug print
         print(f"Storing rank data for {discord_username} with MMR: {rank_data.get('mmr')}")
+        print(f"Rank value: {rank_data.get('rank_value')}")
+        print(f"Game username: {game_username}")
 
         # Create rank document
         rank_document = {
             "discord_username": discord_username,
             "discord_id": discord_id,  # Store the verified Discord ID if available
-            "game_username": game_username,  # This will now contain the exact rank value when available
+            "game_username": game_username,
             "platform": platform,
             "rank": rank_data.get("rank"),
             "tier": rank_data.get("tier"),
-            "mmr": rank_data.get("mmr"),
+            "mmr": rank_data.get("mmr"),  # This should be the MMR from manual input
             "rank_value": rank_data.get("rank_value"),  # Store the exact rank value
             "timestamp": datetime.datetime.utcnow()
         }
 
         # Debug print
         print(f"Rank document to store: {rank_document}")
-
-        # Rest of the function remains the same...
 
         # Check if this user already has a rank record
         existing_rank = ranks_collection.find_one({"discord_username": discord_username})
@@ -506,11 +506,13 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
                 {"discord_username": discord_username},
                 {"$set": rank_document}
             )
-            print(f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
+            print(
+                f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}, rank_value: {rank_data.get('rank_value')}")
         else:
             # Insert new record
             ranks_collection.insert_one(rank_document)
-            print(f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
+            print(
+                f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}, rank_value: {rank_data.get('rank_value')}")
 
     except Exception as e:
         print(f"Error storing rank data: {str(e)}")
@@ -662,20 +664,22 @@ def check_rank():
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
-    discord_id = request.args.get('discord_id', '')
+    discord_id = request.args.get('discord_id', '')  # Add this if possible
     manual_tier = request.args.get('manual_tier', '')
     manual_mmr = request.args.get('manual_mmr', '')
-    rank_value = request.args.get('rank_value', '')  # Add this to capture the exact rank value
+    rank_value = request.args.get('rank_value', '')  # Get the exact rank value
 
-    # Debug logging
+    # Debug logging - add MMR
     print(f"=== RANK CHECK DEBUG ===")
     print(f"Platform: {platform}")
     print(f"Username: {username}")
     print(f"Discord username: {discord_username}")
     print(f"Discord ID: {discord_id}")
     print(f"Manual tier: {manual_tier}")
-    print(f"Manual MMR: {manual_mmr}")
+    print(f"Manual MMR: {manual_mmr}")  # Log the MMR
     print(f"Rank value: {rank_value}")  # Log the rank value
+    print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
+    print(f"API Key length: {len(RLTRACKER_API_KEY) if RLTRACKER_API_KEY else 0}")
     print(f"========================")
 
     # PRIORITY 1: Handle manual tier selection if provided
@@ -683,7 +687,7 @@ def check_rank():
         print(f"Using manually provided tier: {manual_tier}")
         # Use provided MMR if available, otherwise fallback
         mmr = int(manual_mmr) if manual_mmr and manual_mmr.isdigit() else get_mmr_from_rank(manual_tier)
-        print(f"Using MMR: {mmr}")
+        print(f"Using MMR: {mmr}")  # Debug MMR value
 
         manual_result = {
             "success": True,
@@ -697,13 +701,15 @@ def check_rank():
             "manual_verification": True
         }
 
+        # NEW: Add debug print to confirm MMR
         print(f"DEBUG: Setting MMR to {mmr} for player with Discord username {discord_username}")
+        print(f"DEBUG: Rank value is: {rank_value}")
 
         # Handle Discord role assignment if username provided
         if discord_username:
             print(f"Storing manual rank data for Discord user: {discord_username}")
-            store_rank_data(discord_username, rank_value or username or "Manual Entry", platform or "unknown",
-                            manual_result, discord_id=discord_id)
+            # Pass the Discord ID if available
+            store_rank_data(discord_username, rank_value, platform or "unknown", manual_result, discord_id=discord_id)
             role_result = assign_discord_role(discord_username, manual_tier)
             manual_result["role_assignment"] = role_result
 
@@ -718,10 +724,14 @@ def check_rank():
             if rank_data.get("success", False):
                 print(f"API call successful: {rank_data}")
 
+                # Add rank value to the data
+                rank_data["rank_value"] = rank_value
+
                 # Process as normal with existing code
                 if discord_username:
                     tier = rank_data.get("tier")
-                    store_rank_data(discord_username, username, platform, rank_data)
+                    store_rank_data(discord_username, rank_value or username, platform, rank_data,
+                                    discord_id=discord_id)
                     role_result = assign_discord_role(discord_username, tier)
                     rank_data["role_assignment"] = role_result
 
@@ -735,11 +745,12 @@ def check_rank():
     print("All other methods failed, using mock data")
     mock_data = get_mock_rank_data(username, platform)
     mock_data["fallback_method"] = "This is mock data as API method failed"
+    mock_data["rank_value"] = rank_value  # Store the rank value in mock data too
 
     # Handle Discord verification for mock data
     if discord_username:
         tier = mock_data.get("tier")
-        store_rank_data(discord_username, username, platform, mock_data)
+        store_rank_data(discord_username, rank_value or username, platform, mock_data, discord_id=discord_id)
         role_result = assign_discord_role(discord_username, tier)
         mock_data["role_assignment"] = role_result
 

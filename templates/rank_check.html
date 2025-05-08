@@ -249,106 +249,111 @@ function setupRankSelector() {
     }
 
     // Handle verify button click
-    verifyButton.addEventListener('click', function() {
-        const rankSelect = document.getElementById('rlRank');
-        const discordUsername = document.getElementById('discordUsername').value.trim();
+    // Handle verify button click
+verifyButton.addEventListener('click', function() {
+    const rankSelect = document.getElementById('rlRank');
+    const discordUsername = document.getElementById('discordUsername').value.trim();
 
-        // Basic validation
-        if (!rankSelect.value) {
-            alert('Please select your Rocket League rank first');
-            return;
-        }
+    // Basic validation
+    if (!rankSelect.value) {
+        alert('Please select your Rocket League rank first');
+        return;
+    }
 
-        if (!discordUsername) {
-            alert('Please enter your Discord username');
-            return;
-        }
+    if (!discordUsername) {
+        alert('Please enter your Discord username');
+        return;
+    }
 
-        // Get rank details
-        const selectedOption = rankSelect.options[rankSelect.selectedIndex];
-        const rankTier = selectedOption.getAttribute('data-tier');
-        const rankMMR = selectedOption.getAttribute('data-mmr');
-        const rankName = selectedOption.text;
-        const rankValue = rankSelect.value;
+    // Get rank details
+    const selectedOption = rankSelect.options[rankSelect.selectedIndex];
+    const rankTier = selectedOption.getAttribute('data-tier');
+    const rankMMR = selectedOption.getAttribute('data-mmr');  // Get MMR from data attribute
+    const rankName = selectedOption.text;
+    const rankValue = rankSelect.value;  // This is the exact rank value (e.g., "diamond_3")
 
-        // Show loading
-        verifyButton.disabled = true;
-        verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
+    // Show loading
+    verifyButton.disabled = true;
+    verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
 
-        // Build API URL
-        console.log(`Getting MMR from selected rank: ${rankMMR}`);
-        let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}&rank_value=${encodeURIComponent(rankValue)}`;
+    // Debug logs
+    console.log(`Selected rank: ${rankName}`);
+    console.log(`Rank tier: ${rankTier}`);
+    console.log(`Rank MMR: ${rankMMR}`);
+    console.log(`Rank value: ${rankValue}`);
 
-        // Add the MMR parameter
-        if (rankMMR) {
-            console.log(`Sending MMR value to server: ${rankMMR}`);
-            apiUrl += `&manual_mmr=${encodeURIComponent(rankMMR)}`;
-        }
+    // Build API URL
+    let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}&rank_value=${encodeURIComponent(rankValue)}`;
 
-    // Rest of the function remains the same...
+    // Add the MMR parameter
+    if (rankMMR) {
+        console.log(`Sending MMR value to server: ${rankMMR}`);
+        apiUrl += `&manual_mmr=${encodeURIComponent(rankMMR)}`;
+    }
 
-        // Make the API request
-        fetch(apiUrl)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Save verification data - use server timestamp for verification
-                    const now = new Date().toISOString();
-                    console.log("Setting verification timestamp to:", now);
+    console.log(`API URL: ${apiUrl}`);
 
-                    const saveData = {
-                        username: discordUsername,
-                        rank: rankName,
-                        tier: rankTier,
-                        mmr: data.mmr,  // Use the MMR from the response
-                        rankValue: rankValue,
-                        discord_updated: data.role_assignment?.success || false,
-                        verified_at: now
-                    };
+    // Make the API request
+    fetch(apiUrl)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Save verification data - use server timestamp for verification
+                const now = new Date().toISOString();
+                console.log("Setting verification timestamp to:", now);
 
-                    localStorage.setItem('rankVerified', 'true');
-                    localStorage.setItem('rankData', JSON.stringify(saveData));
+                const saveData = {
+                    username: discordUsername,
+                    rank: rankName,
+                    tier: rankTier,
+                    mmr: data.mmr,  // Use the MMR from the response
+                    rankValue: rankValue,  // Store the exact rank value
+                    discord_updated: data.role_assignment?.success || false,
+                    verified_at: now
+                };
 
-                    // Show success
-                    verifyButton.classList.remove('btn-primary');
-                    verifyButton.classList.add('btn-success');
-                    verifyButton.innerHTML = 'Rank Verified';
+                localStorage.setItem('rankVerified', 'true');
+                localStorage.setItem('rankData', JSON.stringify(saveData));
 
-                    // Display result
-                    displayVerifiedRank(saveData);
-                } else {
-                    // Show error
-                    verifyButton.disabled = false;
-                    verifyButton.classList.remove('btn-success');
-                    verifyButton.classList.add('btn-primary');
-                    verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+                // Show success
+                verifyButton.classList.remove('btn-primary');
+                verifyButton.classList.add('btn-success');
+                verifyButton.innerHTML = 'Rank Verified';
 
-                    const resultDiv = document.getElementById('verificationResult');
-                    if (resultDiv) {
-                        resultDiv.innerHTML = `
-                            <div class="alert alert-danger">
-                                <i class="fas fa-exclamation-circle me-2"></i> Error: ${data.message || "Verification failed"}
-                            </div>
-                        `;
-                    }
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
+                // Display result
+                displayVerifiedRank(saveData);
+            } else {
+                // Show error
                 verifyButton.disabled = false;
+                verifyButton.classList.remove('btn-success');
+                verifyButton.classList.add('btn-primary');
                 verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
 
                 const resultDiv = document.getElementById('verificationResult');
                 if (resultDiv) {
                     resultDiv.innerHTML = `
                         <div class="alert alert-danger">
-                            <i class="fas fa-exclamation-circle me-2"></i> Error connecting to server. Please try again.
+                            <i class="fas fa-exclamation-circle me-2"></i> Error: ${data.message || "Verification failed"}
                         </div>
                     `;
                 }
-            });
-    });
-}
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            verifyButton.disabled = false;
+            verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+
+            const resultDiv = document.getElementById('verificationResult');
+            if (resultDiv) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i> Error connecting to server. Please try again.
+                    </div>
+                `;
+            }
+        });
+});
 
 // Function to display verified rank information
 function displayVerifiedRank(data) {
