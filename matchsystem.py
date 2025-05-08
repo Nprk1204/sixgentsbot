@@ -240,13 +240,18 @@ class MatchSystem:
             player_data = self.players.find_one({"id": player_id})
 
             if player_data:
+                # CRITICAL FIX: Use the player's existing MMR as the base
+                current_mmr = player_data.get("mmr", 600)  # Get current MMR with 600 as fallback
+                print(f"Player {player['name']} existing MMR before update: {current_mmr}")
+
                 # Update existing player
                 matches_played = player_data.get("matches", 0) + 1
                 wins = player_data.get("wins", 0) + 1
 
                 # Calculate dynamic MMR gain based on matches played
                 mmr_gain = self.calculate_dynamic_mmr(matches_played, is_win=True)
-                new_mmr = player_data.get("mmr", 600) + mmr_gain
+                new_mmr = current_mmr + mmr_gain
+                print(f"Player {player['name']} MMR update: {current_mmr} + {mmr_gain} = {new_mmr}")
 
                 self.players.update_one(
                     {"id": player_id},
@@ -262,17 +267,20 @@ class MatchSystem:
                 # We'll use the rank-based starting MMR if available
                 starting_mmr = 600  # Default fallback
 
-                # MODIFY THIS SECTION - Better rank record lookup
                 print(f"Looking for rank record for player: {player['name']} (ID: {player_id})")
                 # First try by discord_id
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
                     print(f"Found rank record by discord_id with MMR: {rank_record.get('mmr')}")
+                    if "mmr" in rank_record and rank_record["mmr"] is not None:
+                        starting_mmr = rank_record["mmr"]
                 else:
                     # Try by discord_username - exact match
                     rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
                     if rank_record:
-                        print(f"Found rank record by exact discord_username with MMR: {rank_record.get('mmr')}")
+                        print(f"Found rank record by discord_username with MMR: {rank_record.get('mmr')}")
+                        if "mmr" in rank_record and rank_record["mmr"] is not None:
+                            starting_mmr = rank_record["mmr"]
                     else:
                         # Try case-insensitive username match
                         import re
@@ -281,22 +289,102 @@ class MatchSystem:
                             {"discord_username": {"$regex": name_pattern}})
                         if rank_record:
                             print(f"Found rank record by case-insensitive username with MMR: {rank_record.get('mmr')}")
+                            if "mmr" in rank_record and rank_record["mmr"] is not None:
+                                starting_mmr = rank_record["mmr"]
                         else:
-                            print(
-                                f"No rank record found for player {player['name']} (ID: {player_id}), using default MMR: {starting_mmr}")
-                # END MODIFY
+                            print(f"No rank record found for {player['name']}, using default MMR: {starting_mmr}")
 
-                # Use found MMR if available
-                if rank_record and "mmr" in rank_record:
-                    starting_mmr = rank_record["mmr"]
-                    print(f"Found rank record for player {player['name']} with MMR: {starting_mmr}")
+                # CRITICAL FIX: Calculate first win MMR correctly
+                mmr_gain = self.calculate_dynamic_mmr(1, is_win=True)
+                new_mmr = starting_mmr + mmr_gain
+                print(
+                    f"NEW PLAYER {player['name']} FIRST WIN: Starting MMR {starting_mmr} + gain {mmr_gain} = {new_mmr}")
 
                 self.players.insert_one({
                     "id": player_id,
                     "name": player["name"],
-                    "mmr": starting_mmr + self.calculate_dynamic_mmr(1, is_win=True),  # First match
+                    "mmr": new_mmr,  # FIXED: Use new_mmr instead of recalculating
                     "wins": 1,
                     "losses": 0,
+                    "matches": 1,
+                    "created_at": datetime.datetime.utcnow(),
+                    "last_updated": datetime.datetime.utcnow()
+                })
+
+        # Process losers (similar fix needed)
+        for player in losing_team:
+            player_id = player["id"]
+
+            # Get player data or create new
+            player_data = self.players.find_one({"id": player_id})
+
+            if player_data:
+                # CRITICAL FIX: Use the player's existing MMR as the base
+                current_mmr = player_data.get("mmr", 600)  # Get current MMR with 600 as fallback
+                print(f"Player {player['name']} existing MMR before update: {current_mmr}")
+
+                # Update existing player
+                matches_played = player_data.get("matches", 0) + 1
+                losses = player_data.get("losses", 0) + 1
+
+                # Calculate dynamic MMR loss based on matches played
+                mmr_loss = self.calculate_dynamic_mmr(matches_played, is_win=False)
+                new_mmr = max(0, current_mmr - mmr_loss)  # Don't go below 0
+                print(f"Player {player['name']} MMR update: {current_mmr} - {mmr_loss} = {new_mmr}")
+
+                self.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "losses": losses,
+                        "matches": matches_played,
+                        "last_updated": datetime.datetime.utcnow()
+                    }}
+                )
+            else:
+                # Create new player with default starting values
+                # We'll use the rank-based starting MMR if available
+                starting_mmr = 600  # Default fallback
+
+                print(f"Looking for rank record for player: {player['name']} (ID: {player_id})")
+                # First try by discord_id
+                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                if rank_record:
+                    print(f"Found rank record by discord_id with MMR: {rank_record.get('mmr')}")
+                    if "mmr" in rank_record and rank_record["mmr"] is not None:
+                        starting_mmr = rank_record["mmr"]
+                else:
+                    # Try by discord_username - exact match
+                    rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
+                    if rank_record:
+                        print(f"Found rank record by discord_username with MMR: {rank_record.get('mmr')}")
+                        if "mmr" in rank_record and rank_record["mmr"] is not None:
+                            starting_mmr = rank_record["mmr"]
+                    else:
+                        # Try case-insensitive username match
+                        import re
+                        name_pattern = re.compile(f"^{re.escape(player['name'])}$", re.IGNORECASE)
+                        rank_record = db.get_collection('ranks').find_one(
+                            {"discord_username": {"$regex": name_pattern}})
+                        if rank_record:
+                            print(f"Found rank record by case-insensitive username with MMR: {rank_record.get('mmr')}")
+                            if "mmr" in rank_record and rank_record["mmr"] is not None:
+                                starting_mmr = rank_record["mmr"]
+                        else:
+                            print(f"No rank record found for {player['name']}, using default MMR: {starting_mmr}")
+
+                # CRITICAL FIX: Calculate first loss MMR correctly
+                mmr_loss = self.calculate_dynamic_mmr(1, is_win=False)
+                new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
+                print(
+                    f"NEW PLAYER {player['name']} FIRST LOSS: Starting MMR {starting_mmr} - loss {mmr_loss} = {new_mmr}")
+
+                self.players.insert_one({
+                    "id": player_id,
+                    "name": player["name"],
+                    "mmr": new_mmr,  # FIXED: Use new_mmr instead of recalculating
+                    "wins": 0,
+                    "losses": 1,
                     "matches": 1,
                     "created_at": datetime.datetime.utcnow(),
                     "last_updated": datetime.datetime.utcnow()
