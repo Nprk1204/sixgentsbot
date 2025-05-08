@@ -1,12 +1,10 @@
 import math
-
 import discord
 from discord.ext import commands
 import datetime
 import uuid
 
 from leaderboard_app import db
-from main import bot_status
 
 
 class MatchSystem:
@@ -15,6 +13,52 @@ class MatchSystem:
         self.matches = db.get_collection('matches')
         self.players = db.get_collection('players')
         self.active_matches = {}  # Store active matches in memory
+
+        # Define hardcoded MMR values as instance variables
+        self.EXACT_RANK_MMR = {
+            # Bronze
+            "bronze_1": 50,
+            "bronze_2": 100,
+            "bronze_3": 150,
+
+            # Silver
+            "silver_1": 200,
+            "silver_2": 225,
+            "silver_3": 250,
+
+            # Gold
+            "gold_1": 300,
+            "gold_2": 350,
+            "gold_3": 400,
+
+            # Platinum
+            "platinum_1": 500,
+            "platinum_2": 550,
+            "platinum_3": 600,
+
+            # Diamond
+            "diamond_1": 700,
+            "diamond_2": 800,
+            "diamond_3": 900,
+
+            # Champion
+            "champion_1": 1100,
+            "champion_2": 1250,
+            "champion_3": 1500,
+
+            # Grand Champion and SSL
+            "grand_champion_1": 1600,
+            "grand_champion_2": 1800,
+            "grand_champion_3": 2000,
+            "ssl": 2200
+        }
+
+        # Tier-based MMR values
+        self.TIER_MMR = {
+            "Rank A": 1600,  # Grand Champion I and above
+            "Rank B": 1100,  # Champion I to Champion III
+            "Rank C": 600  # Diamond III and below - default
+        }
 
     def create_match(self, match_id, team1, team2, channel_id):
         """Create a new match entry"""
@@ -232,52 +276,6 @@ class MatchSystem:
 
     def update_player_mmr(self, winning_team, losing_team):
         """Update MMR for all players in the match with dynamic MMR changes"""
-        # Detailed hardcoded MMR values by exact rank selection
-        EXACT_RANK_MMR = {
-            # Bronze
-            "bronze_1": 50,
-            "bronze_2": 100,
-            "bronze_3": 150,
-
-            # Silver
-            "silver_1": 200,
-            "silver_2": 225,
-            "silver_3": 250,
-
-            # Gold
-            "gold_1": 300,
-            "gold_2": 350,
-            "gold_3": 400,
-
-            # Platinum
-            "platinum_1": 500,
-            "platinum_2": 550,
-            "platinum_3": 600,
-
-            # Diamond
-            "diamond_1": 700,
-            "diamond_2": 800,
-            "diamond_3": 900,
-
-            # Champion
-            "champion_1": 1100,
-            "champion_2": 1250,
-            "champion_3": 1500,
-
-            # Grand Champion and SSL
-            "grand_champion_1": 1600,
-            "grand_champion_2": 1800,
-            "grand_champion_3": 2000,
-            "ssl": 2200
-        }
-
-        # Fallback MMR values by tier
-        TIER_MMR = {
-            "Rank A": 1600,  # Grand Champion I and above
-            "Rank B": 1100,  # Champion I to Champion III
-            "Rank C": 600  # Diamond III and below - default
-        }
-
         # Process winners
         for player in winning_team:
             player_id = player["id"]
@@ -322,20 +320,24 @@ class MatchSystem:
 
                     # Try to get the exact rank value first
                     game_rank = None
+                    rank_value = rank_record.get("rank_value")
                     game_username = rank_record.get("game_username")
-                    if game_username:
-                        # Try to extract the rank value from game_username if it looks like a rank key
-                        potential_rank = game_username.lower()
-                        if potential_rank in EXACT_RANK_MMR:
-                            game_rank = potential_rank
+
+                    # First try to use the rank_value if available
+                    if rank_value and rank_value in self.EXACT_RANK_MMR:
+                        game_rank = rank_value
+
+                    # If not found, try the game_username
+                    elif game_username and game_username in self.EXACT_RANK_MMR:
+                        game_rank = game_username
 
                     # If we have a game_rank, use its exact MMR
-                    if game_rank and game_rank in EXACT_RANK_MMR:
-                        starting_mmr = EXACT_RANK_MMR[game_rank]
+                    if game_rank and game_rank in self.EXACT_RANK_MMR:
+                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
                         print(f"Using exact rank MMR for {game_rank}: {starting_mmr}")
                     else:
                         # Otherwise use the tier-based MMR
-                        starting_mmr = TIER_MMR.get(tier, 600)
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
                         print(f"Using tier-based MMR for {tier}: {starting_mmr}")
 
                     # If MMR is explicitly stored in the rank record, prioritize that
@@ -405,20 +407,24 @@ class MatchSystem:
 
                     # Try to get the exact rank value first
                     game_rank = None
+                    rank_value = rank_record.get("rank_value")
                     game_username = rank_record.get("game_username")
-                    if game_username:
-                        # Try to extract the rank value from game_username if it looks like a rank key
-                        potential_rank = game_username.lower()
-                        if potential_rank in EXACT_RANK_MMR:
-                            game_rank = potential_rank
+
+                    # First try to use the rank_value if available
+                    if rank_value and rank_value in self.EXACT_RANK_MMR:
+                        game_rank = rank_value
+
+                    # If not found, try the game_username
+                    elif game_username and game_username in self.EXACT_RANK_MMR:
+                        game_rank = game_username
 
                     # If we have a game_rank, use its exact MMR
-                    if game_rank and game_rank in EXACT_RANK_MMR:
-                        starting_mmr = EXACT_RANK_MMR[game_rank]
+                    if game_rank and game_rank in self.EXACT_RANK_MMR:
+                        starting_mmr = self.EXACT_RANK_MMR[game_rank]
                         print(f"Using exact rank MMR for {game_rank}: {starting_mmr}")
                     else:
                         # Otherwise use the tier-based MMR
-                        starting_mmr = TIER_MMR.get(tier, 600)
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
                         print(f"Using tier-based MMR for {tier}: {starting_mmr}")
 
                     # If MMR is explicitly stored in the rank record, prioritize that
@@ -463,11 +469,6 @@ class MatchSystem:
 
         # Faster decay factor
         DECAY_RATE = 0.18  # Much quicker drop-off
-
-        # Define a function that gives higher rank spread
-        # Rank A starting MMR: 1600 (was 1500)
-        # Rank B starting MMR: 1100 (was 1300)
-        # Rank C starting MMR: 600 (was 1000)
 
         if is_win:
             # Calculate MMR gain (decreasing with more matches)
