@@ -1221,6 +1221,322 @@ async def remove_all_rank_roles(guild):
 
 
 @bot.command()
+async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
+    """Remove the results of a match (Admin only)"""
+    # Check if this is a duplicate command
+    if await is_duplicate_command(ctx):
+        return
+
+    # Check if command is used in an allowed channel
+    if not is_command_channel(ctx):
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
+        return
+
+    # Check if user has admin permissions
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("You need administrator permissions to use this command.")
+        return
+
+    # Track match removals with a dict
+    if not hasattr(bot, 'remove_confirmations'):
+        bot.remove_confirmations = {}
+
+    # CASE 1: No arguments - Find the most recent match
+    if match_id is None:
+        # Find the most recent completed match
+        match = match_system.matches.find_one(
+            {"status": "completed"},
+            sort=[("completed_at", -1)]  # Sort by completion time, most recent first
+        )
+
+        if not match:
+            await ctx.send("No completed matches found to remove.")
+            return
+
+        # Display match information
+        match_id = match['match_id']
+
+        # Create confirmation message
+        embed = create_match_confirmation_embed(match, match_id)
+
+        # Track that we showed this match information
+        current_time = datetime.datetime.now(datetime.UTC).timestamp()
+        bot.remove_confirmations[match_id] = current_time
+
+        await ctx.send(embed=embed)
+        return
+
+    # CASE 2: Match ID provided but no confirmation - Show match details
+    elif confirmation is None:
+        # Find the match
+        match = match_system.matches.find_one({"match_id": match_id, "status": "completed"})
+        if not match:
+            await ctx.send(f"No completed match found with ID `{match_id}`.")
+            return
+
+        # Create confirmation message
+        embed = create_match_confirmation_embed(match, match_id)
+
+        # Track that we showed this match information
+        current_time = datetime.datetime.now(datetime.UTC).timestamp()
+        bot.remove_confirmations[match_id] = current_time
+
+        await ctx.send(embed=embed)
+        return
+
+    # CASE 3: Match ID and confirmation provided - Process the removal
+    elif confirmation.lower() == "confirm":
+        # Check if the match ID has been confirmed within the last 5 minutes
+        current_time = datetime.datetime.now(datetime.UTC).timestamp()
+        confirmation_time = bot.remove_confirmations.get(match_id, 0)
+
+        if current_time - confirmation_time > 300 or confirmation_time == 0:  # 5 minutes expiration
+            await ctx.send(f"Please run `/removelastmatch {match_id}` first to see the warning before confirming.")
+            return
+
+        # Remove the confirmation once used
+        if match_id in bot.remove_confirmations:
+            del bot.remove_confirmations[match_id]
+
+        # Find the match
+        match = match_system.matches.find_one({"match_id": match_id, "status": "completed"})
+        if not match:
+            await ctx.send(f"No completed match found with ID `{match_id}`.")
+            return
+
+        # Execute the actual removal
+        removal_result = await remove_match_results(ctx, match)
+        await ctx.send(embed=removal_result)
+
+    # CASE 4: Invalid confirmation text
+    else:
+        await ctx.send("Invalid confirmation. Use `/removelastmatch {match_id}` to see instructions.")
+
+
+# Helper functions to keep the command cleaner
+def create_match_confirmation_embed(match, match_id):
+    """Create an embed for match removal confirmation"""
+    embed = discord.Embed(
+        title="⚠️ Remove Match Confirmation",
+        description=f"You are about to remove the results for match `{match_id}`.",
+        color=0xff9900
+    )
+
+    # Format team information
+    team1_names = [p['name'] for p in match['team1']]
+    team2_names = [p['name'] for p in match['team2']]
+    winner = match.get('winner', 0)
+
+    embed.add_field(
+        name=f"Team 1 {' (Winner)' if winner == 1 else ''}",
+        value=", ".join(team1_names),
+        inline=False
+    )
+
+    embed.add_field(
+        name=f"Team 2 {' (Winner)' if winner == 2 else ''}",
+        value=", ".join(team2_names),
+        inline=False
+    )
+
+    if match.get('completed_at'):
+        completed_time = match['completed_at'].strftime("%Y-%m-%d %H:%M:%S")
+        embed.add_field(
+            name="Completed At",
+            value=completed_time,
+            inline=False
+        )
+
+    if match.get('reported_by'):
+        reporter_id = match['reported_by']
+        try:
+            member = bot.get_guild(int(match.get('guild_id', 0))).get_member(int(reporter_id))
+            reporter_name = member.display_name if member else f"Unknown (ID: {reporter_id})"
+        except:
+            reporter_name = f"Unknown (ID: {reporter_id})"
+
+        embed.add_field(
+            name="Reported By",
+            value=reporter_name,
+            inline=False
+        )
+
+    embed.add_field(
+        name="To confirm:",
+        value=f"Type `/removelastmatch {match_id} confirm`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Warning",
+        value="This will revert MMR changes and could affect player rankings. This action cannot be undone!",
+        inline=False
+    )
+
+    return embed
+
+
+async def remove_match_results(ctx, match):
+    """Process the actual removal of match results"""
+    match_id = match['match_id']
+
+    # Get the teams and determine who won
+    team1 = match['team1']
+    team2 = match['team2']
+    winner = match.get('winner', 0)
+
+    if winner == 1:
+        winning_team = team1
+        losing_team = team2
+    elif winner == 2:
+        winning_team = team2
+        losing_team = team1
+    else:
+        # Create error embed
+        error_embed = discord.Embed(
+            title="❌ Error Removing Match",
+            description=f"Match `{match_id}` does not have a valid winner assigned.",
+            color=0xff0000
+        )
+        return error_embed
+
+    # Start tracking MMR changes for reporting
+    mmr_changes = []
+
+    # Revert MMR for winning team
+    for player in winning_team:
+        player_id = player['id']
+        # Skip dummy players
+        if player_id.startswith('9000'):
+            continue
+
+        player_data = match_system.players.find_one({"id": player_id})
+        if player_data:
+            # Calculate how much MMR they gained in this match
+            matches_played = player_data.get("matches", 0)
+            if matches_played > 0:
+                matches_played_before = matches_played - 1
+                mmr_gain = match_system.calculate_dynamic_mmr(matches_played_before, is_win=True)
+
+                # Revert MMR
+                current_mmr = player_data.get("mmr", 0)
+                new_mmr = max(0, current_mmr - mmr_gain)  # Don't go below 0
+
+                # Update wins and matches count
+                current_wins = player_data.get("wins", 0)
+                new_wins = max(0, current_wins - 1)  # Don't go below 0
+                new_matches = max(0, matches_played - 1)  # Don't go below 0
+
+                # Update database
+                match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "wins": new_wins,
+                        "matches": new_matches,
+                        "last_updated": datetime.datetime.now(datetime.UTC)
+                    }}
+                )
+
+                # Track change for reporting
+                mmr_changes.append({
+                    "player": player['name'],
+                    "old_mmr": current_mmr,
+                    "new_mmr": new_mmr,
+                    "change": f"-{mmr_gain}"
+                })
+
+                # Update Discord role based on new MMR
+                try:
+                    await match_system.update_discord_role(ctx, player_id, new_mmr)
+                except Exception as e:
+                    print(f"Error updating Discord role for {player['name']}: {str(e)}")
+
+    # Revert MMR for losing team
+    for player in losing_team:
+        player_id = player['id']
+        # Skip dummy players
+        if player_id.startswith('9000'):
+            continue
+
+        player_data = match_system.players.find_one({"id": player_id})
+        if player_data:
+            # Calculate how much MMR they lost in this match
+            matches_played = player_data.get("matches", 0)
+            if matches_played > 0:
+                matches_played_before = matches_played - 1
+                mmr_loss = match_system.calculate_dynamic_mmr(matches_played_before, is_win=False)
+
+                # Revert MMR
+                current_mmr = player_data.get("mmr", 0)
+                new_mmr = current_mmr + mmr_loss
+
+                # Update losses and matches count
+                current_losses = player_data.get("losses", 0)
+                new_losses = max(0, current_losses - 1)  # Don't go below 0
+                new_matches = max(0, matches_played - 1)  # Don't go below 0
+
+                # Update database
+                match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "losses": new_losses,
+                        "matches": new_matches,
+                        "last_updated": datetime.datetime.now(datetime.UTC)
+                    }}
+                )
+
+                # Track change for reporting
+                mmr_changes.append({
+                    "player": player['name'],
+                    "old_mmr": current_mmr,
+                    "new_mmr": new_mmr,
+                    "change": f"+{mmr_loss}"
+                })
+
+                # Update Discord role based on new MMR
+                try:
+                    await match_system.update_discord_role(ctx, player_id, new_mmr)
+                except Exception as e:
+                    print(f"Error updating Discord role for {player['name']}: {str(e)}")
+
+    # Update match status
+    match_system.matches.update_one(
+        {"match_id": match_id},
+        {"$set": {
+            "status": "removed",
+            "removed_at": datetime.datetime.now(datetime.UTC),
+            "removed_by": str(ctx.author.id)
+        }}
+    )
+
+    # Create embed to display results
+    embed = discord.Embed(
+        title="✅ Match Results Removed",
+        description=f"Successfully removed results for match `{match_id}`.",
+        color=0x00ff00
+    )
+
+    # Add MMR changes
+    for i, change in enumerate(mmr_changes):
+        embed.add_field(
+            name=change['player'],
+            value=f"{change['old_mmr']} → {change['new_mmr']} ({change['change']})",
+            inline=True
+        )
+
+        # Add spacer after every 3 players for formatting
+        if (i + 1) % 3 == 0 and i < len(mmr_changes) - 1:
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    embed.set_footer(text=f"Removed by {ctx.author.display_name}")
+
+    return embed
+
+
+@bot.command()
 async def forcestart(ctx):
     """Force start the team selection process (Admin only)"""
     # Check if this is a duplicate command
