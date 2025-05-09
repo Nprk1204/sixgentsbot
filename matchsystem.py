@@ -133,8 +133,184 @@ class MatchSystem:
             winning_team = match["team2"]
             losing_team = match["team1"]
 
-        # Update MMR
-        self.update_player_mmr(winning_team, losing_team)
+        # Track MMR changes for each player
+        mmr_changes = []
+
+        # Update MMR for winners
+        for player in winning_team:
+            player_id = player["id"]
+
+            # Skip dummy players
+            if player_id.startswith('9000'):
+                continue
+
+            # Get player data or create new
+            player_data = self.players.find_one({"id": player_id})
+
+            if player_data:
+                # Existing player logic remains the same
+                matches_played = player_data.get("matches", 0) + 1
+                wins = player_data.get("wins", 0) + 1
+                mmr_gain = self.calculate_dynamic_mmr(matches_played, is_win=True)
+                old_mmr = player_data.get("mmr", 600)
+                new_mmr = old_mmr + mmr_gain
+                print(f"Player {player['name']} MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+
+                self.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "wins": wins,
+                        "matches": matches_played,
+                        "last_updated": datetime.datetime.utcnow()
+                    }}
+                )
+
+                # Track MMR change
+                mmr_changes.append({
+                    "player_id": player_id,
+                    "old_mmr": old_mmr,
+                    "new_mmr": new_mmr,
+                    "mmr_change": mmr_gain,
+                    "is_win": True
+                })
+            else:
+                # Look up player's rank in ranks collection
+                print(f"New player {player['name']} (ID: {player_id}), determining starting MMR")
+
+                # Try to find rank record
+                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                if not rank_record:
+                    rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
+
+                # Default values
+                starting_mmr = 600  # Default MMR
+
+                if rank_record:
+                    print(f"Found rank record: {rank_record}")
+
+                    # Simplified logic - just use tier-based MMR
+                    tier = rank_record.get("tier", "Rank C")
+                    starting_mmr = self.TIER_MMR.get(tier, 600)
+                    print(f"Using tier-based MMR for {tier}: {starting_mmr}")
+                else:
+                    print(f"No rank record found, using default MMR: {starting_mmr}")
+
+                # Calculate first win MMR
+                mmr_gain = self.calculate_dynamic_mmr(1, is_win=True)
+                new_mmr = starting_mmr + mmr_gain
+                print(f"NEW PLAYER {player['name']} FIRST WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
+
+                self.players.insert_one({
+                    "id": player_id,
+                    "name": player["name"],
+                    "mmr": new_mmr,
+                    "wins": 1,
+                    "losses": 0,
+                    "matches": 1,
+                    "created_at": datetime.datetime.utcnow(),
+                    "last_updated": datetime.datetime.utcnow()
+                })
+
+                # Track MMR change for new player
+                mmr_changes.append({
+                    "player_id": player_id,
+                    "old_mmr": starting_mmr,
+                    "new_mmr": new_mmr,
+                    "mmr_change": mmr_gain,
+                    "is_win": True
+                })
+
+        # Update MMR for losing team
+        for player in losing_team:
+            player_id = player["id"]
+
+            # Skip dummy players
+            if player_id.startswith('9000'):
+                continue
+
+            # Get player data or create new
+            player_data = self.players.find_one({"id": player_id})
+
+            if player_data:
+                # Update existing player
+                matches_played = player_data.get("matches", 0) + 1
+                losses = player_data.get("losses", 0) + 1
+                mmr_loss = self.calculate_dynamic_mmr(matches_played, is_win=False)
+                old_mmr = player_data.get("mmr", 600)
+                new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
+                print(f"Player {player['name']} MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+
+                self.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "losses": losses,
+                        "matches": matches_played,
+                        "last_updated": datetime.datetime.utcnow()
+                    }}
+                )
+
+                # Track MMR change
+                mmr_changes.append({
+                    "player_id": player_id,
+                    "old_mmr": old_mmr,
+                    "new_mmr": new_mmr,
+                    "mmr_change": -mmr_loss,  # Negative for loss
+                    "is_win": False
+                })
+            else:
+                # Look up player's rank in ranks collection
+                print(f"New player {player['name']} (ID: {player_id}), determining starting MMR")
+
+                # Try to find rank record
+                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                if not rank_record:
+                    rank_record = db.get_collection('ranks').find_one({"discord_username": player["name"]})
+
+                # Default values
+                starting_mmr = 600  # Default MMR
+
+                if rank_record:
+                    print(f"Found rank record: {rank_record}")
+
+                    # Simplified logic - just use tier-based MMR
+                    tier = rank_record.get("tier", "Rank C")
+                    starting_mmr = self.TIER_MMR.get(tier, 600)
+                    print(f"Using tier-based MMR for {tier}: {starting_mmr}")
+                else:
+                    print(f"No rank record found, using default MMR: {starting_mmr}")
+
+                # Calculate first loss MMR
+                mmr_loss = self.calculate_dynamic_mmr(1, is_win=False)
+                new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
+                print(f"NEW PLAYER {player['name']} FIRST LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
+
+                self.players.insert_one({
+                    "id": player_id,
+                    "name": player["name"],
+                    "mmr": new_mmr,
+                    "wins": 0,
+                    "losses": 1,
+                    "matches": 1,
+                    "created_at": datetime.datetime.utcnow(),
+                    "last_updated": datetime.datetime.utcnow()
+                })
+
+                # Track MMR change for new player
+                mmr_changes.append({
+                    "player_id": player_id,
+                    "old_mmr": starting_mmr,
+                    "new_mmr": new_mmr,
+                    "mmr_change": -mmr_loss,  # Negative for loss
+                    "is_win": False
+                })
+
+        # Store the MMR changes in the match document
+        self.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {"mmr_changes": mmr_changes}}
+        )
 
         # After updating MMR for winners and losers:
         if ctx:

@@ -1292,7 +1292,7 @@ async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
         confirmation_time = bot.remove_confirmations.get(match_id, 0)
 
         if current_time - confirmation_time > 300 or confirmation_time == 0:  # 5 minutes expiration
-            await ctx.send(f"Please run `/removelastmatch {match_id}` first to see the warning before confirming.")
+            await ctx.send(f"Please use `/removelastmatch {match_id}` first!")
             return
 
         # Remove the confirmation once used
@@ -1378,7 +1378,7 @@ def create_match_confirmation_embed(match, match_id):
 
 
 async def remove_match_results(ctx, match):
-    """Process the actual removal of match results using exact MMR values when possible"""
+    """Process the actual removal of match results using stored MMR values"""
     match_id = match['match_id']
 
     # Get the teams and determine who won
@@ -1404,186 +1404,63 @@ async def remove_match_results(ctx, match):
     # Start tracking MMR changes for reporting
     mmr_changes = []
 
-    # Let's first try to find the exact MMR changes by looking at match history
-    try:
-        match_history = list(match_system.matches.find(
-            {"status": "completed"},
-            {"_id": 0, "match_id": 1, "team1": 1, "team2": 1, "winner": 1, "completed_at": 1}
-        ).sort("completed_at", 1))  # Sort by completion time, oldest first
+    # Check if the match has stored MMR changes
+    stored_mmr_changes = match.get('mmr_changes', [])
+    has_stored_changes = len(stored_mmr_changes) > 0
 
-        # Map player IDs to their MMR history
-        player_mmr_history = {}
+    # Create a map of player_id to their MMR change for easy lookup
+    mmr_change_map = {}
+    if has_stored_changes:
+        for change in stored_mmr_changes:
+            player_id = change.get('player_id')
+            if player_id:
+                mmr_change_map[player_id] = change
 
-        # Process matches in chronological order
-        for hist_match in match_history:
-            # Skip the current match and any matches after it
-            if hist_match.get('match_id') == match_id:
-                break
+    # Process all players from both teams
+    all_players = winning_team + losing_team
 
-            # Process winning team
-            hist_winner = hist_match.get('winner', 0)
-            if hist_winner == 1:
-                hist_winners = hist_match['team1']
-                hist_losers = hist_match['team2']
-            elif hist_winner == 2:
-                hist_winners = hist_match['team2']
-                hist_losers = hist_match['team1']
+    for player in all_players:
+        player_id = player['id']
+        # Skip dummy players
+        if player_id.startswith('9000'):
+            continue
+
+        player_data = match_system.players.find_one({"id": player_id})
+        if not player_data:
+            continue  # Skip if player no longer exists
+
+        # Check if we have stored MMR change for this player
+        if player_id in mmr_change_map:
+            change_data = mmr_change_map[player_id]
+
+            # These values are already stored in the match document
+            old_mmr = change_data.get('old_mmr', 0)
+            new_mmr = change_data.get('new_mmr', 0)
+            mmr_change = change_data.get('mmr_change', 0)
+            is_win = change_data.get('is_win', False)
+
+            # Update player's MMR back to the old value
+            current_mmr = player_data.get('mmr', 0)
+
+            # Update wins/losses and matches count
+            current_matches = player_data.get('matches', 0)
+            new_matches = max(0, current_matches - 1)
+
+            if is_win:
+                current_wins = player_data.get('wins', 0)
+                new_wins = max(0, current_wins - 1)
+                new_losses = player_data.get('losses', 0)
             else:
-                continue  # Skip matches with no winner
+                current_losses = player_data.get('losses', 0)
+                new_losses = max(0, current_losses - 1)
+                new_wins = player_data.get('wins', 0)
 
-            # Update MMR history for winners
-            for player in hist_winners:
-                player_id = player.get('id')
-                if player_id not in player_mmr_history:
-                    player_mmr_history[player_id] = []
-                player_mmr_history[player_id].append({
-                    'match_id': hist_match.get('match_id'),
-                    'win': True,
-                    'completed_at': hist_match.get('completed_at')
-                })
-
-            # Update MMR history for losers
-            for player in hist_losers:
-                player_id = player.get('id')
-                if player_id not in player_mmr_history:
-                    player_mmr_history[player_id] = []
-                player_mmr_history[player_id].append({
-                    'match_id': hist_match.get('match_id'),
-                    'win': False,
-                    'completed_at': hist_match.get('completed_at')
-                })
-    except Exception as e:
-        print(f"Error building match history: {e}")
-        player_mmr_history = {}
-
-    # Revert MMR for winning team
-    for player in winning_team:
-        player_id = player['id']
-        # Skip dummy players
-        if player_id.startswith('9000'):
-            continue
-
-        player_data = match_system.players.find_one({"id": player_id})
-        if player_data:
-            # If we have player match history, calculate the exact MMR gain
-            mmr_gain = None
-            if player_id in player_mmr_history:
-                # Calculate exact MMR from match history
-                match_count = len(player_mmr_history[player_id])
-                mmr_gain = match_system.calculate_dynamic_mmr(match_count, is_win=True)
-
-            # If we couldn't determine from history, check if there are any additional clues
-            if mmr_gain is None:
-                # Check if this is a recent match (last 24h) where we can get from logs
-                if 'completed_at' in match and (datetime.datetime.now(datetime.UTC) - match['completed_at']).days < 1:
-                    # Calculate estimated MMR based on match count
-                    matches_played = player_data.get("matches", 0)
-                    if matches_played > 0:
-                        matches_played_before = matches_played - 1
-                        mmr_gain = match_system.calculate_dynamic_mmr(matches_played_before, is_win=True)
-                    else:
-                        mmr_gain = 0
-                else:
-                    # For older matches or when we can't determine exact value
-                    # Use a best guess based on player's record
-                    win_percent = player_data.get("wins", 0) / max(player_data.get("matches", 1), 1) * 100
-
-                    # More wins = less MMR gain (based on your dynamic formula)
-                    if win_percent > 75:  # Very good player
-                        mmr_gain = 20  # Minimum value
-                    elif win_percent > 50:  # Above average player
-                        mmr_gain = 50
-                    else:  # Average or below player
-                        mmr_gain = 80
-
-            # Revert MMR
-            current_mmr = player_data.get("mmr", 0)
-            new_mmr = max(0, current_mmr - mmr_gain)  # Don't go below 0
-
-            # Update wins and matches count
-            current_wins = player_data.get("wins", 0)
-            new_wins = max(0, current_wins - 1)  # Don't go below 0
-            new_matches = max(0, player_data.get("matches", 0) - 1)  # Don't go below 0
-
-            # Update database
+            # Update database - restore MMR to original value
             match_system.players.update_one(
                 {"id": player_id},
                 {"$set": {
-                    "mmr": new_mmr,
+                    "mmr": old_mmr,
                     "wins": new_wins,
-                    "matches": new_matches,
-                    "last_updated": datetime.datetime.now(datetime.UTC)
-                }}
-            )
-
-            # Track change for reporting
-            mmr_changes.append({
-                "player": player['name'],
-                "old_mmr": current_mmr,
-                "new_mmr": new_mmr,
-                "change": f"-{mmr_gain}"
-            })
-
-            # Update Discord role based on new MMR
-            try:
-                await match_system.update_discord_role(ctx, player_id, new_mmr)
-            except Exception as e:
-                print(f"Error updating Discord role for {player['name']}: {str(e)}")
-
-    # Revert MMR for losing team - similar logic
-    for player in losing_team:
-        player_id = player['id']
-        # Skip dummy players
-        if player_id.startswith('9000'):
-            continue
-
-        player_data = match_system.players.find_one({"id": player_id})
-        if player_data:
-            # If we have player match history, calculate the exact MMR loss
-            mmr_loss = None
-            if player_id in player_mmr_history:
-                # Calculate exact MMR from match history
-                match_count = len(player_mmr_history[player_id])
-                mmr_loss = match_system.calculate_dynamic_mmr(match_count, is_win=False)
-
-            # If we couldn't determine from history, check if there are any additional clues
-            if mmr_loss is None:
-                # Check if this is a recent match where we can get from logs
-                if 'completed_at' in match and (datetime.datetime.now(datetime.UTC) - match['completed_at']).days < 1:
-                    # Calculate estimated MMR based on match count
-                    matches_played = player_data.get("matches", 0)
-                    if matches_played > 0:
-                        matches_played_before = matches_played - 1
-                        mmr_loss = match_system.calculate_dynamic_mmr(matches_played_before, is_win=False)
-                    else:
-                        mmr_loss = 0
-                else:
-                    # For older matches or when we can't determine exact value
-                    # Use a best guess based on player's record
-                    loss_percent = player_data.get("losses", 0) / max(player_data.get("matches", 1), 1) * 100
-
-                    # More losses = less MMR loss (based on dynamic formula)
-                    if loss_percent > 75:  # Many losses
-                        mmr_loss = 18  # Minimum
-                    elif loss_percent > 50:  # Above average losses
-                        mmr_loss = 30
-                    else:  # Few losses
-                        mmr_loss = 50
-
-            # Revert MMR
-            current_mmr = player_data.get("mmr", 0)
-            new_mmr = current_mmr + mmr_loss
-
-            # Update losses and matches count
-            current_losses = player_data.get("losses", 0)
-            new_losses = max(0, current_losses - 1)  # Don't go below 0
-            new_matches = max(0, player_data.get("matches", 0) - 1)  # Don't go below 0
-
-            # Update database
-            match_system.players.update_one(
-                {"id": player_id},
-                {"$set": {
-                    "mmr": new_mmr,
                     "losses": new_losses,
                     "matches": new_matches,
                     "last_updated": datetime.datetime.now(datetime.UTC)
@@ -1594,15 +1471,100 @@ async def remove_match_results(ctx, match):
             mmr_changes.append({
                 "player": player['name'],
                 "old_mmr": current_mmr,
-                "new_mmr": new_mmr,
-                "change": f"+{mmr_loss}"
+                "new_mmr": old_mmr,
+                "change": f"{mmr_change}" if mmr_change > 0 else f"{mmr_change}"  # Already includes sign
             })
 
             # Update Discord role based on new MMR
             try:
-                await match_system.update_discord_role(ctx, player_id, new_mmr)
+                await match_system.update_discord_role(ctx, player_id, old_mmr)
             except Exception as e:
                 print(f"Error updating Discord role for {player['name']}: {str(e)}")
+        else:
+            # Fall back to approximation if we don't have stored data
+            # (This should rarely happen if your report_match_by_id is storing MMR changes)
+            is_winner = player in winning_team
+
+            if is_winner:
+                # Use the dynamic calculation for winners
+                matches_played = player_data.get("matches", 0)
+                if matches_played > 0:
+                    matches_played_before = matches_played - 1
+                    mmr_change = match_system.calculate_dynamic_mmr(matches_played_before, is_win=True)
+
+                    # Revert MMR
+                    current_mmr = player_data.get("mmr", 0)
+                    new_mmr = max(0, current_mmr - mmr_change)  # Don't go below 0
+
+                    # Update wins and matches count
+                    current_wins = player_data.get("wins", 0)
+                    new_wins = max(0, current_wins - 1)  # Don't go below 0
+                    new_matches = max(0, matches_played - 1)  # Don't go below 0
+
+                    # Update database
+                    match_system.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "mmr": new_mmr,
+                            "wins": new_wins,
+                            "matches": new_matches,
+                            "last_updated": datetime.datetime.now(datetime.UTC)
+                        }}
+                    )
+
+                    # Track change for reporting
+                    mmr_changes.append({
+                        "player": player['name'],
+                        "old_mmr": current_mmr,
+                        "new_mmr": new_mmr,
+                        "change": f"-{mmr_change}"
+                    })
+
+                    # Update Discord role based on new MMR
+                    try:
+                        await match_system.update_discord_role(ctx, player_id, new_mmr)
+                    except Exception as e:
+                        print(f"Error updating Discord role for {player['name']}: {str(e)}")
+            else:
+                # Use the dynamic calculation for losers
+                matches_played = player_data.get("matches", 0)
+                if matches_played > 0:
+                    matches_played_before = matches_played - 1
+                    mmr_change = match_system.calculate_dynamic_mmr(matches_played_before, is_win=False)
+
+                    # Revert MMR
+                    current_mmr = player_data.get("mmr", 0)
+                    new_mmr = current_mmr + mmr_change
+
+                    # Update losses and matches count
+                    current_losses = player_data.get("losses", 0)
+                    new_losses = max(0, current_losses - 1)  # Don't go below 0
+                    new_matches = max(0, matches_played - 1)  # Don't go below 0
+
+                    # Update database
+                    match_system.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "mmr": new_mmr,
+                            "losses": new_losses,
+                            "matches": new_matches,
+                            "last_updated": datetime.datetime.now(datetime.UTC)
+                        }}
+                    )
+
+                    # Track change for reporting
+                    mmr_changes.append({
+                        "player": player['name'],
+                        "old_mmr": current_mmr,
+                        "new_mmr": new_mmr,
+                        "change": f"+{mmr_change}"
+                    })
+
+                    # Update Discord role based on new MMR
+                    try:
+                        await match_system.update_discord_role(ctx, player_id, new_mmr)
+                    except Exception as e:
+                        print(f"Error updating Discord role for {player['name']}: {str(e)}")
 
     # Update match status
     match_system.matches.update_one(
