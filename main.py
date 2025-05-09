@@ -988,8 +988,16 @@ async def resetleaderboard(ctx, confirmation: str = None):
         await ctx.send("You need administrator permissions to use this command.")
         return
 
+    # Track reset confirmations with a dict that maps user IDs to timestamps
+    if not hasattr(bot, 'reset_confirmations'):
+        bot.reset_confirmations = {}
+
+    user_id = str(ctx.author.id)
+    current_time = datetime.datetime.now(datetime.UTC).timestamp()
+
     # Require confirmation
-    if confirmation is None or confirmation.lower() != "confirm":
+    if confirmation is None:
+        # First step: Show warning
         embed = discord.Embed(
             title="⚠️ Reset Leaderboard Confirmation",
             description="This will reset MMR, stats, rank data, match history and **remove all rank roles**. This action cannot be undone!",
@@ -1001,162 +1009,179 @@ async def resetleaderboard(ctx, confirmation: str = None):
             inline=False
         )
         await ctx.send(embed=embed)
+
+        # Store that this user has seen the warning
+        bot.reset_confirmations[user_id] = current_time
         return
+    elif confirmation.lower() == "confirm":
+        # Check if user has seen the warning (within the last 5 minutes)
+        confirmation_time = bot.reset_confirmations.get(user_id, 0)
+        if current_time - confirmation_time > 300 or confirmation_time == 0:  # 5 minutes expiration
+            await ctx.send("Please run `/resetleaderboard` first to see the warning before confirming.")
+            return
 
-    # Check multiple collections to determine if truly empty
-    db = match_system.players.database
-    player_count = match_system.players.count_documents({})
-    match_count = db['matches'].count_documents({})
-    rank_count = db['ranks'].count_documents({})
+        # Remove the confirmation once used
+        if user_id in bot.reset_confirmations:
+            del bot.reset_confirmations[user_id]
 
-    total_documents = player_count + match_count + rank_count
-
-    try:
-        # Initialize variables that will be used throughout the function
-        web_reset = "⚠️ Web reset not attempted"
-        verification_reset = "⚠️ Verification reset not attempted"
-
-        # Create backup collections with timestamp
-        timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
-
-        # Track what was backed up for reporting
-        backed_up = []
-
-        # Backup and reset players
-        if player_count > 0:
-            backup_collection_name = f"players_backup_{timestamp}"
-            db.create_collection(backup_collection_name)
-            backup_collection = db[backup_collection_name]
-            for player in match_system.players.find():
-                backup_collection.insert_one(player)
-            match_system.players.delete_many({})
-            backed_up.append(f"Players ({player_count})")
-
-        # Backup and reset matches
-        matches_collection = db['matches']
-        if match_count > 0:
-            backup_collection_name = f"matches_backup_{timestamp}"
-            db.create_collection(backup_collection_name)
-            backup_collection = db[backup_collection_name]
-            for match in matches_collection.find():
-                backup_collection.insert_one(match)
-            matches_collection.delete_many({})
-            backed_up.append(f"Matches ({match_count})")
-
-        # Backup and reset ranks
-        ranks_collection = db['ranks']
-        if rank_count > 0:
-            backup_collection_name = f"ranks_backup_{timestamp}"
-            db.create_collection(backup_collection_name)
-            backup_collection = db[backup_collection_name]
-            for rank in ranks_collection.find():
-                backup_collection.insert_one(rank)
-            ranks_collection.delete_many({})
-            backed_up.append(f"Ranks ({rank_count})")
-
-        # Call the web API to reset the leaderboard and verification status
+        # Begin actual reset process
         try:
-            webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
-            admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
+            # Initialize variables that will be used throughout the function
+            web_reset = "⚠️ Web reset not attempted"
+            verification_reset = "⚠️ Verification reset not attempted"
 
-            headers = {
-                'Authorization': admin_token,
-                'Content-Type': 'application/json'
-            }
+            # Check multiple collections to determine if truly empty
+            db = match_system.players.database
+            player_count = match_system.players.count_documents({})
+            match_count = db['matches'].count_documents({})
+            rank_count = db['ranks'].count_documents({})
 
-            data = {
-                'admin_id': str(ctx.author.id),
-                'reason': 'Season reset via Discord command'
-            }
+            total_documents = player_count + match_count + rank_count
 
-            # Reset leaderboard
-            leaderboard_response = requests.post(
-                f"{webapp_url}/api/reset-leaderboard",
-                headers=headers,
-                json=data
+            # Create backup collections with timestamp
+            timestamp = datetime.datetime.now(datetime.UTC).strftime("%Y%m%d_%H%M%S")
+
+            # Track what was backed up for reporting
+            backed_up = []
+
+            # Backup and reset players
+            if player_count > 0:
+                backup_collection_name = f"players_backup_{timestamp}"
+                db.create_collection(backup_collection_name)
+                backup_collection = db[backup_collection_name]
+                for player in match_system.players.find():
+                    backup_collection.insert_one(player)
+                match_system.players.delete_many({})
+                backed_up.append(f"Players ({player_count})")
+
+            # Backup and reset matches
+            matches_collection = db['matches']
+            if match_count > 0:
+                backup_collection_name = f"matches_backup_{timestamp}"
+                db.create_collection(backup_collection_name)
+                backup_collection = db[backup_collection_name]
+                for match in matches_collection.find():
+                    backup_collection.insert_one(match)
+                matches_collection.delete_many({})
+                backed_up.append(f"Matches ({match_count})")
+
+            # Backup and reset ranks
+            ranks_collection = db['ranks']
+            if rank_count > 0:
+                backup_collection_name = f"ranks_backup_{timestamp}"
+                db.create_collection(backup_collection_name)
+                backup_collection = db[backup_collection_name]
+                for rank in ranks_collection.find():
+                    backup_collection.insert_one(rank)
+                ranks_collection.delete_many({})
+                backed_up.append(f"Ranks ({rank_count})")
+
+            # Call the web API to reset the leaderboard and verification status
+            try:
+                webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
+                admin_token = os.getenv('ADMIN_TOKEN', 'admin-secret-token')
+
+                headers = {
+                    'Authorization': admin_token,
+                    'Content-Type': 'application/json'
+                }
+
+                data = {
+                    'admin_id': str(ctx.author.id),
+                    'reason': 'Season reset via Discord command'
+                }
+
+                # Reset leaderboard
+                leaderboard_response = requests.post(
+                    f"{webapp_url}/api/reset-leaderboard",
+                    headers=headers,
+                    json=data
+                )
+
+                # Also reset verification
+                verification_response = requests.post(
+                    f"{webapp_url}/api/reset-verification",
+                    headers=headers,
+                    json=data
+                )
+
+                if leaderboard_response.status_code == 200:
+                    web_reset = "✅ Web leaderboard reset successfully."
+                else:
+                    web_reset = f"❌ Failed to reset web leaderboard (Status: {leaderboard_response.status_code})."
+
+                if verification_response.status_code == 200:
+                    verification_reset = "✅ Rank verification reset successfully."
+                else:
+                    verification_reset = f"❌ Failed to reset rank verification (Status: {verification_response.status_code})."
+
+            except Exception as e:
+                web_reset = f"❌ Error connecting to web services: {str(e)}"
+                # Keep verification_reset with its default value
+
+            # Remove rank roles from all members
+            role_reset = await remove_all_rank_roles(ctx.guild)
+
+            # Record the reset event locally
+            resets_collection = db['resets']
+            resets_collection.insert_one({
+                "type": "leaderboard_reset",
+                "timestamp": datetime.datetime.now(datetime.UTC),
+                "performed_by": str(ctx.author.id),
+                "performed_by_name": ctx.author.display_name,
+                "reason": "Season reset via Discord command"
+            })
+
+            # Debug - print variable values before creating embed
+            print(f"Debug - web_reset: {web_reset}, verification_reset: {verification_reset}")
+
+            # Send confirmation
+            embed = discord.Embed(
+                title="✅ Leaderboard Reset Complete",
+                description=f"Reset {total_documents} documents across {len(backed_up) if backed_up else 0} collections.",
+                color=0x00ff00
             )
 
-            # Also reset verification
-            verification_response = requests.post(
-                f"{webapp_url}/api/reset-verification",
-                headers=headers,
-                json=data
-            )
+            if backed_up:
+                embed.add_field(
+                    name="Collections Reset",
+                    value="\n".join(backed_up),
+                    inline=False
+                )
 
-            if leaderboard_response.status_code == 200:
-                web_reset = "✅ Web leaderboard reset successfully."
-            else:
-                web_reset = f"❌ Failed to reset web leaderboard (Status: {leaderboard_response.status_code})."
-
-            if verification_response.status_code == 200:
-                verification_reset = "✅ Rank verification reset successfully."
-            else:
-                verification_reset = f"❌ Failed to reset rank verification (Status: {verification_response.status_code})."
-
-        except Exception as e:
-            web_reset = f"❌ Error connecting to web services: {str(e)}"
-            # Keep verification_reset with its default value
-
-        # Remove rank roles from all members
-        role_reset = await remove_all_rank_roles(ctx.guild)
-
-        # Record the reset event locally
-        resets_collection = db['resets']
-        resets_collection.insert_one({
-            "type": "leaderboard_reset",
-            "timestamp": datetime.datetime.now(datetime.UTC),
-            "performed_by": str(ctx.author.id),
-            "performed_by_name": ctx.author.display_name,
-            "reason": "Season reset via Discord command"
-        })
-
-        # Debug - print variable values before creating embed
-        print(f"Debug - web_reset: {web_reset}, verification_reset: {verification_reset}")
-
-        # Send confirmation
-        embed = discord.Embed(
-            title="✅ Leaderboard Reset Complete",
-            description=f"Reset {total_documents} documents across {len(backed_up) if backed_up else 0} collections.",
-            color=0x00ff00
-        )
-
-        if backed_up:
             embed.add_field(
-                name="Collections Reset",
-                value="\n".join(backed_up),
+                name="Backup Created",
+                value=f"Backup timestamp: `{timestamp}`",
                 inline=False
             )
 
-        embed.add_field(
-            name="Backup Created",
-            value=f"Backup timestamp: `{timestamp}`",
-            inline=False
-        )
+            embed.add_field(
+                name="Web Leaderboard Status",
+                value=web_reset,
+                inline=False
+            )
 
-        embed.add_field(
-            name="Web Leaderboard Status",
-            value=web_reset,
-            inline=False
-        )
+            embed.add_field(
+                name="Verification Reset Status",
+                value=verification_reset,
+                inline=False
+            )
 
-        embed.add_field(
-            name="Verification Reset Status",
-            value=verification_reset,
-            inline=False
-        )
+            embed.add_field(
+                name="Discord Roles",
+                value=role_reset,
+                inline=False
+            )
 
-        embed.add_field(
-            name="Discord Roles",
-            value=role_reset,
-            inline=False
-        )
+            embed.set_footer(text=f"Reset by {ctx.author.display_name}")
 
-        embed.set_footer(text=f"Reset by {ctx.author.display_name}")
+            await ctx.send(embed=embed)
 
-        await ctx.send(embed=embed)
-
-    except Exception as e:
-        await ctx.send(f"Error resetting leaderboard: {str(e)}")
+        except Exception as e:
+            await ctx.send(f"Error resetting leaderboard: {str(e)}")
+    else:
+        await ctx.send("Invalid confirmation. Use `/resetleaderboard` to see instructions.")
+        return
 
 
 # Add this new helper function to handle role removal
