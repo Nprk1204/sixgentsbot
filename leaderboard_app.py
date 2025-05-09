@@ -867,8 +867,8 @@ def reset_leaderboard():
         resets_collection.insert_one({
             "type": "leaderboard_reset",
             "timestamp": timestamp,
-            "performed_by": request.json.get("admin_id", "unknown"),
-            "reason": request.json.get("reason", "Season reset")
+            "performed_by": request.json.get("admin_id", "unknown") if request.json else "unknown",
+            "reason": request.json.get("reason", "Season reset") if request.json else "Season reset"
         })
 
         return jsonify({
@@ -883,6 +883,7 @@ def reset_leaderboard():
         })
 
     except Exception as e:
+        print(f"Error in reset_leaderboard: {str(e)}")
         return jsonify({
             "success": False,
             "message": f"Error resetting leaderboard: {str(e)}"
@@ -905,8 +906,8 @@ def reset_verification():
         resets_collection.insert_one({
             "type": "verification_reset",
             "timestamp": reset_timestamp,
-            "performed_by": request.json.get("admin_id", "unknown"),
-            "reason": request.json.get("reason", "Rank verification reset")
+            "performed_by": request.json.get("admin_id", "unknown") if request.json else "unknown",
+            "reason": request.json.get("reason", "Rank verification reset") if request.json else "Rank verification reset"
         })
 
         return jsonify({
@@ -916,6 +917,7 @@ def reset_verification():
         })
 
     except Exception as e:
+        print(f"Error in reset_verification: {str(e)}")
         return jsonify({
             "success": False,
             "message": f"Error resetting verification: {str(e)}"
