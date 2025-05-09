@@ -14,46 +14,7 @@ class MatchSystem:
         self.players = db.get_collection('players')
         self.active_matches = {}  # Store active matches in memory
 
-        # Define hardcoded MMR values as instance variables
-        self.EXACT_RANK_MMR = {
-            # Bronze
-            "bronze_1": 50,
-            "bronze_2": 100,
-            "bronze_3": 150,
-
-            # Silver
-            "silver_1": 200,
-            "silver_2": 225,
-            "silver_3": 250,
-
-            # Gold
-            "gold_1": 300,
-            "gold_2": 350,
-            "gold_3": 400,
-
-            # Platinum
-            "platinum_1": 500,
-            "platinum_2": 550,
-            "platinum_3": 600,
-
-            # Diamond
-            "diamond_1": 700,
-            "diamond_2": 800,
-            "diamond_3": 900,
-
-            # Champion
-            "champion_1": 1100,
-            "champion_2": 1250,
-            "champion_3": 1500,
-
-            # Grand Champion and SSL
-            "grand_champion_1": 1600,
-            "grand_champion_2": 1800,
-            "grand_champion_3": 2000,
-            "ssl": 2200
-        }
-
-        # Tier-based MMR values
+        # Simplified - keep just the three tier-based MMR values
         self.TIER_MMR = {
             "Rank A": 1600,  # Grand Champion I and above
             "Rank B": 1100,  # Champion I to Champion III
@@ -315,20 +276,10 @@ class MatchSystem:
                 if rank_record:
                     print(f"Found rank record: {rank_record}")
 
-                    # UPDATED PRIORITY:
-                    # 1. Use rank_value if present
-                    if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
-                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
-                    # 2. Use MMR if present
-                    elif "mmr" in rank_record and rank_record["mmr"] is not None:
-                        starting_mmr = rank_record["mmr"]
-                        print(f"Using explicit MMR from rank record: {starting_mmr}")
-                    # 3. Otherwise use default tier
-                    else:
-                        tier = rank_record.get("tier", "Rank C")
-                        starting_mmr = self.TIER_MMR.get(tier, 600)
-                        print(f"No specific MMR found, using tier-based MMR for {tier}: {starting_mmr}")
+                    # Simplified logic - just use tier-based MMR
+                    tier = rank_record.get("tier", "Rank C")
+                    starting_mmr = self.TIER_MMR.get(tier, 600)
+                    print(f"Using tier-based MMR for {tier}: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
@@ -348,7 +299,7 @@ class MatchSystem:
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-        # Process losers with the same updated logic
+        # Process losers with the same simplified logic
         for player in losing_team:
             player_id = player["id"]
 
@@ -387,20 +338,10 @@ class MatchSystem:
                 if rank_record:
                     print(f"Found rank record: {rank_record}")
 
-                    # UPDATED PRIORITY:
-                    # 1. Use rank_value if present
-                    if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
-                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
-                    # 2. Use MMR if present
-                    elif "mmr" in rank_record and rank_record["mmr"] is not None:
-                        starting_mmr = rank_record["mmr"]
-                        print(f"Using explicit MMR from rank record: {starting_mmr}")
-                    # 3. Otherwise use default tier
-                    else:
-                        tier = rank_record.get("tier", "Rank C")
-                        starting_mmr = self.TIER_MMR.get(tier, 600)
-                        print(f"No specific MMR found, using tier-based MMR for {tier}: {starting_mmr}")
+                    # Simplified logic - just use tier-based MMR
+                    tier = rank_record.get("tier", "Rank C")
+                    starting_mmr = self.TIER_MMR.get(tier, 600)
+                    print(f"Using tier-based MMR for {tier}: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 

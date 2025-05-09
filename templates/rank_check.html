@@ -31,52 +31,31 @@
                     <h4 class="mb-0">Select Your Rank</h4>
                 </div>
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label for="rlRank" class="form-label">Your Rocket League 3v3 Rank</label>
-                        <select class="form-select" id="rlRank">
-                            <option value="" selected disabled>Select your 3v3 competitive rank</option>
+                <div class="mb-3">
+                    <label for="rlRank" class="form-label">Your Rocket League 3v3 Rank</label>
+                    <select class="form-select" id="rlRank">
+                        <option value="" selected disabled>Select your 3v3 competitive rank</option>
 
-                            <!-- Bronze -->
-                            <option value="bronze_1" data-mmr="50" data-tier="Rank C" data-icon="/static/img/ranks/bronze_1.png">Bronze I</option>
-                            <option value="bronze_2" data-mmr="100" data-tier="Rank C" data-icon="/static/img/ranks/bronze_2.png">Bronze II</option>
-                            <option value="bronze_3" data-mmr="150" data-tier="Rank C" data-icon="/static/img/ranks/bronze_3.png">Bronze III</option>
+                        <!-- Rank C Group -->
+                        <option value="rank_c" data-mmr="600" data-tier="Rank C" data-icon="/static/img/ranks/diamond_3.png">
+                            Bronze I - Diamond III
+                        </option>
 
-                            <!-- Silver -->
-                            <option value="silver_1" data-mmr="200" data-tier="Rank C" data-icon="/static/img/ranks/silver_1.png">Silver I</option>
-                            <option value="silver_2" data-mmr="225" data-tier="Rank C" data-icon="/static/img/ranks/silver_2.png">Silver II</option>
-                            <option value="silver_3" data-mmr="250" data-tier="Rank C" data-icon="/static/img/ranks/silver_3.png">Silver III</option>
+                        <!-- Rank B Group -->
+                        <option value="rank_b" data-mmr="1100" data-tier="Rank B" data-icon="/static/img/ranks/champion_3.png">
+                            Champion I - Champion III
+                        </option>
 
-                            <!-- Gold -->
-                            <option value="gold_1" data-mmr="300" data-tier="Rank C" data-icon="/static/img/ranks/gold_1.png">Gold I</option>
-                            <option value="gold_2" data-mmr="350" data-tier="Rank C" data-icon="/static/img/ranks/gold_2.png">Gold II</option>
-                            <option value="gold_3" data-mmr="400" data-tier="Rank C" data-icon="/static/img/ranks/gold_3.png">Gold III</option>
-
-                            <!-- Platinum -->
-                            <option value="platinum_1" data-mmr="500" data-tier="Rank C" data-icon="/static/img/ranks/platinum_1.png">Platinum I</option>
-                            <option value="platinum_2" data-mmr="550" data-tier="Rank C" data-icon="/static/img/ranks/platinum_2.png">Platinum II</option>
-                            <option value="platinum_3" data-mmr="600" data-tier="Rank C" data-icon="/static/img/ranks/platinum_3.png">Platinum III</option>
-
-                            <!-- Diamond -->
-                            <option value="diamond_1" data-mmr="700" data-tier="Rank C" data-icon="/static/img/ranks/diamond_1.png">Diamond I</option>
-                            <option value="diamond_2" data-mmr="800" data-tier="Rank C" data-icon="/static/img/ranks/diamond_2.png">Diamond II</option>
-                            <option value="diamond_3" data-mmr="900" data-tier="Rank C" data-icon="/static/img/ranks/diamond_3.png">Diamond III</option>
-
-                            <!-- Champion -->
-                            <option value="champion_1" data-mmr="1100" data-tier="Rank B" data-icon="/static/img/ranks/champion_1.png">Champion I</option>
-                            <option value="champion_2" data-mmr="1250" data-tier="Rank B" data-icon="/static/img/ranks/champion_2.png">Champion II</option>
-                            <option value="champion_3" data-mmr="1500" data-tier="Rank B" data-icon="/static/img/ranks/champion_3.png">Champion III</option>
-
-                            <!-- Grand Champion -->
-                            <option value="grand_champion_1" data-mmr="1600" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_1.png">Grand Champion I</option>
-                            <option value="grand_champion_2" data-mmr="1800" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_2.png">Grand Champion II</option>
-                            <option value="grand_champion_3" data-mmr="2000" data-tier="Rank A" data-icon="/static/img/ranks/grand_champion_3.png">Grand Champion III</option>
-                            <option value="ssl" data-mmr="2200" data-tier="Rank A" data-icon="/static/img/ranks/ssl.png">Supersonic Legend</option>
-                        </select>
-                        <div id="rankPreview" class="mt-3 text-center d-none">
-                            <img id="rankImage" src="" alt="Rank Icon" class="img-fluid mb-2" style="max-width: 80px;">
-                            <h5 id="rankName" class="mb-0"></h5>
-                        </div>
+                        <!-- Rank A Group -->
+                        <option value="rank_a" data-mmr="1600" data-tier="Rank A" data-icon="/static/img/ranks/ssl.png">
+                            Grand Champion I - Supersonic Legend
+                        </option>
+                    </select>
+                    <div id="rankPreview" class="mt-3 text-center d-none">
+                        <img id="rankImage" src="" alt="Rank Icon" class="img-fluid mb-2" style="max-width: 80px;">
+                        <h5 id="rankName" class="mb-0"></h5>
                     </div>
+                </div>
 
                     <div class="mb-3">
                         <label for="discordUsername" class="form-label">Discord Username for role assignment</label>
@@ -99,49 +78,49 @@
         <div class="col-lg-6 mt-4 mt-lg-0">
             <h4 class="mb-3">Rank Tiers</h4>
 
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <div class="rank-card">
-                        <div class="rank-header rank-a">
-                            <i class="fas fa-trophy fa-2x"></i>
-                        </div>
-                        <div class="rank-body">
-                            <h5 class="rank-title">Rank A</h5>
-                            <p class="rank-description">Grand Champion I & Above</p>
-                            <p class="rank-mmr">MMR Range: 1600+</p>
-                            <span class="badge bg-danger">Rank A Role</span>
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <div class="rank-card">
+                            <div class="rank-header rank-a">
+                                <i class="fas fa-trophy fa-2x"></i>
+                            </div>
+                            <div class="rank-body">
+                                <h5 class="rank-title">Rank A</h5>
+                                <p class="rank-description">Grand Champion I & Above</p>
+                                <p class="rank-mmr">Starting MMR: 1600</p>
+                                <span class="badge bg-danger">Rank A Role</span>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="col-md-4 mb-3">
-                    <div class="rank-card">
-                        <div class="rank-header rank-b">
-                            <i class="fas fa-award fa-2x"></i>
-                        </div>
-                        <div class="rank-body">
-                            <h5 class="rank-title">Rank B</h5>
-                            <p class="rank-description">Champion I to Champion III</p>
-                            <p class="rank-mmr">MMR Range: 1100 - 1600</p>
-                            <span class="badge bg-primary">Rank B Role</span>
+                    <div class="col-md-4 mb-3">
+                        <div class="rank-card">
+                            <div class="rank-header rank-b">
+                                <i class="fas fa-award fa-2x"></i>
+                            </div>
+                            <div class="rank-body">
+                                <h5 class="rank-title">Rank B</h5>
+                                <p class="rank-description">Champion I - Champion III</p>
+                                <p class="rank-mmr">Starting MMR: 1100</p>
+                                <span class="badge bg-primary">Rank B Role</span>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div class="col-md-4 mb-3">
-                    <div class="rank-card">
-                        <div class="rank-header rank-c">
-                            <i class="fas fa-medal fa-2x"></i>
-                        </div>
-                        <div class="rank-body">
-                            <h5 class="rank-title">Rank C</h5>
-                            <p class="rank-description">Diamond III and below</p>
-                            <p class="rank-mmr">MMR Range: 0 - 1100</p>
-                            <span class="badge bg-success">Rank C Role</span>
+                    <div class="col-md-4 mb-3">
+                        <div class="rank-card">
+                            <div class="rank-header rank-c">
+                                <i class="fas fa-medal fa-2x"></i>
+                            </div>
+                            <div class="rank-body">
+                                <h5 class="rank-title">Rank C</h5>
+                                <p class="rank-description">Bronze I - Diamond III</p>
+                                <p class="rank-mmr">Starting MMR: 600</p>
+                                <span class="badge bg-success">Rank C Role</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
             <div class="card bg-dark-medium mt-4">
                 <div class="card-header">
@@ -209,18 +188,20 @@ function setupRankSelector() {
     const rankSelect = document.getElementById('rlRank');
     const verifyButton = document.getElementById('verifyRankButton');
     const rankPreview = document.getElementById('rankPreview');
+    const rankImage = document.getElementById('rankImage');
+    const rankName = document.getElementById('rankName');
 
     // Show rank image when selection changes
     rankSelect.addEventListener('change', function() {
+        const selectedOption = this.options[this.selectedIndex];
         const value = this.value;
-        const text = this.options[this.selectedIndex].text;
-        const imagePath = `/static/img/ranks/${value}.png`;
+        const text = selectedOption.text;
+        const imagePath = selectedOption.getAttribute('data-icon');
 
         if (rankPreview) {
-            rankPreview.innerHTML = `
-                <img src="${imagePath}" alt="${text}" class="img-fluid mb-2" style="max-width: 80px;">
-                <h5 class="mb-0">${text}</h5>
-            `;
+            rankImage.src = imagePath;
+            rankImage.alt = text;
+            rankName.textContent = text;
             rankPreview.classList.remove('d-none');
         }
     });
@@ -255,7 +236,7 @@ function setupRankSelector() {
 
         // Basic validation
         if (!rankSelect.value) {
-            alert('Please select your Rocket League rank first');
+            alert('Please select your Rocket League rank tier first');
             return;
         }
 
@@ -266,25 +247,17 @@ function setupRankSelector() {
 
         // Get rank details from the selected option
         const selectedOption = rankSelect.options[rankSelect.selectedIndex];
-        const rankTier = selectedOption.getAttribute('data-tier'); // This stays as Rank A, B, or C
-        const rankMMR = selectedOption.getAttribute('data-mmr');  // This is the specific MMR for the selected rank
-        const rankName = selectedOption.text;
-        const rankValue = rankSelect.value;
+        const rankTier = selectedOption.getAttribute('data-tier'); // This is the tier (Rank A, B, or C)
+        const rankMMR = selectedOption.getAttribute('data-mmr');   // The tier-based MMR value
+        const rankName = selectedOption.text;                      // The display name
+        const rankValue = rankSelect.value;                        // The value (rank_a, rank_b, rank_c)
 
         // Show loading state
         verifyButton.disabled = true;
         verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
 
-        // Call API with the MMR value included
-        let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}`;
-
-        // Important: Add the MMR parameter from the selected rank
-        if (rankMMR) {
-            apiUrl += `&manual_mmr=${encodeURIComponent(rankMMR)}`;
-        }
-
-        // Add the rank_value parameter
-        apiUrl += `&rank_value=${encodeURIComponent(rankValue)}`;
+        // Simplified API call
+        let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}&manual_mmr=${encodeURIComponent(rankMMR)}`;
 
         // Make the API request
         fetch(apiUrl)
@@ -299,10 +272,10 @@ function setupRankSelector() {
                         username: discordUsername,
                         rank: rankName,
                         tier: rankTier,
-                        mmr: data.mmr,  // Use the MMR from the response
-                        rankValue: rankValue,
+                        mmr: data.mmr || rankMMR,  // Use the MMR from the response or fallback to selected
                         discord_updated: data.role_assignment?.success || false,
-                        verified_at: now
+                        verified_at: now,
+                        rankValue: rankValue  // Store the value for image path
                     };
 
                     localStorage.setItem('rankVerified', 'true');
@@ -354,7 +327,9 @@ function displayVerifiedRank(data) {
     const resultDiv = document.getElementById('verificationResult');
     if (!resultDiv) return;
 
-    const imagePath = `/static/img/ranks/${data.rankValue}.png`;
+    // Use the stored rankValue or fall back to a tier-based value
+    const rankValue = data.rankValue || data.tier?.toLowerCase().replace(' ', '_') || 'rank_c';
+    const imagePath = `/static/img/ranks/${rankValue}.png`;
 
     resultDiv.innerHTML = `
         <div class="alert alert-success">

@@ -478,10 +478,9 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
     try:
         # Debug print
         print(f"Storing rank data for {discord_username} with MMR: {rank_data.get('mmr')}")
-        print(f"Rank value: {rank_data.get('rank_value')}")
         print(f"Game username: {game_username}")
 
-        # Create rank document
+        # Create simplified rank document
         rank_document = {
             "discord_username": discord_username,
             "discord_id": discord_id,  # Store the verified Discord ID if available
@@ -490,7 +489,6 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
             "rank": rank_data.get("rank"),
             "tier": rank_data.get("tier"),
             "mmr": rank_data.get("mmr"),  # This should be the MMR from manual input
-            "rank_value": rank_data.get("rank_value"),  # Store the exact rank value
             "timestamp": datetime.datetime.utcnow()
         }
 
@@ -506,13 +504,11 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
                 {"discord_username": discord_username},
                 {"$set": rank_document}
             )
-            print(
-                f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}, rank_value: {rank_data.get('rank_value')}")
+            print(f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
         else:
             # Insert new record
             ranks_collection.insert_one(rank_document)
-            print(
-                f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}, rank_value: {rank_data.get('rank_value')}")
+            print(f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
 
     except Exception as e:
         print(f"Error storing rank data: {str(e)}")
@@ -667,17 +663,15 @@ def check_rank():
     discord_id = request.args.get('discord_id', '')  # Add this if possible
     manual_tier = request.args.get('manual_tier', '')
     manual_mmr = request.args.get('manual_mmr', '')
-    rank_value = request.args.get('rank_value', '')  # Get the exact rank value
 
-    # Debug logging - add MMR
+    # Debug logging
     print(f"=== RANK CHECK DEBUG ===")
     print(f"Platform: {platform}")
     print(f"Username: {username}")
     print(f"Discord username: {discord_username}")
     print(f"Discord ID: {discord_id}")
     print(f"Manual tier: {manual_tier}")
-    print(f"Manual MMR: {manual_mmr}")  # Log the MMR
-    print(f"Rank value: {rank_value}")  # Log the rank value
+    print(f"Manual MMR: {manual_mmr}")
     print(f"========================")
 
     # PRIORITY 1: Handle manual tier selection if provided
@@ -694,20 +688,18 @@ def check_rank():
             "rank": manual_tier,
             "tier": manual_tier,
             "mmr": mmr,
-            "rank_value": rank_value,  # Store the exact rank value
             "timestamp": time.time(),
             "manual_verification": True
         }
 
         # NEW: Add debug print to confirm MMR
         print(f"DEBUG: Setting MMR to {mmr} for player with Discord username {discord_username}")
-        print(f"DEBUG: Rank value is: {rank_value}")
 
         # Handle Discord role assignment if username provided
         if discord_username:
             print(f"Storing manual rank data for Discord user: {discord_username}")
             # Pass the Discord ID if available
-            store_rank_data(discord_username, rank_value, platform or "unknown", manual_result, discord_id=discord_id)
+            store_rank_data(discord_username, discord_username, platform or "unknown", manual_result, discord_id=discord_id)
             role_result = assign_discord_role(discord_username, manual_tier)
             manual_result["role_assignment"] = role_result
 
