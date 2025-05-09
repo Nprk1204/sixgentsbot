@@ -699,48 +699,21 @@ def check_rank():
         if discord_username:
             print(f"Storing manual rank data for Discord user: {discord_username}")
             # Pass the Discord ID if available
-            store_rank_data(discord_username, discord_username, platform or "unknown", manual_result, discord_id=discord_id)
+            store_rank_data(discord_username, username or discord_username, platform or "unknown", manual_result, discord_id=discord_id)
             role_result = assign_discord_role(discord_username, manual_tier)
             manual_result["role_assignment"] = role_result
 
         return jsonify(manual_result)
 
-    # PRIORITY 2: Try API if credentials available
-    if RLTRACKER_API_KEY and platform and username:
-        print("Attempting to use RLTracker API")
-        try:
-            # Existing API code
-            rank_data = get_cached_rank(platform, username)
-            if rank_data.get("success", False):
-                print(f"API call successful: {rank_data}")
-
-                # Add rank value to the data
-                rank_data["rank_value"] = rank_value
-
-                # Process as normal with existing code
-                if discord_username:
-                    tier = rank_data.get("tier")
-                    store_rank_data(discord_username, rank_value or username, platform, rank_data,
-                                   discord_id=discord_id)
-                    role_result = assign_discord_role(discord_username, tier)
-                    rank_data["role_assignment"] = role_result
-
-                return jsonify(rank_data)
-            else:
-                print(f"API call failed: {rank_data.get('message', 'Unknown error')}")
-        except Exception as e:
-            print(f"API attempt failed: {str(e)}")
-
-    # PRIORITY 3: Use mock data as a last resort
-    print("All other methods failed, using mock data")
+    # Since we don't use the RLTracker API anymore, use mock data directly
+    print("Using mock data for rank verification")
     mock_data = get_mock_rank_data(username, platform)
-    mock_data["fallback_method"] = "This is mock data as API method failed"
-    mock_data["rank_value"] = rank_value  # Store the rank value in mock data too
+    mock_data["fallback_method"] = "This is mock data as no manual tier was provided"
 
     # Handle Discord verification for mock data
     if discord_username:
         tier = mock_data.get("tier")
-        store_rank_data(discord_username, rank_value or username, platform, mock_data, discord_id=discord_id)
+        store_rank_data(discord_username, username or discord_username, platform, mock_data, discord_id=discord_id)
         role_result = assign_discord_role(discord_username, tier)
         mock_data["role_assignment"] = role_result
 

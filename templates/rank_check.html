@@ -329,26 +329,55 @@ function displayVerifiedRank(data) {
 
     // Use the stored rankValue or fall back to a tier-based value
     const rankValue = data.rankValue || data.tier?.toLowerCase().replace(' ', '_') || 'rank_c';
-    const imagePath = `/static/img/ranks/${rankValue}.png`;
 
-    resultDiv.innerHTML = `
-        <div class="alert alert-success">
+    // Determine the rank icon based on tier
+    let rankIcon = 'fas fa-medal';
+    if (data.tier === 'Rank A') {
+        rankIcon = 'fas fa-trophy';
+    } else if (data.tier === 'Rank B') {
+        rankIcon = 'fas fa-award';
+    }
+
+    // Determine the rank color class
+    const rankColorClass = data.tier === 'Rank A' ? 'rank-a' : data.tier === 'Rank B' ? 'rank-b' : 'rank-c';
+    const badgeClass = data.tier === 'Rank A' ? 'bg-danger' : data.tier === 'Rank B' ? 'bg-primary' : 'bg-success';
+
+    // Create a success notification at the top
+    const successAlert = `
+        <div class="alert alert-success mb-3">
             <i class="fas fa-check-circle me-2"></i> Rank verification successful!
         </div>
+    `;
 
-        <div class="text-center mb-4">
-            <img src="${imagePath}" alt="${data.rank}" class="img-fluid mb-3" style="max-width: 100px;" onerror="this.style.display='none'">
-            <h4>${data.rank}</h4>
-            <span class="badge bg-${data.tier === 'Rank A' ? 'danger' : data.tier === 'Rank B' ? 'primary' : 'success'}">${data.tier}</span>
-            <p class="mt-3">Starting MMR: ${data.mmr}</p>
+    // Create a discord notification at the bottom
+    const discordAlert = data.discord_updated ?
+        `<div class="alert alert-success mt-3">
+            <i class="fab fa-discord me-2"></i> Discord role assigned successfully!
+        </div>` :
+        `<div class="alert alert-warning mt-3">
+            <i class="fab fa-discord me-2"></i> Could not assign Discord role automatically. Please contact an admin.
+        </div>`;
+
+    // Use the rank card design
+    resultDiv.innerHTML = `
+        ${successAlert}
+
+        <div class="rank-card">
+            <div class="rank-header ${rankColorClass}">
+                <i class="${rankIcon} fa-2x"></i>
+            </div>
+            <div class="rank-body">
+                <h5 class="rank-title">${data.tier}</h5>
+                <p class="rank-description">${data.rank}</p>
+                <p class="rank-mmr">Starting MMR: ${data.mmr}</p>
+                <span class="badge ${badgeClass}">${data.tier} Role</span>
+            </div>
         </div>
 
-        ${data.discord_updated ?
-            '<div class="alert alert-success"><i class="fab fa-discord me-2"></i> Discord role assigned successfully!</div>' :
-            '<div class="alert alert-warning"><i class="fab fa-discord me-2"></i> Could not assign Discord role automatically. Please contact an admin.</div>'
-        }
+        ${discordAlert}
     `;
 }
+
 
 // Check reset status, but store reset info in localStorage
 async function checkResetStatus() {
