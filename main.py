@@ -1017,7 +1017,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
         # Check if user has seen the warning (within the last 5 minutes)
         confirmation_time = bot.reset_confirmations.get(user_id, 0)
         if current_time - confirmation_time > 300 or confirmation_time == 0:  # 5 minutes expiration
-            await ctx.send("Please run `/resetleaderboard` first to see the warning before confirming.")
+            await ctx.send("Please use /resetleaderboard first!")
             return
 
         # Remove the confirmation once used
