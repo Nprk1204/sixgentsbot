@@ -316,11 +316,11 @@ class MatchSystem:
                     print(f"Found rank record: {rank_record}")
 
                     # UPDATED PRIORITY:
-                    # 1. Use rank_value if present to get exact MMR
+                    # 1. Use rank_value if present
                     if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
                         starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
                         print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
-                    # 2. Use MMR if present (fallback)
+                    # 2. Use MMR if present
                     elif "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
                         print(f"Using explicit MMR from rank record: {starting_mmr}")
@@ -388,11 +388,11 @@ class MatchSystem:
                     print(f"Found rank record: {rank_record}")
 
                     # UPDATED PRIORITY:
-                    # 1. Use rank_value if present to get exact MMR
+                    # 1. Use rank_value if present
                     if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
                         starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
                         print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
-                    # 2. Use MMR if present (fallback)
+                    # 2. Use MMR if present
                     elif "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
                         print(f"Using explicit MMR from rank record: {starting_mmr}")

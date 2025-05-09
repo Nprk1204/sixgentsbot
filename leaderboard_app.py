@@ -678,8 +678,6 @@ def check_rank():
     print(f"Manual tier: {manual_tier}")
     print(f"Manual MMR: {manual_mmr}")  # Log the MMR
     print(f"Rank value: {rank_value}")  # Log the rank value
-    print(f"API Key present: {'Yes, starts with ' + RLTRACKER_API_KEY[:5] if RLTRACKER_API_KEY else 'No'}")
-    print(f"API Key length: {len(RLTRACKER_API_KEY) if RLTRACKER_API_KEY else 0}")
     print(f"========================")
 
     # PRIORITY 1: Handle manual tier selection if provided
