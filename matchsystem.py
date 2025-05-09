@@ -315,18 +315,20 @@ class MatchSystem:
                 if rank_record:
                     print(f"Found rank record: {rank_record}")
 
-                    # SIMPLIFIED PRIORITY:
-                    # 1. Use rank_value if present
-                    if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
-                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
-                    # 2. Use MMR if present
-                    elif "mmr" in rank_record and rank_record["mmr"] is not None:
+                    # UPDATED PRIORITY:
+                    # 1. Use MMR if present (specific MMR from dropdown)
+                    if "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
                         print(f"Using explicit MMR from rank record: {starting_mmr}")
-                    # 3. Otherwise use default
+                    # 2. Use rank_value if present
+                    elif "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
+                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
+                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
+                    # 3. Otherwise use default tier
                     else:
-                        print(f"No specific MMR found, using default: {starting_mmr}")
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
+                        print(f"No specific MMR found, using tier-based MMR for {tier}: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
@@ -346,7 +348,7 @@ class MatchSystem:
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-        # Process losers with the same simplified logic
+        # Process losers with the same updated logic
         for player in losing_team:
             player_id = player["id"]
 
@@ -385,18 +387,20 @@ class MatchSystem:
                 if rank_record:
                     print(f"Found rank record: {rank_record}")
 
-                    # SIMPLIFIED PRIORITY:
-                    # 1. Use rank_value if present
-                    if "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
-                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
-                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
-                    # 2. Use MMR if present
-                    elif "mmr" in rank_record and rank_record["mmr"] is not None:
+                    # UPDATED PRIORITY:
+                    # 1. Use MMR if present (specific MMR from dropdown)
+                    if "mmr" in rank_record and rank_record["mmr"] is not None:
                         starting_mmr = rank_record["mmr"]
                         print(f"Using explicit MMR from rank record: {starting_mmr}")
-                    # 3. Otherwise use default
+                    # 2. Use rank_value if present
+                    elif "rank_value" in rank_record and rank_record["rank_value"] in self.EXACT_RANK_MMR:
+                        starting_mmr = self.EXACT_RANK_MMR[rank_record["rank_value"]]
+                        print(f"Using MMR for rank value {rank_record['rank_value']}: {starting_mmr}")
+                    # 3. Otherwise use default tier
                     else:
-                        print(f"No specific MMR found, using default: {starting_mmr}")
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
+                        print(f"No specific MMR found, using tier-based MMR for {tier}: {starting_mmr}")
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 

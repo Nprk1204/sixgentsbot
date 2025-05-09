@@ -248,7 +248,7 @@ function setupRankSelector() {
         }
     }
 
-    // Handle verify button click
+    // When the verify button is clicked
     verifyButton.addEventListener('click', function() {
         const rankSelect = document.getElementById('rlRank');
         const discordUsername = document.getElementById('discordUsername').value.trim();
@@ -264,21 +264,21 @@ function setupRankSelector() {
             return;
         }
 
-        // Get rank details
+        // Get rank details from the selected option
         const selectedOption = rankSelect.options[rankSelect.selectedIndex];
-        const rankTier = selectedOption.getAttribute('data-tier');
-        const rankMMR = selectedOption.getAttribute('data-mmr');  // Get MMR from data attribute
+        const rankTier = selectedOption.getAttribute('data-tier'); // This stays as Rank A, B, or C
+        const rankMMR = selectedOption.getAttribute('data-mmr');  // This is the specific MMR for the selected rank
         const rankName = selectedOption.text;
         const rankValue = rankSelect.value;
 
-        // Show loading
+        // Show loading state
         verifyButton.disabled = true;
         verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
 
         // Call API with the MMR value included
         let apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}`;
 
-        // Add the MMR parameter from the data attribute
+        // Important: Add the MMR parameter from the selected rank
         if (rankMMR) {
             apiUrl += `&manual_mmr=${encodeURIComponent(rankMMR)}`;
         }

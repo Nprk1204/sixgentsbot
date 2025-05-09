@@ -731,7 +731,7 @@ def check_rank():
                 if discord_username:
                     tier = rank_data.get("tier")
                     store_rank_data(discord_username, rank_value or username, platform, rank_data,
-                                    discord_id=discord_id)
+                                   discord_id=discord_id)
                     role_result = assign_discord_role(discord_username, tier)
                     rank_data["role_assignment"] = role_result
 
