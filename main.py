@@ -17,7 +17,6 @@ from matchsystem import MatchSystem
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from system_coordinators import VoteSystemCoordinator, CaptainSystemCoordinator
-import uuid
 
 # Load environment variables
 load_dotenv()
