@@ -1871,10 +1871,19 @@ async def adminreport(interaction: discord.Interaction, team_number: int, result
 
         return embed
 
-    # Run the bot with the keepalive server
     if __name__ == "__main__":
-        # Start the keepalive server first
-        start_keepalive_server()
+        try:
+            print("About to start keepalive server...")
+            start_keepalive_server()
+            print("Keepalive server started successfully")
 
-        # Then run the bot
-        bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+            # The next line is crucial - it should show if we're attempting to run the bot
+            print("About to run the Discord bot...")
+            bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+
+            # This should never print if bot.run() works correctly
+            print("Bot.run() has returned - this is unexpected!")
+        except Exception as e:
+            print(f"ERROR RUNNING BOT: {str(e)}")
+            import traceback
+            traceback.print_exc()
