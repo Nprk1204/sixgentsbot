@@ -1870,10 +1870,5 @@ async def adminreport(interaction: discord.Interaction, team_number: int, result
 
         return embed
 
-    # Run the bot with the keepalive server
-    if __name__ == "__main__":
-        # Start the keepalive server first
-        start_keepalive_server()
-
-        # Then run the bot
-        bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+    # Then run the bot
+    bot.run(token, log_handler=handler, log_level=logging.DEBUG)
