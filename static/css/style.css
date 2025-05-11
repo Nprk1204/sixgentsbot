@@ -359,6 +359,51 @@ a:hover {
     box-shadow: 0 0 10px rgba(205, 127, 50, 0.5);
 }
 
+/* Fix for stable rank indicator positioning */
+.rank, .rank.medal-1, .rank.medal-2, .rank.medal-3 {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: none; /* Prevent any transitions from affecting it */
+    z-index: 5; /* Ensure it stays above other elements */
+}
+
+/* Ensure proper spacing for the player name in rows */
+.player-row {
+    position: relative;
+    padding-left: 55px !important; /* Add more left padding to make room for the rank */
+}
+
+/* Disable transform on the rank during hover */
+.player-row:hover .rank,
+.featured-player:hover .rank {
+    transform: translateY(-50%) !important; /* Only transform vertically, not from hover effect */
+}
+
+/* For featured player cards, adjust positioning */
+.featured-player {
+    position: relative;
+}
+
+.featured-player-rank {
+    position: absolute;
+    left: 10px;
+    top: 50% !important;
+    transform: translateY(-50%);
+    transition: none;
+    z-index: 5;
+}
+
+.featured-player:hover .featured-player-rank {
+    transform: translateY(-50%) !important;
+}
+
+/* Fix for featured player name alignment */
+.featured-player-header {
+    padding-left: 40px; /* Add space for the rank badge */
+}
+
 .mmr {
     font-weight: bold;
     color: var(--primary);
