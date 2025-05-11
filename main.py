@@ -2048,7 +2048,7 @@ async def help(ctx, command_name=None):
     queue_commands = ['queue', 'leave', 'status']
     match_commands = ['report', 'leaderboard', 'rank', 'sub']
     admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'forcestop', 'removelastmatch', 'resetleaderboard']
-    utility_commands = ['help', 'helpme', 'ping', 'purgechat']
+    utility_commands = ['help', 'ping', 'purgechat']
 
     # Add command fields grouped by category
     embed.add_field(
