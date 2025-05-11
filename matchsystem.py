@@ -60,7 +60,29 @@ class MatchSystem:
         # Find the match by ID
         match = self.matches.find_one({"match_id": match_id})
 
-        # [Existing validation code remains the same]
+        if not match:
+            return None, "No match found with that ID."
+
+        # Debug print to troubleshoot
+        print(f"Reporting match {match_id}, current status: {match.get('status')}")
+
+        # Make sure we're checking for "in_progress" status correctly
+        if match.get("status") != "in_progress":
+            return None, "This match has already been reported."
+
+        # Get player ID to determine which team they're on
+        player_id = reporter_id
+
+        # Check if reporter is in either team
+        team1_ids = [p["id"] for p in match["team1"]]
+        team2_ids = [p["id"] for p in match["team2"]]
+
+        if player_id in team1_ids:
+            reporter_team = 1
+        elif player_id in team2_ids:
+            reporter_team = 2
+        else:
+            return None, "You must be a player in this match to report results."
 
         # Determine winner based on reporter's team and their reported result
         if result.lower() == "win":
@@ -70,7 +92,35 @@ class MatchSystem:
         else:
             return None, "Invalid result. Please use 'win' or 'loss'."
 
-        # [Existing match status update code remains the same]
+        # Set scores (simplified to 1-0 or 0-1)
+        if winner == 1:
+            team1_score = 1
+            team2_score = 0
+        else:
+            team1_score = 0
+            team2_score = 1
+
+        # Update match data with a timestamp to ensure it's updated correctly
+        result = self.matches.update_one(
+            {"match_id": match_id, "status": "in_progress"},  # Only update if still in progress
+            {"$set": {
+                "status": "completed",
+                "winner": winner,
+                "score": {"team1": team1_score, "team2": team2_score},
+                "completed_at": datetime.datetime.utcnow(),
+                "reported_by": reporter_id
+            }}
+        )
+
+        # Check if the update was successful
+        if result.modified_count == 0:
+            # This means the match wasn't updated - either doesn't exist or already reported
+            # Double check if it exists but is already completed
+            completed_match = self.matches.find_one({"match_id": match_id, "status": "completed"})
+            if completed_match:
+                return None, "This match has already been reported."
+            else:
+                return None, "Failed to update match. Please check the match ID."
 
         # Now get the updated match document
         updated_match = self.matches.find_one({"match_id": match_id})
@@ -190,8 +240,6 @@ class MatchSystem:
                     "is_win": True
                 })
             else:
-                # New player logic
-                # [Existing new player logic with modified MMR calculation]
                 # Get starting MMR from rank record or use default
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
                 starting_mmr = 600  # Default MMR
@@ -200,12 +248,14 @@ class MatchSystem:
                     tier = rank_record.get("tier", "Rank C")
                     starting_mmr = self.TIER_MMR.get(tier, 600)
 
-                # For first match, use a simpler calculation to avoid complications
-                mmr_gain = 25  # Base value for first match
-
-                # Adjust based on team difference
-                if player_team_avg < opponent_avg:
-                    mmr_gain += 5  # Extra MMR for underdogs
+                # Calculate first win MMR with the new algorithm
+                mmr_gain = self.calculate_dynamic_mmr(
+                    starting_mmr,
+                    player_team_avg,
+                    opponent_avg,
+                    1,  # First match
+                    is_win=True
+                )
 
                 new_mmr = starting_mmr + mmr_gain
                 print(f"NEW PLAYER {player['name']} FIRST WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
@@ -284,7 +334,6 @@ class MatchSystem:
                 })
             else:
                 # Logic for new player who loses their first match
-                # [Existing new player logic with modified calculation]
                 rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
                 starting_mmr = 600  # Default MMR
 
@@ -292,16 +341,14 @@ class MatchSystem:
                     tier = rank_record.get("tier", "Rank C")
                     starting_mmr = self.TIER_MMR.get(tier, 600)
 
-                # For first match, use a simpler calculation
-                mmr_loss = 20  # Base value for first match loss
-
-                # Adjust based on team difference
-                if player_team_avg > opponent_avg:
-                    mmr_loss += 5  # Extra penalty for higher ranked team losing
-                else:
-                    mmr_loss -= 5  # Less penalty for underdogs losing
-
-                mmr_loss = max(10, mmr_loss)  # Ensure minimum loss
+                # Calculate first loss MMR
+                mmr_loss = self.calculate_dynamic_mmr(
+                    starting_mmr,
+                    player_team_avg,
+                    opponent_avg,
+                    1,  # First match
+                    is_win=False
+                )
 
                 new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
                 print(f"NEW PLAYER {player['name']} FIRST LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
@@ -336,7 +383,39 @@ class MatchSystem:
             }}
         )
 
-        # [The rest of the function with Discord role updates remains the same]
+        # After updating MMR for winners and losers:
+        if ctx:
+            # Update roles for winners
+            for player in winning_team:
+                player_id = player["id"]
+                # Skip dummy players (those with IDs starting with 9000)
+                if player_id.startswith('9000'):
+                    continue
+
+                # Get updated MMR from database
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 600)
+                    # Update Discord role based on new MMR
+                    await self.update_discord_role(ctx, player_id, mmr)
+
+            # Update roles for losers
+            for player in losing_team:
+                player_id = player["id"]
+                # Skip dummy players
+                if player_id.startswith('9000'):
+                    continue
+
+                # Get updated MMR from database
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 600)
+                    # Update Discord role based on new MMR
+                    await self.update_discord_role(ctx, player_id, mmr)
+
+        # Remove from active matches
+        if match["match_id"] in self.active_matches:
+            del self.active_matches[match["match_id"]]
 
         return updated_match, None
 
