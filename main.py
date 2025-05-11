@@ -961,9 +961,9 @@ async def rank(ctx, member: discord.Member = None):
 
     # Determine player tier based on MMR
     tier = "Rank C"
-    if mmr >= 1850:
+    if mmr >= 1600:
         tier = "Rank A"
-    elif mmr >= 1350:
+    elif mmr >= 1110:
         tier = "Rank B"
 
     tier_color = 0x1287438  # Default color for Rank C (green)
