@@ -4,8 +4,6 @@ from discord.ext import commands
 import datetime
 import uuid
 
-from leaderboard_app import db
-
 
 class MatchSystem:
     def __init__(self, db):
@@ -153,7 +151,7 @@ class MatchSystem:
                 team1_mmrs.append(player_data.get("mmr", 0))
             else:
                 # For new players, get MMR from rank verification or use default
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
                     team1_mmrs.append(rank_record.get("mmr", 600))
                 else:
@@ -179,7 +177,7 @@ class MatchSystem:
                 team2_mmrs.append(player_data.get("mmr", 0))
             else:
                 # For new players, get MMR from rank verification or use default
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
                     team2_mmrs.append(rank_record.get("mmr", 600))
                 else:
@@ -250,7 +248,7 @@ class MatchSystem:
                 })
             else:
                 # Get starting MMR from rank record or use default
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 starting_mmr = 600  # Default MMR
 
                 if rank_record:
@@ -343,7 +341,7 @@ class MatchSystem:
                 })
             else:
                 # Logic for new player who loses their first match
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 starting_mmr = 600  # Default MMR
 
                 if rank_record:
@@ -521,7 +519,7 @@ class MatchSystem:
                 winning_team_mmrs.append(player_data.get("mmr", 0))
             else:
                 # For new players, get MMR from rank verification or use default
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
                     winning_team_mmrs.append(rank_record.get("mmr", 600))
                 else:
@@ -547,7 +545,7 @@ class MatchSystem:
                 losing_team_mmrs.append(player_data.get("mmr", 0))
             else:
                 # For new players, get MMR from rank verification or use default
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
                     losing_team_mmrs.append(rank_record.get("mmr", 600))
                 else:
@@ -615,7 +613,7 @@ class MatchSystem:
                 print(f"New player {player['name']} (ID: {player_id}), determining starting MMR")
 
                 # Try to find rank record
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
 
                 # Default values
                 starting_mmr = 600  # Default MMR
@@ -713,7 +711,7 @@ class MatchSystem:
                 print(f"New player {player['name']} (ID: {player_id}), determining starting MMR")
 
                 # Try to find rank record
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
 
                 # Default values
                 starting_mmr = 600  # Default MMR
