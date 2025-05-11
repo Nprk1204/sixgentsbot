@@ -371,11 +371,6 @@ class VoteSystem:
         embed.add_field(name=f"Team 1 (Avg MMR: {team1_avg_mmr})", value=", ".join(team1_mentions), inline=False)
         embed.add_field(name=f"Team 2 (Avg MMR: {team2_avg_mmr})", value=", ".join(team2_mentions), inline=False)
         embed.add_field(
-            name="Balance",
-            value=f"MMR Difference: {abs(round(team1_avg_mmr - team2_avg_mmr, 1))}",
-            inline=False
-        )
-        embed.add_field(
             name="Report Results",
             value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
             inline=False
