@@ -612,36 +612,48 @@ async def report(ctx, match_id: str, result: str):
         winning_team = match_result["team2"]
         losing_team = match_result["team1"]
 
-    # Get MMR changes for display
-    winning_team_mmr_changes = []
-    for player in winning_team:
-        player_id = player["id"]
-        if player_id.startswith('9000'):  # Skip dummy players
-            winning_team_mmr_changes.append("+0")
-            continue
+    # Initialize empty arrays for MMR changes
+    winning_team_mmr_changes = ["?"] * len(winning_team)
+    losing_team_mmr_changes = ["?"] * len(losing_team)
 
-        player_data = match_system.players.find_one({"id": player_id})
-        if player_data:
-            matches_played = player_data.get("matches", 0)
-            mmr_change = match_system.calculate_dynamic_mmr(matches_played, is_win=True)
-            winning_team_mmr_changes.append(f"+{mmr_change}")
+    # Extract MMR changes from the match result
+    for change in match_result.get("mmr_changes", []):
+        player_id = change.get("player_id")
+        mmr_change = change.get("mmr_change", 0)
+        is_win = change.get("is_win", False)
+
+        # Find the player's index and set their MMR change
+        if is_win:
+            # This is a winner
+            for i, player in enumerate(winning_team):
+                if player["id"] == player_id:
+                    winning_team_mmr_changes[i] = f"+{mmr_change}"
+                    break
         else:
-            winning_team_mmr_changes.append("+??")
+            # This is a loser
+            for i, player in enumerate(losing_team):
+                if player["id"] == player_id:
+                    # MMR change is already negative for losers
+                    losing_team_mmr_changes[i] = f"{mmr_change}"
+                    break
 
-    losing_team_mmr_changes = []
-    for player in losing_team:
-        player_id = player["id"]
-        if player_id.startswith('9000'):  # Skip dummy players
-            losing_team_mmr_changes.append("-0")
-            continue
+    # Handle dummy players (they don't have MMR changes in the database)
+    for i, player in enumerate(winning_team):
+        if player["id"].startswith('9000'):  # Dummy player
+            winning_team_mmr_changes[i] = "+0"
 
-        player_data = match_system.players.find_one({"id": player_id})
-        if player_data:
-            matches_played = player_data.get("matches", 0)
-            mmr_change = match_system.calculate_dynamic_mmr(matches_played, is_win=False)
-            losing_team_mmr_changes.append(f"-{mmr_change}")
-        else:
-            losing_team_mmr_changes.append("-??")
+    for i, player in enumerate(losing_team):
+        if player["id"].startswith('9000'):  # Dummy player
+            losing_team_mmr_changes[i] = "-0"
+
+    # Check for any remaining unknown MMR changes
+    for i in range(len(winning_team_mmr_changes)):
+        if winning_team_mmr_changes[i] == "?":
+            winning_team_mmr_changes[i] = "+??"
+
+    for i in range(len(losing_team_mmr_changes)):
+        if losing_team_mmr_changes[i] == "?":
+            losing_team_mmr_changes[i] = "-??"
 
     # Create the embed with updated formatting
     embed = discord.Embed(
