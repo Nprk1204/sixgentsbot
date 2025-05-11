@@ -287,7 +287,7 @@ class VoteSystem:
                     mmr = player_data.get("mmr", 0)
                 else:
                     # For new players, check rank record
-                    rank_record = self.get_collection('ranks').find_one({"discord_id": player_id})
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                     if rank_record:
                         tier = rank_record.get("tier", "Rank C")
                         mmr = self.match_system.TIER_MMR.get(tier, 600)
