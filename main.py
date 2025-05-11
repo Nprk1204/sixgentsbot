@@ -2033,7 +2033,6 @@ async def help(ctx, command_name=None):
         'help': 'Display help information',
         'leaderboard': 'Shows a link to the leaderboard website',
         'leave': 'Leave the queue',
-        'ping': 'Simple ping command that doesn\'t use MongoDB',
         'purgechat': 'Clear chat messages',
         'queue': 'Join the queue for 6 mans',
         'rank': 'Check your rank and stats (or another member\'s)',
@@ -2048,7 +2047,7 @@ async def help(ctx, command_name=None):
     queue_commands = ['queue', 'leave', 'status']
     match_commands = ['report', 'leaderboard', 'rank', 'sub']
     admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'forcestop', 'removelastmatch', 'resetleaderboard']
-    utility_commands = ['help', 'ping', 'purgechat']
+    utility_commands = ['help', 'purgechat']
 
     # Add command fields grouped by category
     embed.add_field(
