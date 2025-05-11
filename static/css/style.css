@@ -387,12 +387,15 @@ a:hover {
 }
 
 .featured-player-rank {
-    position: absolute;
-    left: 10px;
-    top: 50% !important;
-    transform: translateY(-50%);
-    transition: none;
-    z-index: 5;
+    position: relative;
+    display: inline-flex;
+    width: 25px;
+    height: 25px;
+    margin-right: 8px;
+    top: auto;
+    left: auto;
+    vertical-align: middle;
+    font-size: 0.8rem;
 }
 
 .featured-player:hover .featured-player-rank {
@@ -401,7 +404,8 @@ a:hover {
 
 /* Fix for featured player name alignment */
 .featured-player-header {
-    padding-left: 40px; /* Add space for the rank badge */
+    display: flex;
+    align-items: center;
 }
 
 .mmr {

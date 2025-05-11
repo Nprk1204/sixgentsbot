@@ -68,11 +68,10 @@
                 {% for player in featured_players %}
                 <div class="col-md-6">
                     <div class="featured-player" data-player-id="{{ player.id }}">
-                        {% if loop.index <= 3 %}
-                        <div class="featured-player-rank rank-{{ loop.index }}">{{ loop.index }}</div>
-                        {% endif %}
-
                         <div class="featured-player-header">
+                            {% if loop.index <= 3 %}
+                            <span class="featured-player-rank rank-{{ loop.index }}">{{ loop.index }}</span>
+                            {% endif %}
                             {{ player.name }}
                         </div>
 
