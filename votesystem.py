@@ -263,80 +263,126 @@ class VoteSystem:
                 # Fallback to random teams if captains_system is not set
                 await channel.send("Captains system not available. Falling back to random teams...")
                 # Continue to the random teams code below
-                random.shuffle(players)
-                team1 = players[:3]
-                team2 = players[3:6]
-
-                # Format team mentions
-                team1_mentions = [player['mention'] for player in team1]
-                team2_mentions = [player['mention'] for player in team2]
-
-                # Remove players from queue
-                self.queue.remove_players_from_queue(players, channel_id)
-
-                # Create match record - using self.match_system
-                match_id = self.match_system.create_match(
-                    str(uuid.uuid4()),
-                    team1,
-                    team2,
-                    channel_id
-                )
-
-                # Create an embed for team announcement
-                embed = discord.Embed(
-                    title="Match Created! (Random Teams)",
-                    color=0xe74c3c
-                )
-
-                embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
-                embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
-                embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
-                embed.add_field(
-                    name="Report Results",
-                    value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
-                    inline=False
-                )
-
-                # Send team announcement as embed
-                await channel.send(embed=embed)
+                await self.create_balanced_random_teams(channel, players, channel_id)
         else:
-            # Create random teams
-            random.shuffle(players)
-            team1 = players[:3]
-            team2 = players[3:6]
+            # Create balanced random teams
+            await self.create_balanced_random_teams(channel, players, channel_id)
 
-            # Format team mentions
-            team1_mentions = [player['mention'] for player in team1]
-            team2_mentions = [player['mention'] for player in team2]
+    # New method to create balanced random teams
+    async def create_balanced_random_teams(self, channel, players, channel_id):
+        """Create balanced random teams instead of completely random"""
+        # Get MMR for each player (real or dummy)
+        player_mmrs = []
+        for player in players:
+            player_id = player["id"]
 
-            # Remove players from queue
-            self.queue.remove_players_from_queue(players, channel_id)
+            # Check if this is a dummy player with MMR
+            if "dummy_mmr" in player:
+                mmr = player["dummy_mmr"]
+                player_mmrs.append((player, mmr))
+            # Otherwise look up in database
+            elif not player_id.startswith('9000'):  # Skip dummy players without MMR
+                player_data = self.match_system.players.find_one({"id": player_id})
+                if player_data:
+                    mmr = player_data.get("mmr", 0)
+                else:
+                    # For new players, check rank record
+                    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        mmr = self.match_system.TIER_MMR.get(tier, 600)
+                    else:
+                        # Default MMR
+                        mmr = 600
 
-            # Create match record - using self.match_system
-            match_id = self.match_system.create_match(
-                str(uuid.uuid4()),
-                team1,
-                team2,
-                channel_id
-            )
+                player_mmrs.append((player, mmr))
+            else:
+                # Dummy player without MMR (shouldn't happen with our changes)
+                # Assign a random MMR based on channel
+                channel_name = channel.name.lower()
+                if channel_name == "rank-a":
+                    mmr = random.randint(1600, 2100)
+                elif channel_name == "rank-b":
+                    mmr = random.randint(1100, 1599)
+                else:  # rank-c or global
+                    mmr = random.randint(600, 1099)
 
-            # Create an embed for team announcement
-            embed = discord.Embed(
-                title="Match Created! (Random Teams)",
-                color=0xe74c3c
-            )
+                player_mmrs.append((player, mmr))
 
-            embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
-            embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
-            embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
-            embed.add_field(
-                name="Report Results",
-                value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
-                inline=False
-            )
+        # Sort players by MMR (highest to lowest)
+        player_mmrs.sort(key=lambda x: x[1], reverse=True)
 
-            # Send team announcement as embed
-            await channel.send(embed=embed)
+        # Initialize teams
+        team1 = []
+        team2 = []
+        team1_mmr = 0
+        team2_mmr = 0
 
-            # Cancel this vote
-            self.cancel_voting(channel_id)
+        # Assign players to teams for balance (alternating with highest and lowest)
+        while player_mmrs:
+            # Get highest MMR player
+            if player_mmrs:
+                if team1_mmr <= team2_mmr:
+                    player, mmr = player_mmrs.pop(0)  # Take from front (highest MMR)
+                    team1.append(player)
+                    team1_mmr += mmr
+                else:
+                    player, mmr = player_mmrs.pop(0)  # Take from front (highest MMR)
+                    team2.append(player)
+                    team2_mmr += mmr
+
+            # Get lowest MMR player
+            if player_mmrs:
+                if team1_mmr <= team2_mmr:
+                    player, mmr = player_mmrs.pop(-1)  # Take from end (lowest MMR)
+                    team1.append(player)
+                    team1_mmr += mmr
+                else:
+                    player, mmr = player_mmrs.pop(-1)  # Take from end (lowest MMR)
+                    team2.append(player)
+                    team2_mmr += mmr
+
+        # Format team mentions
+        team1_mentions = [player['mention'] for player in team1]
+        team2_mentions = [player['mention'] for player in team2]
+
+        # Calculate average MMR per team for display
+        team1_avg_mmr = round(team1_mmr / len(team1), 1)
+        team2_avg_mmr = round(team2_mmr / len(team2), 1)
+
+        # Remove players from queue
+        self.queue.remove_players_from_queue(players, channel_id)
+
+        # Create match record - using self.match_system
+        match_id = self.match_system.create_match(
+            str(uuid.uuid4()),
+            team1,
+            team2,
+            channel_id
+        )
+
+        # Create an embed for team announcement
+        embed = discord.Embed(
+            title="Match Created! (Balanced Random Teams)",
+            color=0xe74c3c
+        )
+
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+        embed.add_field(name=f"Team 1 (Avg MMR: {team1_avg_mmr})", value=", ".join(team1_mentions), inline=False)
+        embed.add_field(name=f"Team 2 (Avg MMR: {team2_avg_mmr})", value=", ".join(team2_mentions), inline=False)
+        embed.add_field(
+            name="Balance",
+            value=f"MMR Difference: {abs(round(team1_avg_mmr - team2_avg_mmr, 1))}",
+            inline=False
+        )
+        embed.add_field(
+            name="Report Results",
+            value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
+            inline=False
+        )
+
+        # Send team announcement as embed
+        await channel.send(embed=embed)
+
+        # Cancel this vote
+        self.cancel_voting(channel_id)

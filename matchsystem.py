@@ -70,16 +70,13 @@ class MatchSystem:
         if match.get("status") != "in_progress":
             return None, "This match has already been reported."
 
-        # Get player ID to determine which team they're on
-        player_id = reporter_id
-
         # Check if reporter is in either team
         team1_ids = [p["id"] for p in match["team1"]]
         team2_ids = [p["id"] for p in match["team2"]]
 
-        if player_id in team1_ids:
+        if reporter_id in team1_ids:
             reporter_team = 1
-        elif player_id in team2_ids:
+        elif reporter_id in team2_ids:
             reporter_team = 2
         else:
             return None, "You must be a player in this match to report results."
@@ -140,11 +137,17 @@ class MatchSystem:
         # Get MMRs for team 1
         for player in match["team1"]:
             player_id = player["id"]
-            # Skip dummy players
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and "dummy_mmr" in player:
+                team1_mmrs.append(player["dummy_mmr"])
+                continue
+
+            # Skip dummy players without MMR
             if player_id.startswith('9000'):
                 continue
 
-            # Get player MMR
+            # Get player MMR for real players
             player_data = self.players.find_one({"id": player_id})
             if player_data:
                 team1_mmrs.append(player_data.get("mmr", 0))
@@ -160,11 +163,17 @@ class MatchSystem:
         # Get MMRs for team 2
         for player in match["team2"]:
             player_id = player["id"]
-            # Skip dummy players
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and "dummy_mmr" in player:
+                team2_mmrs.append(player["dummy_mmr"])
+                continue
+
+            # Skip dummy players without MMR
             if player_id.startswith('9000'):
                 continue
 
-            # Get player MMR
+            # Get player MMR for real players
             player_data = self.players.find_one({"id": player_id})
             if player_data:
                 team2_mmrs.append(player_data.get("mmr", 0))
@@ -496,11 +505,17 @@ class MatchSystem:
         # Get MMRs for winning team
         for player in winning_team:
             player_id = player["id"]
-            # Skip dummy players
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and "dummy_mmr" in player:
+                winning_team_mmrs.append(player["dummy_mmr"])
+                continue
+
+            # Skip dummy players without MMR
             if player_id.startswith('9000'):
                 continue
 
-            # Get player MMR
+            # Get player MMR for real players
             player_data = self.players.find_one({"id": player_id})
             if player_data:
                 winning_team_mmrs.append(player_data.get("mmr", 0))
@@ -516,11 +531,17 @@ class MatchSystem:
         # Get MMRs for losing team
         for player in losing_team:
             player_id = player["id"]
-            # Skip dummy players
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and "dummy_mmr" in player:
+                losing_team_mmrs.append(player["dummy_mmr"])
+                continue
+
+            # Skip dummy players without MMR
             if player_id.startswith('9000'):
                 continue
 
-            # Get player MMR
+            # Get player MMR for real players
             player_data = self.players.find_one({"id": player_id})
             if player_data:
                 losing_team_mmrs.append(player_data.get("mmr", 0))
@@ -609,7 +630,7 @@ class MatchSystem:
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
-                # Calculate first win MMR - simplified for first game
+                # Calculate first win MMR with the new algorithm
                 mmr_gain = self.calculate_dynamic_mmr(
                     starting_mmr,
                     winning_team_avg_mmr,

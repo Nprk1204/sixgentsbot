@@ -1779,6 +1779,7 @@ async def remove_match_results(ctx, match):
 
     return embed
 
+
 @bot.command()
 async def forcestart(ctx):
     """Force start the team selection process (Admin only)"""
@@ -1788,7 +1789,8 @@ async def forcestart(ctx):
 
     # Check if command is used in an allowed channel
     if not is_queue_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
         return
 
     # Check if user has admin permissions
@@ -1812,7 +1814,20 @@ async def forcestart(ctx):
         await ctx.send("Can't force start: Queue is empty!")
         return
 
-    # If fewer than 6 players, add dummy players to reach 6
+    # Before adding dummy players, determine the MMR range based on the channel
+    # This ensures dummy players have appropriate MMR for each rank channel
+    channel_name = ctx.channel.name.lower()
+    if channel_name == "rank-a":
+        min_mmr = 1600
+        max_mmr = 2100
+    elif channel_name == "rank-b":
+        min_mmr = 1100
+        max_mmr = 1599
+    else:  # rank-c or global
+        min_mmr = 600
+        max_mmr = 1099
+
+    # If fewer than 6 players, add dummy players to fill the queue
     if player_count < 6:
         # Create dummy players to fill the queue
         needed = 6 - player_count
@@ -1824,13 +1839,20 @@ async def forcestart(ctx):
             dummy_name = f"TestPlayer{i + 1}"
             dummy_mention = f"@TestPlayer{i + 1}"
 
-            # Add dummy player to queue
-            queue_handler.queue_collection.insert_one({
+            # Generate a random MMR value appropriate for the channel
+            dummy_mmr = random.randint(min_mmr, max_mmr)
+
+            # Store MMR in a special field we'll check later
+            dummy_player = {
                 "id": dummy_id,
                 "name": dummy_name,
                 "mention": dummy_mention,
-                "channel_id": channel_id
-            })
+                "channel_id": channel_id,
+                "dummy_mmr": dummy_mmr  # Add MMR for the dummy player
+            }
+
+            # Add dummy player to queue
+            queue_handler.queue_collection.insert_one(dummy_player)
 
     # Force start the vote
     await ctx.send("**Force starting team selection!**")
