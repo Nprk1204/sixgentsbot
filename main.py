@@ -1571,7 +1571,7 @@ def create_match_confirmation_embed(match, match_id):
 
 
 async def remove_match_results(ctx, match):
-    """Process the actual removal of match results using stored MMR values"""
+    """Process the actual removal of match results by negating MMR changes"""
     match_id = match['match_id']
 
     # Get the teams and determine who won
@@ -1626,33 +1626,37 @@ async def remove_match_results(ctx, match):
         if player_id in mmr_change_map:
             change_data = mmr_change_map[player_id]
 
-            # These values are already stored in the match document
-            old_mmr = change_data.get('old_mmr', 0)
-            new_mmr = change_data.get('new_mmr', 0)
+            # Get the original MMR change value
             mmr_change = change_data.get('mmr_change', 0)
             is_win = change_data.get('is_win', False)
 
-            # Update player's MMR back to the old value
+            # Current MMR and stats
             current_mmr = player_data.get('mmr', 0)
-
-            # Update wins/losses and matches count
             current_matches = player_data.get('matches', 0)
+            current_wins = player_data.get('wins', 0)
+            current_losses = player_data.get('losses', 0)
+
+            # Calculate new MMR by negating the original change
+            # For winners: subtract the MMR they gained
+            # For losers: add back the MMR they lost
+            new_mmr = current_mmr - mmr_change  # For winners, mmr_change is positive. For losers, it's negative.
+
+            # Decrement match count
             new_matches = max(0, current_matches - 1)
 
+            # Update wins/losses counters
             if is_win:
-                current_wins = player_data.get('wins', 0)
-                new_wins = max(0, current_wins - 1)
-                new_losses = player_data.get('losses', 0)
+                new_wins = max(0, current_wins - 1)  # Decrement wins
+                new_losses = current_losses  # Losses stay the same
             else:
-                current_losses = player_data.get('losses', 0)
-                new_losses = max(0, current_losses - 1)
-                new_wins = player_data.get('wins', 0)
+                new_wins = current_wins  # Wins stay the same
+                new_losses = max(0, current_losses - 1)  # Decrement losses
 
-            # Update database - restore MMR to original value
+            # Update database - apply the negated MMR change
             match_system.players.update_one(
                 {"id": player_id},
                 {"$set": {
-                    "mmr": old_mmr,
+                    "mmr": new_mmr,
                     "wins": new_wins,
                     "losses": new_losses,
                     "matches": new_matches,
@@ -1660,17 +1664,20 @@ async def remove_match_results(ctx, match):
                 }}
             )
 
+            # Format the change for display (reverse the original direction)
+            display_change = f"-{mmr_change}" if mmr_change > 0 else f"+{abs(mmr_change)}"
+
             # Track change for reporting
             mmr_changes.append({
                 "player": player['name'],
                 "old_mmr": current_mmr,
-                "new_mmr": old_mmr,
-                "change": f"{mmr_change}" if mmr_change > 0 else f"{mmr_change}"  # Already includes sign
+                "new_mmr": new_mmr,
+                "change": display_change
             })
 
             # Update Discord role based on new MMR
             try:
-                await match_system.update_discord_role(ctx, player_id, old_mmr)
+                await match_system.update_discord_role(ctx, player_id, new_mmr)
             except Exception as e:
                 print(f"Error updating Discord role for {player['name']}: {str(e)}")
         else:
@@ -1679,20 +1686,29 @@ async def remove_match_results(ctx, match):
             is_winner = player in winning_team
 
             if is_winner:
-                # Use the dynamic calculation for winners
+                # Approximate calculation for winners
                 matches_played = player_data.get("matches", 0)
                 if matches_played > 0:
                     matches_played_before = matches_played - 1
-                    mmr_change = match_system.calculate_dynamic_mmr(matches_played_before, is_win=True)
-
-                    # Revert MMR
+                    # Get player's MMR and call calculate_dynamic_mmr with all required parameters
                     current_mmr = player_data.get("mmr", 0)
-                    new_mmr = max(0, current_mmr - mmr_change)  # Don't go below 0
+
+                    # For approximation, use the player's current MMR for all parameters
+                    mmr_change = match_system.calculate_dynamic_mmr(
+                        current_mmr,
+                        current_mmr,  # Approximation
+                        current_mmr,  # Approximation
+                        matches_played_before,
+                        is_win=True
+                    )
+
+                    # Subtract the approximate MMR gain
+                    new_mmr = max(0, current_mmr - mmr_change)
 
                     # Update wins and matches count
                     current_wins = player_data.get("wins", 0)
-                    new_wins = max(0, current_wins - 1)  # Don't go below 0
-                    new_matches = max(0, matches_played - 1)  # Don't go below 0
+                    new_wins = max(0, current_wins - 1)
+                    new_matches = max(0, matches_played - 1)
 
                     # Update database
                     match_system.players.update_one(
@@ -1713,26 +1729,34 @@ async def remove_match_results(ctx, match):
                         "change": f"-{mmr_change}"
                     })
 
-                    # Update Discord role based on new MMR
+                    # Update Discord role
                     try:
                         await match_system.update_discord_role(ctx, player_id, new_mmr)
                     except Exception as e:
-                        print(f"Error updating Discord role for {player['name']}: {str(e)}")
+                        print(f"Error updating Discord role: {str(e)}")
             else:
-                # Use the dynamic calculation for losers
+                # Approximate calculation for losers
                 matches_played = player_data.get("matches", 0)
                 if matches_played > 0:
                     matches_played_before = matches_played - 1
-                    mmr_change = match_system.calculate_dynamic_mmr(matches_played_before, is_win=False)
-
-                    # Revert MMR
                     current_mmr = player_data.get("mmr", 0)
+
+                    # For approximation, use the player's current MMR for all parameters
+                    mmr_change = match_system.calculate_dynamic_mmr(
+                        current_mmr,
+                        current_mmr,  # Approximation
+                        current_mmr,  # Approximation
+                        matches_played_before,
+                        is_win=False
+                    )
+
+                    # Add back the approximate MMR loss
                     new_mmr = current_mmr + mmr_change
 
                     # Update losses and matches count
                     current_losses = player_data.get("losses", 0)
-                    new_losses = max(0, current_losses - 1)  # Don't go below 0
-                    new_matches = max(0, matches_played - 1)  # Don't go below 0
+                    new_losses = max(0, current_losses - 1)
+                    new_matches = max(0, matches_played - 1)
 
                     # Update database
                     match_system.players.update_one(
@@ -1753,11 +1777,11 @@ async def remove_match_results(ctx, match):
                         "change": f"+{mmr_change}"
                     })
 
-                    # Update Discord role based on new MMR
+                    # Update Discord role
                     try:
                         await match_system.update_discord_role(ctx, player_id, new_mmr)
                     except Exception as e:
-                        print(f"Error updating Discord role for {player['name']}: {str(e)}")
+                        print(f"Error updating Discord role: {str(e)}")
 
     # Update match status
     match_system.matches.update_one(
