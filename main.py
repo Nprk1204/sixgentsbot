@@ -1290,9 +1290,47 @@ async def remove_all_rank_roles(guild):
         return f"❌ Error removing roles: {str(e)}"
 
 
+async def show_recent_matches(ctx):
+    """Shows a list of recent matches to help admins find match IDs"""
+    recent_matches = list(match_system.matches.find(
+        {"status": "completed"},
+        {"match_id": 1, "team1": 1, "team2": 1, "winner": 1, "completed_at": 1}
+    ).sort("completed_at", -1).limit(5))
+
+    if not recent_matches:
+        await ctx.send("No completed matches found.")
+        return
+
+    embed = discord.Embed(
+        title="Recent Completed Matches",
+        description="Here are the 5 most recent completed matches. Use `/removematch <match_id>` to remove one.",
+        color=0x3498db
+    )
+
+    for match in recent_matches:
+        match_id = match["match_id"]
+        team1_summary = ", ".join([p.get("name", "Unknown") for p in match["team1"]])
+        team2_summary = ", ".join([p.get("name", "Unknown") for p in match["team2"]])
+        winner = match.get("winner", 0)
+
+        completed_time = match.get('completed_at', datetime.datetime.now()).strftime("%Y-%m-%d %H:%M")
+
+        value = f"`{match_id}` | {completed_time}\n" \
+                f"Team 1: {team1_summary}\n" \
+                f"Team 2: {team2_summary}\n" \
+                f"Winner: Team {winner}"
+
+        embed.add_field(
+            name=f"Match {match_id}",
+            value=value,
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
 @bot.command()
-async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
-    """Remove the results of a match (Admin only)"""
+async def removematch(ctx, match_id: str = None, confirmation: str = None):
+    """Remove the results of a match by ID (Admin only)"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
         return
@@ -1312,40 +1350,21 @@ async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
     if not hasattr(bot, 'remove_confirmations'):
         bot.remove_confirmations = {}
 
-    # CASE 1: No arguments - Find the most recent match
+    # CASE 1: No match ID provided - inform about usage
     if match_id is None:
-        # Find the most recent completed match
-        match = match_system.matches.find_one(
-            {"status": "completed"},
-            sort=[("completed_at", -1)]  # Sort by completion time, most recent first
-        )
-
-        if not match:
-            await ctx.send("No completed matches found to remove.")
-            return
-
-        # Display match information
-        match_id = match['match_id']
-
-        # Create confirmation message
-        embed = create_match_confirmation_embed(match, match_id)
-
-        # Track that we showed this match information
-        current_time = datetime.datetime.now(datetime.UTC).timestamp()
-        bot.remove_confirmations[match_id] = current_time
-
-        await ctx.send(embed=embed)
+        await show_recent_matches(ctx)
+        await ctx.send("Please provide a match ID to remove. Usage: `/removematch <match_id>`")
         return
 
     # CASE 2: Match ID provided but no confirmation - Show match details
     elif confirmation is None:
         # Find the match
-        match = match_system.matches.find_one({"match_id": match_id, "status": "completed"})
+        match = match_system.matches.find_one({"match_id": match_id})
         if not match:
-            await ctx.send(f"No completed match found with ID `{match_id}`.")
+            await ctx.send(f"No match found with ID `{match_id}`.")
             return
 
-        # Create confirmation message
+        # Create confirmation message with match details
         embed = create_match_confirmation_embed(match, match_id)
 
         # Track that we showed this match information
@@ -1362,7 +1381,7 @@ async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
         confirmation_time = bot.remove_confirmations.get(match_id, 0)
 
         if current_time - confirmation_time > 300 or confirmation_time == 0:  # 5 minutes expiration
-            await ctx.send(f"Please use `/removelastmatch {match_id}` first!")
+            await ctx.send(f"Please use `/removematch {match_id}` first!")
             return
 
         # Remove the confirmation once used
@@ -1370,9 +1389,9 @@ async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
             del bot.remove_confirmations[match_id]
 
         # Find the match
-        match = match_system.matches.find_one({"match_id": match_id, "status": "completed"})
+        match = match_system.matches.find_one({"match_id": match_id})
         if not match:
-            await ctx.send(f"No completed match found with ID `{match_id}`.")
+            await ctx.send(f"No match found with ID `{match_id}`.")
             return
 
         # Execute the actual removal
@@ -1381,17 +1400,33 @@ async def removelastmatch(ctx, match_id: str = None, confirmation: str = None):
 
     # CASE 4: Invalid confirmation text
     else:
-        await ctx.send("Invalid confirmation. Use `/removelastmatch {match_id}` to see instructions.")
+        await ctx.send("Invalid confirmation. Use `/removematch {match_id}` to see instructions.")
 
 
-# Helper functions to keep the command cleaner
+# Helper function to create a confirmation embed for the match
 def create_match_confirmation_embed(match, match_id):
     """Create an embed for match removal confirmation"""
-    embed = discord.Embed(
-        title="⚠️ Remove Match Confirmation",
-        description=f"You are about to remove the results for match `{match_id}`.",
-        color=0xff9900
-    )
+    # Check match status
+    status = match.get('status', 'unknown')
+
+    # Different display for completed vs. other status matches
+    if status != 'completed':
+        embed = discord.Embed(
+            title="⚠️ Match Not Completed",
+            description=f"Match `{match_id}` has status `{status}`, not `completed`.",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Warning",
+            value="This match does not appear to be completed. Removing non-completed matches may have unexpected results.",
+            inline=False
+        )
+    else:
+        embed = discord.Embed(
+            title="⚠️ Remove Match Confirmation",
+            description=f"You are about to remove the results for match `{match_id}`.",
+            color=0xff9900
+        )
 
     # Format team information
     team1_names = [p['name'] for p in match['team1']]
@@ -1434,7 +1469,7 @@ def create_match_confirmation_embed(match, match_id):
 
     embed.add_field(
         name="To confirm:",
-        value=f"Type `/removelastmatch {match_id} confirm`",
+        value=f"Type `/removematch {match_id} confirm`",
         inline=False
     )
 
