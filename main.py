@@ -1042,7 +1042,7 @@ async def clearqueue(ctx):
 
 @bot.command()
 async def resetleaderboard(ctx, confirmation: str = None):
-    """Reset the leaderboard (Admin only)"""
+    """Reset the leaderboard and clear all queues (Admin only)"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
         return
@@ -1070,7 +1070,7 @@ async def resetleaderboard(ctx, confirmation: str = None):
         # First step: Show warning
         embed = discord.Embed(
             title="⚠️ Reset Leaderboard Confirmation",
-            description="This will reset MMR, stats, rank data, match history and **remove all rank roles**. This action cannot be undone!",
+            description="This will reset MMR, stats, rank data, match history, clear all active queues, cancel any ongoing votes/selections, and **remove all rank roles**. This action cannot be undone!",
             color=0xff9900
         )
         embed.add_field(
@@ -1146,6 +1146,34 @@ async def resetleaderboard(ctx, confirmation: str = None):
                 ranks_collection.delete_many({})
                 backed_up.append(f"Ranks ({rank_count})")
 
+            # NEW: Clear all queues and cancel active votes/selections
+            queue_count = queue_handler.queue_collection.count_documents({})
+            if queue_count > 0:
+                # Backup queue first
+                backup_collection_name = f"queue_backup_{timestamp}"
+                db.create_collection(backup_collection_name)
+                backup_collection = db[backup_collection_name]
+                for queue_item in queue_handler.queue_collection.find():
+                    backup_collection.insert_one(queue_item)
+
+                # Clear all queues
+                queue_handler.queue_collection.delete_many({})
+                backed_up.append(f"Queues ({queue_count})")
+
+            # NEW: Cancel any active votes
+            active_vote_channels = []
+            if vote_system.is_voting_active():
+                for channel_id in vote_system.active_votes.keys():
+                    active_vote_channels.append(channel_id)
+                vote_system.cancel_voting()
+
+            # NEW: Cancel any active captain selections
+            active_selection_channels = []
+            if captains_system.is_selection_active():
+                for channel_id in captains_system.active_selections.keys():
+                    active_selection_channels.append(channel_id)
+                captains_system.cancel_selection()
+
             # Call the web API to reset the leaderboard and verification status
             try:
                 webapp_url = os.getenv('WEBAPP_URL', 'https://sixgentsbot-1.onrender.com')
@@ -1219,6 +1247,27 @@ async def resetleaderboard(ctx, confirmation: str = None):
                     inline=False
                 )
 
+            # NEW: Add info about cleared queues and canceled activities
+            if queue_count > 0:
+                embed.add_field(
+                    name="Queues Cleared",
+                    value=f"Cleared {queue_count} players from active queues",
+                    inline=False
+                )
+
+            if active_vote_channels or active_selection_channels:
+                cancel_message = ""
+                if active_vote_channels:
+                    cancel_message += f"Canceled team voting in {len(active_vote_channels)} channels\n"
+                if active_selection_channels:
+                    cancel_message += f"Canceled captain selection in {len(active_selection_channels)} channels"
+
+                embed.add_field(
+                    name="Active Processes Canceled",
+                    value=cancel_message.strip(),
+                    inline=False
+                )
+
             embed.add_field(
                 name="Backup Created",
                 value=f"Backup timestamp: `{timestamp}`",
@@ -1244,6 +1293,32 @@ async def resetleaderboard(ctx, confirmation: str = None):
             )
 
             embed.set_footer(text=f"Reset by {ctx.author.display_name}")
+
+            # Send a global announcement to all rank channels
+            for channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
+                for channel in ctx.guild.text_channels:
+                    if channel.name.lower() == channel_name:
+                        try:
+                            announcement = discord.Embed(
+                                title="🔄 Season Reset Announcement",
+                                description="The leaderboard and all ranks have been reset for a new season!",
+                                color=0x9932CC  # Purple color for announcements
+                            )
+                            announcement.add_field(
+                                name="What was reset",
+                                value="• All MMR and stats\n• All rank roles\n• All active queues\n• All verification status",
+                                inline=False
+                            )
+                            announcement.add_field(
+                                name="Next Steps",
+                                value="Please verify your rank again to join the new season's queues!",
+                                inline=False
+                            )
+                            announcement.set_footer(text=f"Reset performed by {ctx.author.display_name}")
+
+                            await channel.send(embed=announcement)
+                        except Exception as e:
+                            print(f"Error sending reset announcement to {channel.name}: {str(e)}")
 
             await ctx.send(embed=embed)
 
