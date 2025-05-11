@@ -31,6 +31,7 @@ intents.message_content = True
 intents.reactions = True  # Make sure reaction intents are enabled
 
 bot = commands.Bot(command_prefix='/', intents=intents)
+bot.remove_command('help')
 
 # Track recent commands to prevent duplicates
 recent_commands = {}
@@ -216,7 +217,7 @@ async def on_reaction_add(reaction, user):
 
 # Queue commands
 @bot.command()
-async def join(ctx):
+async def queue(ctx):
     """Join the queue for 6 mans"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
@@ -1989,32 +1990,95 @@ async def ping(ctx):
 
 # Help command
 @bot.command()
-async def helpme(ctx):
-    """Display help information"""
+async def help(ctx, command_name=None):
+    """Shows this message"""
     # Check if this is a duplicate command
     if await is_duplicate_command(ctx):
         return
 
     # Check if command is used in an allowed channel
     if not is_command_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
+    # If a specific command is requested, show details for that command
+    if command_name:
+        command = bot.get_command(command_name)
+        if command:
+            embed = discord.Embed(
+                title=f"Command: /{command.name}",
+                description=command.help or "No description available",
+                color=0x00ff00
+            )
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send(f"Command `{command_name}` not found.")
+        return
+
+    # Create an embed for the command list
     embed = discord.Embed(
-        title="Rocket League 6 Mans Bot",
-        description="Commands for the 6 mans queue system:",
+        title="Rocket League 6 Mans Bot Commands",
+        description="Use `/help <command>` for more details on a specific command",
         color=0x00ff00
     )
 
-    embed.add_field(name="/join", value="Join the queue (rank-a, rank-b, rank-c, global channels only)", inline=False)
-    embed.add_field(name="/leave", value="Leave the queue (rank-a, rank-b, rank-c, global channels only)", inline=False)
-    embed.add_field(name="/status", value="Show the current queue status (rank-a, rank-b, rank-c, global channels only)", inline=False)
-    embed.add_field(name="/report <match_id> <win/loss>", value="Report match results", inline=False)
-    embed.add_field(name="/leaderboard", value="View the leaderboard website", inline=False)
-    embed.add_field(name="/rank [member]", value="Show your rank or another member's rank", inline=False)
+    # Define commands and descriptions
+    commands_dict = {
+        'adjustmmr': 'Admin command to adjust a player\'s MMR (format: /adjustmmr...)',
+        'adminreport': 'Admin command to report match results (format: /adminrepor...)',
+        'clearqueue': 'Clear all players from the queue (Admin only)',
+        'forcestart': 'Force start the team selection process (Admin only)',
+        'forcestop': 'Force stop any active votes or selections and clear the queue',
+        'help': 'Shows this message',
+        'helpme': 'Display help information',
+        'leaderboard': 'Shows a link to the leaderboard website',
+        'leave': 'Leave the queue',
+        'ping': 'Simple ping command that doesn\'t use MongoDB',
+        'purgechat': 'Clear chat messages',
+        'queue': 'Join the queue for 6 mans',
+        'rank': 'Check your rank and stats (or another member\'s)',
+        'removelastmatch': 'Remove the results of a match (Admin only)',
+        'report': 'Report match results (format: /report <match_id> <win/loss>)',
+        'resetleaderboard': 'Reset the leaderboard (Admin only)',
+        'status': 'Shows the current queue status',
+        'sub': 'Substitute players in an active match'
+    }
+
+    # Group commands by category
+    queue_commands = ['queue', 'leave', 'status']
+    match_commands = ['report', 'leaderboard', 'rank', 'sub']
+    admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'forcestop', 'removelastmatch', 'resetleaderboard']
+    utility_commands = ['help', 'helpme', 'ping', 'purgechat']
+
+    # Add command fields grouped by category
+    embed.add_field(
+        name="📋 Queue Commands",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in queue_commands]),
+        inline=False
+    )
 
     embed.add_field(
-        name="How it works:",
+        name="🎮 Match Commands",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in match_commands]),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🛠️ Admin Commands",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in admin_commands]),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔧 Utility Commands",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in utility_commands]),
+        inline=False
+    )
+
+    # Add "How It Works" section
+    embed.add_field(
+        name="How 6 Mans Works:",
         value=(
             "1. Join the queue with `/join` in a rank channel\n"
             "2. When 6 players join, voting starts automatically\n"
@@ -2026,6 +2090,8 @@ async def helpme(ctx):
         inline=False
     )
 
+    embed.set_footer(text="Type /help <command> for more info on a specific command")
+
     await ctx.send(embed=embed)
 
 
@@ -2035,9 +2101,9 @@ async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
         # Get the command that was attempted
         attempted_command = ctx.message.content.split()[0][1:]  # Remove the / prefix
-        await ctx.send(f"Command not found. Use `/helpme` to see available commands.")
+        await ctx.send(f"Command not found. Use `/help` to see available commands.")
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("Missing required argument. Use `/helpme` to see command usage.")
+        await ctx.send("Missing required argument. Use `/help` to see command usage.")
     elif isinstance(error, (discord.errors.HTTPException, discord.errors.GatewayNotFound,
                             discord.errors.ConnectionClosed)):
         print(f"Discord connection error: {error}")
