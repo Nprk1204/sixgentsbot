@@ -795,7 +795,7 @@ class MatchSystem:
         FIRST_GAME_LOSS = 80  # Base value for first loss
 
         MAX_MMR_CHANGE = 140  # Maximum possible MMR change for extremely unbalanced first matches
-        MIN_MMR_CHANGE = 10  # Minimum MMR change even after many games
+        MIN_MMR_CHANGE = 20  # Minimum MMR change even after many games
 
         # Decay settings
         DECAY_RATE = 0.15  # Slightly increased to create faster decay from high initial values
