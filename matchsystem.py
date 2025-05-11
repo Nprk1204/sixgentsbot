@@ -16,8 +16,8 @@ class MatchSystem:
 
         # Simplified - keep just the three tier-based MMR values
         self.TIER_MMR = {
-            "Rank A": 1600,  # Grand Champion I and above
-            "Rank B": 1100,  # Champion I to Champion III
+            "Rank A": 1850,  # Grand Champion I and above
+            "Rank B": 1350,  # Champion I to Champion III
             "Rank C": 600  # Diamond III and below - default
         }
 

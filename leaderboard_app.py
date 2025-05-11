@@ -359,9 +359,9 @@ def get_mmr_from_rank(rank):
     rank_lower = rank.lower()
 
     if "grand champion" in rank_lower or "supersonic" in rank_lower or "gc" in rank_lower or "ssl" in rank_lower:
-        return 1600
+        return 1850
     elif "champion" in rank_lower:
-        return 1100
+        return 1350
     else:
         return 600  # Default MMR for Diamond and below
 
