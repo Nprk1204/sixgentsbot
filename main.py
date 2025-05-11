@@ -876,7 +876,8 @@ async def rank(ctx, member: discord.Member = None):
 
     # Check if command is used in an allowed channel
     if not is_command_channel(ctx):
-        await ctx.send(f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
+        await ctx.send(
+            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.")
         return
 
     if member is None:
@@ -885,32 +886,72 @@ async def rank(ctx, member: discord.Member = None):
     player_id = str(member.id)
     player_data = match_system.get_player_stats(player_id)
 
+    # NEW CODE: If no player data exists, create a placeholder profile based on their rank role
     if not player_data:
-        await ctx.send(f"{member.mention} hasn't played any matches yet.")
-        return
+        # Check if player has a rank verification or role
+        rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+        # Get rank roles
+        rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+        rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+        rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+
+        # Determine tier and MMR based on roles if no rank record exists
+        if not rank_record:
+            if rank_a_role in member.roles:
+                tier = "Rank A"
+                mmr = 1850
+            elif rank_b_role in member.roles:
+                tier = "Rank B"
+                mmr = 1350
+            elif rank_c_role in member.roles:
+                tier = "Rank C"
+                mmr = 600
+            else:
+                # No role or verification found
+                await ctx.send(
+                    f"{member.mention} hasn't verified their rank yet. Please use the rank verification system to get started!")
+                return
+        else:
+            # Use data from rank record
+            tier = rank_record.get("tier", "Rank C")
+            mmr = rank_record.get("mmr", 600)
+
+        # Create a temporary player_data object for display
+        player_data = {
+            "name": member.display_name,
+            "mmr": mmr,
+            "wins": 0,
+            "losses": 0,
+            "matches": 0,
+            "tier": tier,
+            "is_new": True  # Flag to indicate this is a new player
+        }
 
     # Calculate stats
-    mmr = player_data.get("mmr", 1000)
+    mmr = player_data.get("mmr", 0)
     wins = player_data.get("wins", 0)
     losses = player_data.get("losses", 0)
     matches = player_data.get("matches", 0)
+    is_new = player_data.get("is_new", False)
 
     win_rate = 0
     if matches > 0:
         win_rate = (wins / matches) * 100
 
-    # Get player's rank position - fixed to use player_data's mmr for comparison
-    all_players = list(match_system.players.find().sort("mmr", -1))
+    # Get player's rank position only if they've played games
+    rank_position = "Unranked"
+    total_players = 0
 
-    # Get the position using the player's ID
-    rank_position = None
-    for i, p in enumerate(all_players):
-        if p["id"] == player_id:
-            rank_position = i + 1
-            break
+    if not is_new:
+        all_players = list(match_system.players.find().sort("mmr", -1))
+        total_players = len(all_players)
 
-    if rank_position is None:
-        rank_position = "Unknown"
+        # Get the position using the player's ID
+        for i, p in enumerate(all_players):
+            if p["id"] == player_id:
+                rank_position = i + 1
+                break
 
     # Create embed
     embed = discord.Embed(
@@ -918,14 +959,42 @@ async def rank(ctx, member: discord.Member = None):
         color=member.color
     )
 
-    embed.add_field(name="Rank", value=f"#{rank_position} of {len(all_players)}", inline=True)
+    # Determine player tier based on MMR
+    tier = "Rank C"
+    if mmr >= 1850:
+        tier = "Rank A"
+    elif mmr >= 1350:
+        tier = "Rank B"
+
+    tier_color = 0x1287438  # Default color for Rank C (green)
+    if tier == "Rank A":
+        tier_color = 0xC41E3A  # Red color for Rank A
+    elif tier == "Rank B":
+        tier_color = 0x1E90FF  # Blue color for Rank B
+
+    embed.color = tier_color
+
+    # Add rank badge field
+    embed.add_field(name="Rank", value=tier, inline=True)
+
+    if matches > 0:
+        embed.add_field(name="Leaderboard", value=f"#{rank_position} of {total_players}", inline=True)
+    else:
+        embed.add_field(name="Leaderboard", value="Unranked (0 games)", inline=True)
+
     embed.add_field(name="MMR", value=str(mmr), inline=True)
-    embed.add_field(name="Win Rate", value=f"{win_rate:.1f}%", inline=True)
+    embed.add_field(name="Win Rate", value=f"{win_rate:.1f}%" if matches > 0 else "N/A", inline=True)
     embed.add_field(name="Record", value=f"{wins}W - {losses}L", inline=True)
     embed.add_field(name="Matches", value=str(matches), inline=True)
 
+    # Add note for new players
+    if is_new:
+        embed.set_footer(
+            text="⭐ New player - this is your starting MMR based on rank verification. Play matches to earn your spot on the leaderboard!")
+    else:
+        embed.set_footer(text="Stats updated after each match")
+
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
-    embed.set_footer(text="Stats updated after each match")
 
     # Send only once
     await ctx.send(embed=embed)
