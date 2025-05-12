@@ -1280,69 +1280,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             # Debug - print variable values before creating embed
             print(f"Debug - web_reset: {web_reset}, verification_reset: {verification_reset}")
 
-            # Send confirmation
-            embed = discord.Embed(
-                title="✅ Leaderboard Reset Complete",
-                description=f"Reset {total_documents} documents across {len(backed_up) if backed_up else 0} collections.",
-                color=0x00ff00
-            )
-
-            if backed_up:
-                embed.add_field(
-                    name="Collections Reset",
-                    value="\n".join(backed_up),
-                    inline=False
-                )
-
-            # Add info about cleared queues and canceled activities
-            if queue_count > 0:
-                embed.add_field(
-                    name="Queues Cleared",
-                    value=f"Cleared {queue_count} players from active queues",
-                    inline=False
-                )
-
-            if active_vote_channels or active_selection_channels:
-                cancel_message = ""
-                if active_vote_channels:
-                    cancel_message += f"Canceled team voting in {len(active_vote_channels)} channels\n"
-                if active_selection_channels:
-                    cancel_message += f"Canceled captain selection in {len(active_selection_channels)} channels"
-
-                embed.add_field(
-                    name="Active Processes Canceled",
-                    value=cancel_message.strip(),
-                    inline=False
-                )
-
-            embed.add_field(
-                name="Backup Created",
-                value=f"Backup timestamp: `{timestamp}`",
-                inline=False
-            )
-
-            embed.add_field(
-                name="Web Leaderboard Status",
-                value=web_reset,
-                inline=False
-            )
-
-            embed.add_field(
-                name="Verification Reset Status",
-                value=verification_reset,
-                inline=False
-            )
-
-            embed.add_field(
-                name="Discord Roles",
-                value=role_reset,
-                inline=False
-            )
-
-            embed.set_footer(text=f"Reset by {interaction.user.display_name}")
-
-            await interaction.followup.send(embed=embed)
-
             # Send a global announcement to all rank channels
             for channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
                 for channel in interaction.guild.text_channels:
