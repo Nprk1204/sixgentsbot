@@ -4,6 +4,11 @@ class QueueHandler:
         self.queue_collection = db.get_collection('queue')
         self.vote_systems = {}  # Map of channel_id to VoteSystem
         self.captains_systems = {}  # Map of channel_id to CaptainsSystem
+        self.bot = None
+
+    def set_bot(self, bot):
+        """Set the bot instance"""
+        self.bot = bot
 
     def set_vote_system(self, channel_id, vote_system):
         """Set the vote system reference for a specific channel"""

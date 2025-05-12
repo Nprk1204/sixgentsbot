@@ -186,6 +186,7 @@ async def on_ready():
     # Set bot for all systems
     vote_system.set_bot(bot)
     captains_system.set_bot(bot)
+    queue_handler.set_bot(bot)
 
     # Get all queue channels and initialize systems
     for guild in bot.guilds:
