@@ -220,7 +220,6 @@ async def on_reaction_add(reaction, user):
 
 
 # Queue commands
-@bot.tree.command(name="Queue", description="Join the queue for 6 mans")
 @bot.command()
 async def queue(ctx):
     """Join the queue for 6 mans"""
