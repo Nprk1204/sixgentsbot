@@ -81,8 +81,17 @@ class CaptainsSystem:
         return embed
 
     async def execute_captain_selection(self, channel):
-        """Execute the captain selection process via DMs with UI buttons"""
         channel_id = str(channel.id)
+        is_global = channel.name.lower() == "global"
+
+        print(f"Captain selection for channel: {channel.name}, is_global: {is_global}")
+
+        # When creating match, pass the is_global parameter
+        match_id = self.match_system.create_match(
+            # other parameters...
+            channel_id,
+            is_global=is_global
+        )
 
         # Check if selection is active for this channel
         if not self.is_selection_active(channel_id):

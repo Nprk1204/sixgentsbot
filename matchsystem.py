@@ -24,7 +24,8 @@ class MatchSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def create_match(self, match_id, team1, team2, channel_id, is_global):
+    def create_match(self, match_id, team1, team2, channel_id, is_global=False):
+        print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
         """Create a new match entry"""
         # Generate a shorter match ID that's easier for users to type
         short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
