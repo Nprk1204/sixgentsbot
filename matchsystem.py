@@ -11,6 +11,7 @@ class MatchSystem:
         self.matches = db.get_collection('matches')
         self.players = db.get_collection('players')
         self.active_matches = {}  # Store active matches in memory
+        self.bot = None
 
         # Simplified - keep just the three tier-based MMR values
         self.TIER_MMR = {
@@ -18,6 +19,10 @@ class MatchSystem:
             "Rank B": 1350,  # Champion I to Champion III
             "Rank C": 600  # Diamond III and below - default
         }
+
+    def set_bot(self, bot):
+        """Set the bot instance"""
+        self.bot = bot
 
     def create_match(self, match_id, team1, team2, channel_id):
         """Create a new match entry"""
