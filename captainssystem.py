@@ -475,12 +475,20 @@ class CaptainsSystem:
         team1_mmr = self.calculate_team_mmr(team1)
         team2_mmr = self.calculate_team_mmr(team2)
 
+        is_global = False
+        for guild in self.bot.guilds:
+            for channel in guild.text_channels:
+                if str(channel.id) == channel_id and channel.name.lower() == "global":
+                    is_global = True
+                    break
+
         # Create match record
         match_id = self.match_system.create_match(
             str(uuid.uuid4()),
             team1,
             team2,
-            channel_id
+            channel_id,
+            is_global=is_global
         )
 
         # Create an embed for team announcement
