@@ -312,6 +312,58 @@ a:hover {
     background-color: rgba(0, 0, 0, 0.2);
 }
 
+.leaderboard-nav {
+    background-color: var(--dark-medium);
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 20px;
+}
+
+.leaderboard-nav .nav-pills .nav-link {
+    color: var(--text-muted);
+    font-weight: 600;
+    border-radius: 5px;
+    transition: all 0.3s ease;
+    margin-right: 5px;
+}
+
+.leaderboard-nav .nav-pills .nav-link:hover {
+    color: var(--text);
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.leaderboard-nav .nav-pills .nav-link.active {
+    background: var(--gradient-primary);
+    color: var(--text);
+}
+
+/* For player stats tabs in modal */
+#playerStatsTabs .nav-link {
+    color: var(--text-muted);
+    border-color: var(--border);
+    background-color: var(--dark-medium);
+}
+
+#playerStatsTabs .nav-link:hover {
+    color: var(--text);
+    border-color: var(--primary);
+}
+
+#playerStatsTabs .nav-link.active {
+    background-color: var(--dark-light);
+    color: var(--primary);
+    border-color: var(--primary);
+    border-bottom-color: transparent;
+}
+
+.tab-content {
+    background-color: var(--dark-light);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 5px 5px;
+    padding: 15px;
+}
+
 .player-row {
     border-bottom: 1px solid var(--border);
     padding: 15px;

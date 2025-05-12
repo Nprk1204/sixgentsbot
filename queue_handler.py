@@ -14,14 +14,17 @@ class QueueHandler:
         self.captains_systems[channel_id] = captains_system
 
     def add_player(self, player, channel_id):
-        """Add a player to the queue for a specific channel"""
         player_id = str(player.id)
         player_mention = player.mention
         player_name = player.display_name
         channel_id = str(channel_id)  # Ensure channel_id is a string
 
+        # Determine if this is a global queue
+        channel = self.bot.get_channel(int(channel_id)) if self.bot else None
+        is_global = channel and channel.name.lower() == "global"
+
         # Debug output
-        print(f"Adding player {player_name} (ID: {player_id}) to channel {channel_id}")
+        print(f"Adding player {player_name} (ID: {player_id}) to channel {channel_id}, is_global: {is_global}")
 
         # Check if player is already in this channel's queue
         if self.queue_collection.find_one({"id": player_id, "channel_id": channel_id}):
@@ -46,7 +49,8 @@ class QueueHandler:
                     "id": player_id,
                     "name": player_name,
                     "mention": player_mention,
-                    "channel_id": channel_id
+                    "channel_id": channel_id,
+                    "is_global": is_global
                 })
 
                 count = self.queue_collection.count_documents({"channel_id": channel_id})
@@ -65,7 +69,8 @@ class QueueHandler:
             "id": player_id,
             "name": player_name,
             "mention": player_mention,
-            "channel_id": channel_id  # Make sure this is stored
+            "channel_id": channel_id,
+            "is_global": is_global
         })
 
         # Count players in this channel's queue

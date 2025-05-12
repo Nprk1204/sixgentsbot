@@ -5,6 +5,25 @@
 {% block content %}
 <div class="content-container">
     <div class="content-header">
+        <div class="leaderboard-nav mb-4">
+    <ul class="nav nav-pills">
+        <li class="nav-item">
+            <a class="nav-link {% if board_type == 'all' %}active{% endif %}" href="{{ url_for('leaderboard') }}">All</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if board_type == 'global' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='global') }}">Global</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if board_type == 'rank-a' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-a') }}">Rank A</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if board_type == 'rank-b' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-b') }}">Rank B</a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link {% if board_type == 'rank-c' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-c') }}">Rank C</a>
+        </li>
+    </ul>
+</div>
         <h2>Player Leaderboard</h2>
         <button id="refreshButton" class="btn btn-primary">
             <i class="fas fa-sync-alt me-2"></i> Refresh
@@ -123,19 +142,23 @@
     });
 
     function loadLeaderboard(page) {
-        const leaderboardContent = document.getElementById('leaderboardContent');
-        leaderboardContent.innerHTML = `
-            <div class="text-center py-5">
-                <div class="spinner-border text-light" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p class="mt-3">Loading leaderboard data...</p>
+    const leaderboardContent = document.getElementById('leaderboardContent');
+    leaderboardContent.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-light" role="status">
+                <span class="visually-hidden">Loading...</span>
             </div>
-        `;
+            <p class="mt-3">Loading leaderboard data...</p>
+        </div>
+    `;
 
-        fetch(`/api/leaderboard?page=${page}&per_page=${perPage}`)
-            .then(response => response.json())
-            .then(data => {
+    // Get the current board type from the active nav link
+    const activeLink = document.querySelector('.nav-link.active');
+    const boardType = activeLink ? activeLink.getAttribute('href').split('/').pop() : 'all';
+
+    fetch(`/api/leaderboard/${boardType}?page=${page}&per_page=${perPage}`)
+        .then(response => response.json())
+        .then(data => {
                 leaderboardContent.innerHTML = '';
 
                 // If the new API structure is used (with pagination)
@@ -170,47 +193,47 @@
     }
 
     function displayPlayers(players, startIndex) {
-        const leaderboardContent = document.getElementById('leaderboardContent');
+    const leaderboardContent = document.getElementById('leaderboardContent');
 
-        players.forEach((player, index) => {
-            const rank = startIndex + index + 1;
-            let medalClass = '';
+    players.forEach((player, index) => {
+        const rank = startIndex + index + 1;
+        let medalClass = '';
 
-            if (rank === 1) {
-                medalClass = 'medal-1';
-            } else if (rank === 2) {
-                medalClass = 'medal-2';
-            } else if (rank === 3) {
-                medalClass = 'medal-3';
-            }
+        if (rank === 1) {
+            medalClass = 'medal-1';
+        } else if (rank === 2) {
+            medalClass = 'medal-2';
+        } else if (rank === 3) {
+            medalClass = 'medal-3';
+        }
 
-            // Determine rank based on MMR
-            let rankDisplay = '';
-            let rankClass = '';
+        // Determine rank based on MMR
+        let rankDisplay = '';
+        let rankClass = '';
 
-            if (player.mmr >= 1600) {
-                rankDisplay = 'A';
-                rankClass = 'rank-a';
-            } else if (player.mmr >= 1100) {
-                rankDisplay = 'B';
-                rankClass = 'rank-b';
-            } else {
-                rankDisplay = 'C';
-                rankClass = 'rank-c';
-            }
+        if (player.mmr >= 1600) {
+            rankDisplay = 'A';
+            rankClass = 'rank-a';
+        } else if (player.mmr >= 1100) {
+            rankDisplay = 'B';
+            rankClass = 'rank-b';
+        } else {
+            rankDisplay = 'C';
+            rankClass = 'rank-c';
+        }
 
-            const playerRow = document.createElement('div');
-            playerRow.className = 'player-row row align-items-center';
-            playerRow.dataset.playerId = player.id;
-            playerRow.innerHTML = `
-                <div class="col-1"><div class="rank ${medalClass}">${rank}</div></div>
-                <div class="col-1"><div class="rank-badge ${rankClass}">${rankDisplay}</div></div>
-                <div class="col-3">${player.name}</div>
-                <div class="col-2"><span class="mmr">${player.mmr}</span></div>
-                <div class="col-2"><span class="win-rate">${player.win_rate}%</span></div>
-                <div class="col-1">${player.wins || 0}-${player.losses || 0}</div>
-                <div class="col-2">${player.matches || 0}</div>
-            `;
+        const playerRow = document.createElement('div');
+        playerRow.className = 'player-row row align-items-center';
+        playerRow.dataset.playerId = player.id;
+        playerRow.innerHTML = `
+            <div class="col-1"><div class="rank ${medalClass}">${rank}</div></div>
+            <div class="col-1"><div class="rank-badge ${rankClass}">${rankDisplay}</div></div>
+            <div class="col-3">${player.name}</div>
+            <div class="col-2"><span class="mmr">${player.mmr_display}</span></div>
+            <div class="col-2"><span class="win-rate">${player.win_rate}%</span></div>
+            <div class="col-1">${player.wins || 0}-${player.losses || 0}</div>
+            <div class="col-2">${player.matches || 0}</div>
+        `;
 
             leaderboardContent.appendChild(playerRow);
         });
@@ -370,98 +393,159 @@
     }
 
     function showPlayerDetails(playerId) {
-        const modalContent = document.getElementById('playerModalContent');
-        modalContent.innerHTML = `
-            <div class="text-center">
-                <div class="spinner-border text-light" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p>Loading player data...</p>
+    const modalContent = document.getElementById('playerModalContent');
+    modalContent.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border text-light" role="status">
+                <span class="visually-hidden">Loading...</span>
             </div>
-        `;
+            <p>Loading player data...</p>
+        </div>
+    `;
 
-        playerModal.show();
+    playerModal.show();
 
-        fetch(`/api/player/${playerId}`)
-            .then(response => response.json())
-            .then(player => {
-                if (player.error) {
-                    modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
-                    return;
-                }
+    fetch(`/api/player/${playerId}`)
+        .then(response => response.json())
+        .then(player => {
+            if (player.error) {
+                modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
+                return;
+            }
 
-                // Player stats
-                let content = `
-                    <div class="row mb-4">
-                        <div class="col-md-6">
-                            <h3>${player.name}</h3>
-                            <p class="lead">MMR: <span class="badge bg-primary">${player.mmr}</span></p>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="card bg-dark">
-                                <div class="card-body">
-                                    <h5 class="card-title">Stats</h5>
-                                    <div class="row">
-                                        <div class="col-6">Win Rate: ${player.win_rate}%</div>
-                                        <div class="col-6">Record: ${player.wins || 0}-${player.losses || 0}</div>
-                                        <div class="col-6">Matches: ${player.matches || 0}</div>
+            // Player stats - now with both ranked and global stats
+            let content = `
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h3>${player.name}</h3>
+                    </div>
+                </div>
+
+                <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
+                                data-bs-target="#ranked-stats" type="button" role="tab"
+                                aria-controls="ranked-stats" aria-selected="true">
+                            Ranked Stats
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="global-tab" data-bs-toggle="tab"
+                                data-bs-target="#global-stats" type="button" role="tab"
+                                aria-controls="global-stats" aria-selected="false">
+                            Global Stats
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="playerStatsContent">
+                    <!-- Ranked Stats Tab -->
+                    <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p class="lead">MMR: <span class="badge bg-primary">${player.mmr || 0}</span></p>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card bg-dark">
+                                    <div class="card-body">
+                                        <h5 class="card-title">Ranked Stats</h5>
+                                        <div class="row">
+                                            <div class="col-6">Win Rate: ${player.win_rate || 0}%</div>
+                                            <div class="col-6">Record: ${player.wins || 0}-${player.losses || 0}</div>
+                                            <div class="col-6">Matches: ${player.matches || 0}</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Ranked Matches Section -->
+                        ${player.recent_matches && player.recent_matches.length > 0 ? `
+                            <h4 class="mt-4">Recent Ranked Matches</h4>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Result</th>
+                                            <th>Teams</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${player.recent_matches.filter(match => !match.is_global).map(match => `
+                                            <tr>
+                                                <td>${match.date || 'Unknown'}</td>
+                                                <td class="${match.player_result === 'Win' ? 'text-success' : 'text-danger'}">${match.player_result}</td>
+                                                <td>
+                                                    <strong>${match.team1.map(p => p.name).join(', ')}</strong> vs <strong>${match.team2.map(p => p.name).join(', ')}</strong>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : `<p class="mt-4">No recent ranked matches found for this player.</p>`}
                     </div>
-                `;
 
-                // Recent matches
-                if (player.recent_matches && player.recent_matches.length > 0) {
-                    content += `
-                        <h4>Recent Matches</h4>
-                        <div class="table-responsive">
-                            <table class="table table-dark table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Result</th>
-                                        <th>Teams</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-
-                    player.recent_matches.forEach(match => {
-                        // Format teams
-                        let team1Names = match.team1.map(p => p.name).join(', ');
-                        let team2Names = match.team2.map(p => p.name).join(', ');
-
-                        // Determine result color
-                        let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
-
-                        content += `
-                            <tr>
-                                <td>${match.date || 'Unknown'}</td>
-                                <td class="${resultClass}">${match.player_result}</td>
-                                <td>
-                                    <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
-                                </td>
-                            </tr>
-                        `;
-                    });
-
-                    content += `
-                                </tbody>
-                            </table>
+                    <!-- Global Stats Tab -->
+                    <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p class="lead">Global MMR: <span class="badge bg-primary">${player.global_mmr || 300}</span></p>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card bg-dark">
+                                    <div class="card-body">
+                                        <h5 class="card-title">Global Stats</h5>
+                                        <div class="row">
+                                            <div class="col-6">Win Rate: ${
+                                                player.global_matches && player.global_matches > 0 ?
+                                                Math.round((player.global_wins || 0) / player.global_matches * 100) : 0
+                                            }%</div>
+                                            <div class="col-6">Record: ${player.global_wins || 0}-${player.global_losses || 0}</div>
+                                            <div class="col-6">Matches: ${player.global_matches || 0}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                    `;
-                } else {
-                    content += `<p>No recent matches found for this player.</p>`;
-                }
 
-                modalContent.innerHTML = content;
-            })
-            .catch(error => {
-                console.error('Error fetching player details:', error);
-                modalContent.innerHTML = '<div class="alert alert-danger">Error loading player data. Please try again later.</div>';
-            });
+                        <!-- Global Matches Section -->
+                        ${player.recent_matches && player.recent_matches.some(match => match.is_global) ? `
+                            <h4 class="mt-4">Recent Global Matches</h4>
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Result</th>
+                                            <th>Teams</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        ${player.recent_matches.filter(match => match.is_global).map(match => `
+                                            <tr>
+                                                <td>${match.date || 'Unknown'}</td>
+                                                <td class="${match.player_result === 'Win' ? 'text-success' : 'text-danger'}">${match.player_result}</td>
+                                                <td>
+                                                    <strong>${match.team1.map(p => p.name).join(', ')}</strong> vs <strong>${match.team2.map(p => p.name).join(', ')}</strong>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        ` : `<p class="mt-4">No recent global matches found for this player.</p>`}
+                    </div>
+                </div>
+            `;
+
+            modalContent.innerHTML = content;
+        })
+        .catch(error => {
+            console.error('Error fetching player details:', error);
+            modalContent.innerHTML = '<div class="alert alert-danger">Error loading player data. Please try again later.</div>';
+        });
     }
 </script>
 {% endblock %}

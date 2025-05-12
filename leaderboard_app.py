@@ -143,6 +143,9 @@ def home():
     # Get total match count
     match_count = matches_collection.count_documents({})
 
+    # Get global match count
+    global_match_count = matches_collection.count_documents({"is_global": True})
+
     # Get top 5 players for featured section
     featured_players = list(players_collection.find({}, {
         "_id": 0,
@@ -159,6 +162,24 @@ def home():
         matches = player.get("matches", 0)
         wins = player.get("wins", 0)
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
+
+    # Get featured global players
+    featured_global_players = list(players_collection.find({"global_matches": {"$gt": 0}}, {
+        "_id": 0,
+        "id": 1,
+        "name": 1,
+        "global_mmr": 1,
+        "global_wins": 1,
+        "global_losses": 1,
+        "global_matches": 1
+    }).sort("global_mmr", -1).limit(5))
+
+    # Calculate win rates for featured global players
+    for player in featured_global_players:
+        matches = player.get("global_matches", 0)
+        wins = player.get("global_wins", 0)
+        player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
+        player["mmr"] = player.get("global_mmr", 0)  # For consistency in template
 
     # Get recent matches
     recent_matches = list(matches_collection.find(
@@ -177,6 +198,7 @@ def home():
         winner = match.get("winner", 0)
         team1 = [p.get("name", "Unknown") for p in match.get("team1", [])]
         team2 = [p.get("name", "Unknown") for p in match.get("team2", [])]
+        is_global = match.get("is_global", False)
 
         formatted_match = {
             "date": date_str,
@@ -184,7 +206,8 @@ def home():
             "team2": team2,
             "winner": winner,
             "match_id": match.get("match_id", ""),
-            "score": match.get("score", {"team1": 0, "team2": 0})
+            "score": match.get("score", {"team1": 0, "team2": 0}),
+            "is_global": is_global
         }
 
         formatted_matches.append(formatted_match)
@@ -192,15 +215,23 @@ def home():
     return render_template('home.html',
                            player_count=player_count,
                            match_count=match_count,
+                           global_match_count=global_match_count,
                            featured_players=featured_players,
+                           featured_global_players=featured_global_players,
                            recent_matches=formatted_matches)
 
 
 @app.route('/leaderboard')
-@cached(timeout=60)  # Cache for 1 minute
+@cached(timeout=60)
 def leaderboard():
-    """Display the leaderboard page"""
-    return render_template('leaderboard.html')
+    """Display the main leaderboard page"""
+    return render_template('leaderboard.html', board_type='all')
+
+@app.route('/leaderboard/<board_type>')
+@cached(timeout=60)
+def leaderboard_by_type(board_type):
+    """Display the leaderboard page for a specific type"""
+    return render_template('leaderboard.html', board_type=board_type)
 
 
 @app.route('/rank-check')
@@ -213,9 +244,16 @@ def rank_check():
 
 
 @app.route('/api/leaderboard')
-@cached(timeout=60)  # Cache for 1 minute
+@cached(timeout=60)
 def get_leaderboard():
     """API endpoint to get leaderboard data with pagination"""
+    return get_leaderboard_by_type('all')
+
+
+@app.route('/api/leaderboard/<board_type>')
+@cached(timeout=60)
+def get_leaderboard_by_type(board_type):
+    """API endpoint to get leaderboard data with pagination for specific type"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 25, type=int)
 
@@ -223,28 +261,66 @@ def get_leaderboard():
     if per_page > 100:
         per_page = 100
 
+    # Define query and sort field based on board type
+    query = {}
+    sort_field = "mmr"
+    mmr_field = "mmr"
+
+    if board_type == "global":
+        # For global leaderboard, filter players with global matches
+        query = {"global_matches": {"$gt": 0}}
+        sort_field = "global_mmr"
+        mmr_field = "global_mmr"
+    elif board_type == "rank-a":
+        # For Rank A, filter players with MMR >= 1600
+        query = {"mmr": {"$gte": 1600}, "matches": {"$gt": 0}}
+    elif board_type == "rank-b":
+        # For Rank B, filter players with MMR between 1100 and 1599
+        query = {"mmr": {"$gte": 1100, "$lt": 1600}, "matches": {"$gt": 0}}
+    elif board_type == "rank-c":
+        # For Rank C, filter players with MMR < 1100
+        query = {"mmr": {"$lt": 1100}, "matches": {"$gt": 0}}
+    elif board_type != "all":
+        # Invalid board type, fallback to all
+        board_type = "all"
+
+    # Get total count for pagination info
+    total_players = players_collection.count_documents(query)
+
     # Calculate skip value for pagination
     skip = (page - 1) * per_page
 
-    # Get total count for pagination info
-    total_players = players_collection.count_documents({})
-
     # Get players with pagination
-    top_players = list(players_collection.find({}, {
+    projection = {
         "_id": 0,
         "id": 1,
         "name": 1,
         "mmr": 1,
+        "global_mmr": 1,
         "wins": 1,
+        "global_wins": 1,
         "losses": 1,
+        "global_losses": 1,
         "matches": 1,
+        "global_matches": 1,
         "last_updated": 1
-    }).sort("mmr", -1).skip(skip).limit(per_page))
+    }
+
+    top_players = list(players_collection.find(query, projection)
+                       .sort(sort_field, -1)
+                       .skip(skip).limit(per_page))
 
     # Calculate additional stats
     for player in top_players:
-        matches = player.get("matches", 0)
-        wins = player.get("wins", 0)
+        if board_type == "global":
+            matches = player.get("global_matches", 0)
+            wins = player.get("global_wins", 0)
+            # Add this field to standardize what's displayed
+            player["mmr_display"] = player.get(mmr_field, 0)
+        else:
+            matches = player.get("matches", 0)
+            wins = player.get("wins", 0)
+            player["mmr_display"] = player.get(mmr_field, 0)
 
         # Calculate win rate
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
@@ -262,6 +338,7 @@ def get_leaderboard():
     # Return with pagination info
     return jsonify({
         "players": top_players,
+        "board_type": board_type,
         "pagination": {
             "total": total_players,
             "page": page,
@@ -280,11 +357,22 @@ def get_player(player_id):
         if not player:
             return jsonify({"error": "Player not found"}), 404
 
-        # Calculate additional stats
+        # Ensure player has global MMR fields
+        if "global_mmr" not in player:
+            player["global_mmr"] = 300
+            player["global_wins"] = 0
+            player["global_losses"] = 0
+            player["global_matches"] = 0
+
+        # Calculate additional stats for ranked
         matches = player.get("matches", 0)
         wins = player.get("wins", 0)
-
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
+
+        # Calculate global win rate
+        global_matches = player.get("global_matches", 0)
+        global_wins = player.get("global_wins", 0)
+        player["global_win_rate"] = round((global_wins / global_matches) * 100, 2) if global_matches > 0 else 0
 
         # Get recent matches for this player
         recent_matches = list(matches_collection.find(
@@ -293,9 +381,9 @@ def get_player(player_id):
                 {"team2.id": player_id}
             ], "status": "completed"},
             {"_id": 0}
-        ).sort("completed_at", -1).limit(10))
+        ).sort("completed_at", -1).limit(20))  # Increased limit to get more matches
 
-        # Format match data
+        # Format match data and include is_global flag
         for match in recent_matches:
             # Determine if the player won or lost
             player_in_team1 = False
@@ -310,6 +398,20 @@ def get_player(player_id):
                 match["player_result"] = "Win"
             else:
                 match["player_result"] = "Loss"
+
+            # Add is_global flag if missing
+            if "is_global" not in match:
+                # For backwards compatibility, determine based on channel
+                channel_id = match.get("channel_id")
+                is_global = False
+
+                # Infer from channel ID - this is a best guess
+                if channel_id:
+                    # Try to find channel name somehow
+                    # This is a placeholder - in real implementation you'd need to determine this
+                    is_global = (channel_id == "your_global_channel_id")
+
+                match["is_global"] = is_global
 
             # Format date
             if "completed_at" in match:
@@ -489,6 +591,7 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
             "rank": rank_data.get("rank"),
             "tier": rank_data.get("tier"),
             "mmr": rank_data.get("mmr"),  # This should be the MMR from manual input
+            "global_mmr": 300,  # Initialize global MMR at 300
             "timestamp": datetime.datetime.utcnow()
         }
 
@@ -499,10 +602,14 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
         existing_rank = ranks_collection.find_one({"discord_username": discord_username})
 
         if existing_rank:
-            # Update existing record
+            # Update existing record but preserve global_mmr if it exists
+            update_data = rank_document.copy()
+            if "global_mmr" in existing_rank:
+                del update_data["global_mmr"]
+
             ranks_collection.update_one(
                 {"discord_username": discord_username},
-                {"$set": rank_document}
+                {"$set": update_data}
             )
             print(f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
         else:
@@ -688,6 +795,7 @@ def check_rank():
             "rank": manual_tier,
             "tier": manual_tier,
             "mmr": mmr,
+            "global_mmr": 300,  # Initialize Global MMR at 300
             "timestamp": time.time(),
             "manual_verification": True
         }

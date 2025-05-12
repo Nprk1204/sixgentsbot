@@ -24,6 +24,10 @@ class MatchSystem:
         # Generate a shorter match ID that's easier for users to type
         short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
 
+        # Determine if this is a global match based on channel name
+        channel = self.bot.get_channel(int(channel_id)) if self.bot else None
+        is_global = channel and channel.name.lower() == "global"
+
         match_data = {
             "match_id": short_id,  # Use the shorter ID
             "team1": team1,
@@ -34,7 +38,8 @@ class MatchSystem:
             "channel_id": channel_id,
             "created_at": datetime.datetime.utcnow(),
             "completed_at": None,
-            "reported_by": None
+            "reported_by": None,
+            "is_global": is_global  # Add this line to track global matches
         }
 
         # Store in database
@@ -44,7 +49,7 @@ class MatchSystem:
         self.active_matches[short_id] = match_data
 
         # Debug print to confirm match creation
-        print(f"Created match with ID: {short_id}, status: {match_data['status']}")
+        print(f"Created match with ID: {short_id}, status: {match_data['status']}, is_global: {is_global}")
 
         return short_id  # Return the short ID
 
@@ -120,6 +125,11 @@ class MatchSystem:
         # Now get the updated match document
         updated_match = self.matches.find_one({"match_id": match_id})
 
+        # Check if this is a global match
+        is_global_match = updated_match.get("is_global", False)
+        channel_id = updated_match.get("channel_id")
+        print(f"Match type: {'Global' if is_global_match else 'Ranked'}, Channel ID: {channel_id}")
+
         # Update MMR for all players with the new algorithm
         if winner == 1:
             winning_team = match["team1"]
@@ -148,15 +158,28 @@ class MatchSystem:
             # Get player MMR for real players
             player_data = self.players.find_one({"id": player_id})
             if player_data:
-                team1_mmrs.append(player_data.get("mmr", 0))
+                # Use global or ranked MMR based on match type
+                if is_global_match:
+                    mmr = player_data.get("global_mmr", 300)  # Default global MMR is 300
+                else:
+                    mmr = player_data.get("mmr", 600)  # Default ranked MMR
+                team1_mmrs.append(mmr)
             else:
                 # For new players, get MMR from rank verification or use default
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
-                    team1_mmrs.append(rank_record.get("mmr", 600))
+                    if is_global_match:
+                        mmr = rank_record.get("global_mmr", 300)
+                    else:
+                        tier = rank_record.get("tier", "Rank C")
+                        mmr = self.TIER_MMR.get(tier, 600)
+                    team1_mmrs.append(mmr)
                 else:
-                    # Use tier-based default
-                    team1_mmrs.append(600)  # Default to Rank C MMR
+                    # Use default MMR
+                    if is_global_match:
+                        team1_mmrs.append(300)  # Default global MMR
+                    else:
+                        team1_mmrs.append(600)  # Default ranked MMR
 
         # Get MMRs for team 2
         for player in match["team2"]:
@@ -174,15 +197,28 @@ class MatchSystem:
             # Get player MMR for real players
             player_data = self.players.find_one({"id": player_id})
             if player_data:
-                team2_mmrs.append(player_data.get("mmr", 0))
+                # Use global or ranked MMR based on match type
+                if is_global_match:
+                    mmr = player_data.get("global_mmr", 300)
+                else:
+                    mmr = player_data.get("mmr", 600)
+                team2_mmrs.append(mmr)
             else:
                 # For new players, get MMR from rank verification or use default
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
-                    team2_mmrs.append(rank_record.get("mmr", 600))
+                    if is_global_match:
+                        mmr = rank_record.get("global_mmr", 300)
+                    else:
+                        tier = rank_record.get("tier", "Rank C")
+                        mmr = self.TIER_MMR.get(tier, 600)
+                    team2_mmrs.append(mmr)
                 else:
-                    # Use tier-based default
-                    team2_mmrs.append(600)  # Default to Rank C MMR
+                    # Use default MMR
+                    if is_global_match:
+                        team2_mmrs.append(300)  # Default global MMR
+                    else:
+                        team2_mmrs.append(600)  # Default ranked MMR
 
         # Calculate average MMRs for each team
         team1_avg_mmr = sum(team1_mmrs) / len(team1_mmrs) if team1_mmrs else 0
@@ -212,80 +248,180 @@ class MatchSystem:
 
             if player_data:
                 # Existing player logic
-                matches_played = player_data.get("matches", 0) + 1
-                wins = player_data.get("wins", 0) + 1
-                old_mmr = player_data.get("mmr", 600)
+                if is_global_match:
+                    # Global match win handling
+                    global_matches = player_data.get("global_matches", 0) + 1
+                    global_wins = player_data.get("global_wins", 0) + 1
+                    old_mmr = player_data.get("global_mmr", 300)
 
-                # Calculate MMR gain with new algorithm
-                mmr_gain = self.calculate_dynamic_mmr(
-                    old_mmr,
-                    player_team_avg,
-                    opponent_avg,
-                    matches_played,
-                    is_win=True
-                )
+                    # Calculate MMR gain with new algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        old_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        global_matches,
+                        is_win=True
+                    )
 
-                new_mmr = old_mmr + mmr_gain
-                print(f"Player {player['name']} MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+                    new_mmr = old_mmr + mmr_gain
+                    print(f"Player {player['name']} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
 
-                self.players.update_one(
-                    {"id": player_id},
-                    {"$set": {
-                        "mmr": new_mmr,
-                        "wins": wins,
-                        "matches": matches_played,
-                        "last_updated": datetime.datetime.utcnow()
-                    }}
-                )
+                    self.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "global_mmr": new_mmr,
+                            "global_wins": global_wins,
+                            "global_matches": global_matches,
+                            "last_updated": datetime.datetime.utcnow()
+                        }}
+                    )
 
-                # Track MMR change
-                mmr_changes.append({
-                    "player_id": player_id,
-                    "old_mmr": old_mmr,
-                    "new_mmr": new_mmr,
-                    "mmr_change": mmr_gain,
-                    "is_win": True
-                })
+                    # Track MMR change for global
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,
+                        "is_win": True,
+                        "is_global": True
+                    })
+                else:
+                    # Regular ranked match win handling
+                    matches_played = player_data.get("matches", 0) + 1
+                    wins = player_data.get("wins", 0) + 1
+                    old_mmr = player_data.get("mmr", 600)
+
+                    # Calculate MMR gain with new algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        old_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        matches_played,
+                        is_win=True
+                    )
+
+                    new_mmr = old_mmr + mmr_gain
+                    print(f"Player {player['name']} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+
+                    self.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "mmr": new_mmr,
+                            "wins": wins,
+                            "matches": matches_played,
+                            "last_updated": datetime.datetime.utcnow()
+                        }}
+                    )
+
+                    # Track MMR change for ranked
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,
+                        "is_win": True,
+                        "is_global": False
+                    })
             else:
-                # Get starting MMR from rank record or use default
-                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
-                starting_mmr = 600  # Default MMR
+                # New player logic
+                if is_global_match:
+                    # New player's first global match - win
+                    # Get starting MMR from rank record or use default
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                    starting_global_mmr = 300  # Default global MMR
 
-                if rank_record:
-                    tier = rank_record.get("tier", "Rank C")
-                    starting_mmr = self.TIER_MMR.get(tier, 600)
+                    if rank_record and "global_mmr" in rank_record:
+                        starting_global_mmr = rank_record.get("global_mmr", 300)
 
-                # Calculate first win MMR with the new algorithm
-                mmr_gain = self.calculate_dynamic_mmr(
-                    starting_mmr,
-                    player_team_avg,
-                    opponent_avg,
-                    1,  # First match
-                    is_win=True
-                )
+                    # Calculate first win MMR with the new algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        starting_global_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        1,  # First match
+                        is_win=True
+                    )
 
-                new_mmr = starting_mmr + mmr_gain
-                print(f"NEW PLAYER {player['name']} FIRST WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
+                    new_global_mmr = starting_global_mmr + mmr_gain
+                    print(
+                        f"NEW PLAYER {player['name']} FIRST GLOBAL WIN: {starting_global_mmr} + {mmr_gain} = {new_global_mmr}")
 
-                self.players.insert_one({
-                    "id": player_id,
-                    "name": player["name"],
-                    "mmr": new_mmr,
-                    "wins": 1,
-                    "losses": 0,
-                    "matches": 1,
-                    "created_at": datetime.datetime.utcnow(),
-                    "last_updated": datetime.datetime.utcnow()
-                })
+                    # Get default ranked MMR from rank verification if available
+                    starting_ranked_mmr = 600  # Default ranked MMR
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_ranked_mmr = self.TIER_MMR.get(tier, 600)
 
-                # Track MMR change for new player
-                mmr_changes.append({
-                    "player_id": player_id,
-                    "old_mmr": starting_mmr,
-                    "new_mmr": new_mmr,
-                    "mmr_change": mmr_gain,
-                    "is_win": True
-                })
+                    self.players.insert_one({
+                        "id": player_id,
+                        "name": player["name"],
+                        "mmr": starting_ranked_mmr,  # Default ranked MMR
+                        "global_mmr": new_global_mmr,  # Updated global MMR
+                        "wins": 0,
+                        "global_wins": 1,
+                        "losses": 0,
+                        "global_losses": 0,
+                        "matches": 0,
+                        "global_matches": 1,
+                        "created_at": datetime.datetime.utcnow(),
+                        "last_updated": datetime.datetime.utcnow()
+                    })
+
+                    # Track MMR change for global
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": starting_global_mmr,
+                        "new_mmr": new_global_mmr,
+                        "mmr_change": mmr_gain,
+                        "is_win": True,
+                        "is_global": True
+                    })
+                else:
+                    # New player's first ranked match - win
+                    # Get starting MMR from rank record or use default
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                    starting_mmr = 600  # Default MMR
+
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
+
+                    # Calculate first win MMR with the new algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        starting_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        1,  # First match
+                        is_win=True
+                    )
+
+                    new_mmr = starting_mmr + mmr_gain
+                    print(f"NEW PLAYER {player['name']} FIRST RANKED WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
+
+                    self.players.insert_one({
+                        "id": player_id,
+                        "name": player["name"],
+                        "mmr": new_mmr,  # Updated ranked MMR
+                        "global_mmr": 300,  # Default global MMR
+                        "wins": 1,
+                        "global_wins": 0,
+                        "losses": 0,
+                        "global_losses": 0,
+                        "matches": 1,
+                        "global_matches": 0,
+                        "created_at": datetime.datetime.utcnow(),
+                        "last_updated": datetime.datetime.utcnow()
+                    })
+
+                    # Track MMR change for ranked
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": starting_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,
+                        "is_win": True,
+                        "is_global": False
+                    })
 
         # Update MMR for losing team - similar logic as above
         for player in losing_team:
@@ -304,81 +440,181 @@ class MatchSystem:
             player_data = self.players.find_one({"id": player_id})
 
             if player_data:
-                # Update existing player
-                matches_played = player_data.get("matches", 0) + 1
-                losses = player_data.get("losses", 0) + 1
-                old_mmr = player_data.get("mmr", 600)
+                # Existing player logic
+                if is_global_match:
+                    # Global match loss handling
+                    global_matches = player_data.get("global_matches", 0) + 1
+                    global_losses = player_data.get("global_losses", 0) + 1
+                    old_mmr = player_data.get("global_mmr", 300)
 
-                # Calculate MMR loss with new algorithm
-                mmr_loss = self.calculate_dynamic_mmr(
-                    old_mmr,
-                    player_team_avg,
-                    opponent_avg,
-                    matches_played,
-                    is_win=False
-                )
+                    # Calculate MMR loss with new algorithm
+                    mmr_loss = self.calculate_dynamic_mmr(
+                        old_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        global_matches,
+                        is_win=False
+                    )
 
-                new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                print(f"Player {player['name']} MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                    new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
+                    print(f"Player {player['name']} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
 
-                self.players.update_one(
-                    {"id": player_id},
-                    {"$set": {
-                        "mmr": new_mmr,
-                        "losses": losses,
-                        "matches": matches_played,
-                        "last_updated": datetime.datetime.utcnow()
-                    }}
-                )
+                    self.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "global_mmr": new_mmr,
+                            "global_losses": global_losses,
+                            "global_matches": global_matches,
+                            "last_updated": datetime.datetime.utcnow()
+                        }}
+                    )
 
-                # Track MMR change
-                mmr_changes.append({
-                    "player_id": player_id,
-                    "old_mmr": old_mmr,
-                    "new_mmr": new_mmr,
-                    "mmr_change": -mmr_loss,  # Negative for loss
-                    "is_win": False
-                })
+                    # Track MMR change for global loss
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": -mmr_loss,  # Negative for loss
+                        "is_win": False,
+                        "is_global": True
+                    })
+                else:
+                    # Regular ranked match loss handling
+                    matches_played = player_data.get("matches", 0) + 1
+                    losses = player_data.get("losses", 0) + 1
+                    old_mmr = player_data.get("mmr", 600)
+
+                    # Calculate MMR loss with new algorithm
+                    mmr_loss = self.calculate_dynamic_mmr(
+                        old_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        matches_played,
+                        is_win=False
+                    )
+
+                    new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
+                    print(f"Player {player['name']} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+
+                    self.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "mmr": new_mmr,
+                            "losses": losses,
+                            "matches": matches_played,
+                            "last_updated": datetime.datetime.utcnow()
+                        }}
+                    )
+
+                    # Track MMR change for ranked loss
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": -mmr_loss,  # Negative for loss
+                        "is_win": False,
+                        "is_global": False
+                    })
             else:
-                # Logic for new player who loses their first match
-                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
-                starting_mmr = 600  # Default MMR
+                # New player logic
+                if is_global_match:
+                    # New player's first global match - loss
+                    # Logic for new player who loses their first global match
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                    starting_global_mmr = 300  # Default global MMR
 
-                if rank_record:
-                    tier = rank_record.get("tier", "Rank C")
-                    starting_mmr = self.TIER_MMR.get(tier, 600)
+                    if rank_record and "global_mmr" in rank_record:
+                        starting_global_mmr = rank_record.get("global_mmr", 300)
 
-                # Calculate first loss MMR
-                mmr_loss = self.calculate_dynamic_mmr(
-                    starting_mmr,
-                    player_team_avg,
-                    opponent_avg,
-                    1,  # First match
-                    is_win=False
-                )
+                    # Calculate first loss MMR
+                    mmr_loss = self.calculate_dynamic_mmr(
+                        starting_global_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        1,  # First match
+                        is_win=False
+                    )
 
-                new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
-                print(f"NEW PLAYER {player['name']} FIRST LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
+                    new_global_mmr = max(0, starting_global_mmr - mmr_loss)  # Don't go below 0
+                    print(
+                        f"NEW PLAYER {player['name']} FIRST GLOBAL LOSS: {starting_global_mmr} - {mmr_loss} = {new_global_mmr}")
 
-                self.players.insert_one({
-                    "id": player_id,
-                    "name": player["name"],
-                    "mmr": new_mmr,
-                    "wins": 0,
-                    "losses": 1,
-                    "matches": 1,
-                    "created_at": datetime.datetime.utcnow(),
-                    "last_updated": datetime.datetime.utcnow()
-                })
+                    # Get default ranked MMR from rank verification if available
+                    starting_ranked_mmr = 600  # Default ranked MMR
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_ranked_mmr = self.TIER_MMR.get(tier, 600)
 
-                # Track MMR change for new player
-                mmr_changes.append({
-                    "player_id": player_id,
-                    "old_mmr": starting_mmr,
-                    "new_mmr": new_mmr,
-                    "mmr_change": -mmr_loss,  # Negative for loss
-                    "is_win": False
-                })
+                    self.players.insert_one({
+                        "id": player_id,
+                        "name": player["name"],
+                        "mmr": starting_ranked_mmr,  # Default ranked MMR
+                        "global_mmr": new_global_mmr,  # Updated global MMR
+                        "wins": 0,
+                        "global_wins": 0,
+                        "losses": 0,
+                        "global_losses": 1,
+                        "matches": 0,
+                        "global_matches": 1,
+                        "created_at": datetime.datetime.utcnow(),
+                        "last_updated": datetime.datetime.utcnow()
+                    })
+
+                    # Track MMR change for global loss
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": starting_global_mmr,
+                        "new_mmr": new_global_mmr,
+                        "mmr_change": -mmr_loss,  # Negative for loss
+                        "is_win": False,
+                        "is_global": True
+                    })
+                else:
+                    # New player's first ranked match - loss
+                    # Logic for new player who loses their first match
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                    starting_mmr = 600  # Default MMR
+
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
+
+                    # Calculate first loss MMR
+                    mmr_loss = self.calculate_dynamic_mmr(
+                        starting_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        1,  # First match
+                        is_win=False
+                    )
+
+                    new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
+                    print(f"NEW PLAYER {player['name']} FIRST RANKED LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
+
+                    self.players.insert_one({
+                        "id": player_id,
+                        "name": player["name"],
+                        "mmr": new_mmr,  # Updated ranked MMR
+                        "global_mmr": 300,  # Default global MMR
+                        "wins": 0,
+                        "global_wins": 0,
+                        "losses": 1,
+                        "global_losses": 0,
+                        "matches": 1,
+                        "global_matches": 0,
+                        "created_at": datetime.datetime.utcnow(),
+                        "last_updated": datetime.datetime.utcnow()
+                    })
+
+                    # Track MMR change for ranked loss
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": starting_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": -mmr_loss,  # Negative for loss
+                        "is_win": False,
+                        "is_global": False
+                    })
 
         # Store the MMR changes in the match document
         self.matches.update_one(
@@ -402,6 +638,7 @@ class MatchSystem:
                 # Get updated MMR from database
                 player_data = self.players.find_one({"id": player_id})
                 if player_data:
+                    # Only update Discord role based on ranked MMR, not global MMR
                     mmr = player_data.get("mmr", 600)
                     # Update Discord role based on new MMR
                     await self.update_discord_role(ctx, player_id, mmr)
@@ -416,6 +653,7 @@ class MatchSystem:
                 # Get updated MMR from database
                 player_data = self.players.find_one({"id": player_id})
                 if player_data:
+                    # Only update Discord role based on ranked MMR, not global MMR
                     mmr = player_data.get("mmr", 600)
                     # Update Discord role based on new MMR
                     await self.update_discord_role(ctx, player_id, mmr)
@@ -864,4 +1102,24 @@ class MatchSystem:
     def get_player_stats(self, player_id):
         """Get stats for a specific player"""
         player = self.players.find_one({"id": player_id})
+
+        # If found, ensure it has global MMR fields
+        if player and "global_mmr" not in player:
+            # Update the player with default global MMR fields
+            self.players.update_one(
+                {"id": player_id},
+                {"$set": {
+                    "global_mmr": 300,
+                    "global_wins": 0,
+                    "global_losses": 0,
+                    "global_matches": 0
+                }}
+            )
+
+            # Update our player object with the new fields
+            player["global_mmr"] = 300
+            player["global_wins"] = 0
+            player["global_losses"] = 0
+            player["global_matches"] = 0
+
         return player

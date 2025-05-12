@@ -861,22 +861,31 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
             "is_new": True  # Flag to indicate this is a new player
         }
 
-    # Calculate stats
+        # Calculate stats - add global stats
     mmr = player_data.get("mmr", 0)
+    global_mmr = player_data.get("global_mmr", 300)  # Default global MMR to 300
     wins = player_data.get("wins", 0)
+    global_wins = player_data.get("global_wins", 0)
     losses = player_data.get("losses", 0)
+    global_losses = player_data.get("global_losses", 0)
     matches = player_data.get("matches", 0)
+    global_matches = player_data.get("global_matches", 0)
     is_new = player_data.get("is_new", False)
 
+    # Calculate win rates
     win_rate = 0
     if matches > 0:
         win_rate = (wins / matches) * 100
+
+    global_win_rate = 0
+    if global_matches > 0:
+        global_win_rate = (global_wins / global_matches) * 100
 
     # Get player's rank position only if they've played games
     rank_position = "Unranked"
     total_players = 0
 
-    if not is_new:
+    if not is_new and matches > 0:
         all_players = list(match_system.players.find().sort("mmr", -1))
         total_players = len(all_players)
 
@@ -884,6 +893,16 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
         for i, p in enumerate(all_players):
             if p["id"] == player_id:
                 rank_position = i + 1
+                break
+
+    # Get global rank position if they've played global games
+    global_rank_position = "Unranked"
+    if global_matches > 0:
+        global_players = list(match_system.players.find({"global_matches": {"$gt": 0}}).sort("global_mmr", -1))
+        # Get the position using the player's ID
+        for i, p in enumerate(global_players):
+            if p["id"] == player_id:
+                global_rank_position = i + 1
                 break
 
     # Create embed
@@ -896,7 +915,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     tier = "Rank C"
     if mmr >= 1600:
         tier = "Rank A"
-    elif mmr >= 1110:
+    elif mmr >= 1100:
         tier = "Rank B"
 
     tier_color = 0x1287438  # Default color for Rank C (green)
@@ -907,7 +926,8 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 
     embed.color = tier_color
 
-    # Add rank badge field
+    # Add ranked section
+    embed.add_field(name="__Ranked Stats__", value="", inline=False)
     embed.add_field(name="Rank", value=tier, inline=True)
 
     if matches > 0:
@@ -919,6 +939,19 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     embed.add_field(name="Win Rate", value=f"{win_rate:.1f}%" if matches > 0 else "N/A", inline=True)
     embed.add_field(name="Record", value=f"{wins}W - {losses}L", inline=True)
     embed.add_field(name="Matches", value=str(matches), inline=True)
+
+    # Add global section
+    embed.add_field(name="__Global Stats__", value="", inline=False)
+
+    if global_matches > 0:
+        embed.add_field(name="Global Rank", value=f"#{global_rank_position}", inline=True)
+    else:
+        embed.add_field(name="Global Rank", value="Unranked (0 games)", inline=True)
+
+    embed.add_field(name="Global MMR", value=str(global_mmr), inline=True)
+    embed.add_field(name="Win Rate", value=f"{global_win_rate:.1f}%" if global_matches > 0 else "N/A", inline=True)
+    embed.add_field(name="Record", value=f"{global_wins}W - {global_losses}L", inline=True)
+    embed.add_field(name="Matches", value=str(global_matches), inline=True)
 
     # Add note for new players
     if is_new:

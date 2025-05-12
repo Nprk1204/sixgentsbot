@@ -23,7 +23,7 @@
 
 <!-- Stats Section -->
 <div class="row mb-4">
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="stat-card primary">
             <div class="stat-card-icon">
                 <i class="fas fa-users"></i>
@@ -33,7 +33,7 @@
         </div>
     </div>
 
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="stat-card secondary">
             <div class="stat-card-icon">
                 <i class="fas fa-gamepad"></i>
@@ -43,27 +43,47 @@
         </div>
     </div>
 
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="stat-card accent">
+            <div class="stat-card-icon">
+                <i class="fas fa-globe"></i>
+            </div>
+            <div class="stat-card-value">{{ global_match_count }}</div>
+            <div class="stat-card-title">Global Matches</div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="stat-card">
             <div class="stat-card-icon">
                 <i class="fas fa-server"></i>
             </div>
             <div class="stat-card-value">1</div>
-            <div class="stat-card-title">Active Servers</div>
+            <div class="stat-card-title">Active Server</div>
         </div>
     </div>
 </div>
 
 <!-- Featured Players and Recent Matches -->
-<div class="row">
-    <!-- Featured Players -->
-    <div class="col-lg-6">
-        <div class="content-container">
-            <div class="content-header">
-                <h2>Featured Players</h2>
-                <a href="{{ url_for('leaderboard') }}" class="btn btn-sm btn-outline-primary">View All</a>
-            </div>
+<div class="content-container">
+    <ul class="nav nav-tabs mb-3" id="featuredPlayersTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
+                    data-bs-target="#ranked-players" type="button" role="tab">
+                Ranked Players
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="global-tab" data-bs-toggle="tab"
+                    data-bs-target="#global-players" type="button" role="tab">
+                Global Players
+            </button>
+        </li>
+    </ul>
 
+    <div class="tab-content">
+        <!-- Ranked Players Tab -->
+        <div class="tab-pane fade show active" id="ranked-players" role="tabpanel">
             <div class="row">
                 {% for player in featured_players %}
                 <div class="col-md-6">
@@ -95,7 +115,42 @@
                 {% endfor %}
             </div>
         </div>
+
+        <!-- Global Players Tab -->
+        <div class="tab-pane fade" id="global-players" role="tabpanel">
+            <div class="row">
+                {% for player in featured_global_players %}
+                <div class="col-md-6">
+                    <div class="featured-player" data-player-id="{{ player.id }}">
+                        <div class="featured-player-header">
+                            {{ player.name }}
+                        </div>
+
+                        <div class="featured-player-body">
+                            <div class="featured-player-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.mmr }}</span>
+                                    <span class="stat-label">Global MMR</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.win_rate }}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.global_matches }}</span>
+                                    <span class="stat-label">Matches</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
     </div>
+</div>
 
     <!-- Recent Matches -->
     <div class="col-lg-6">
@@ -109,7 +164,12 @@
                 <div class="match-card">
                     <div class="match-header">
                         <span class="match-date">{{ match.date }}</span>
-                        <span class="match-id">Match ID: {{ match.match_id }}</span>
+                        <div>
+                            {% if match.is_global %}
+                            <span class="badge bg-info me-2">Global</span>
+                            {% endif %}
+                            <span class="match-id">Match ID: {{ match.match_id }}</span>
+                        </div>
                     </div>
                     <div class="match-body">
                         <div class="team team1 {% if match.winner == 1 %}team-winner{% endif %}">
