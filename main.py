@@ -206,7 +206,12 @@ async def on_ready():
     print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
     # Sync command tree with Discord
-    await bot.tree.sync()
+    print("Attempting to sync application commands...")
+    try:
+        await bot.tree.sync()
+        print("Successfully synced application commands")
+    except Exception as e:
+        print(f"Error syncing application commands: {e}")
 
 
 @bot.event
