@@ -220,27 +220,24 @@ async def on_reaction_add(reaction, user):
 
 
 # Queue commands
-@bot.command()
-async def queue(ctx):
-    """Join the queue for 6 mans"""
-    # Check if this is a duplicate command
-    if await is_duplicate_command(ctx):
-        return
-
+@bot.tree.command(name="queue", description="Join the queue for 6 mans")
+async def queue_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
-    if not is_queue_channel(ctx):
-        await ctx.send(
-            f"{ctx.author.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.")
+    if not is_queue_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
+            ephemeral=True
+        )
         return
 
     # Check if the player has completed rank verification
-    player = ctx.author
+    player = interaction.user
     player_id = str(player.id)
 
     # Get all rank roles
-    rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
-    rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
-    rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+    rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+    rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+    rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
     has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
 
     # Check if player has a rank entry in the database OR has a rank role
@@ -259,7 +256,7 @@ async def queue(ctx):
             value="Visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await ctx.send(embed=embed)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
     # If player has role but no database record, create one based on their role
@@ -289,16 +286,16 @@ async def queue(ctx):
         print(f"Created rank record for {player.display_name} with tier {tier}")
 
     # Continue with regular join process
-    channel_id = ctx.channel.id
+    channel_id = interaction.channel.id
     response = queue_handler.add_player(player, channel_id)
-    await ctx.send(response)
+    await interaction.response.send_message(response)
 
     # Check if queue is full and start voting
     players = queue_handler.get_players_for_match(channel_id)
     if len(players) >= 6:
         # Check if voting is already active for this channel
         if not vote_system.is_voting_active(channel_id):
-            await vote_system.start_vote(ctx.channel)
+            await vote_system.start_vote(interaction.channel)
 
 
 @bot.command()
