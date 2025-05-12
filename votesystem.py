@@ -271,6 +271,10 @@ class VoteSystem:
     # New method to create balanced random teams
     async def create_balanced_random_teams(self, channel, players, channel_id):
         """Create balanced random teams instead of completely random"""
+        # Check if this is a global match by examining the channel name
+        is_global = channel.name.lower() == "global"
+        print(f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}")
+
         # Get MMR for each player (real or dummy)
         player_mmrs = []
         for player in players:
@@ -358,7 +362,8 @@ class VoteSystem:
             str(uuid.uuid4()),
             team1,
             team2,
-            channel_id
+            channel_id,
+            is_global
         )
 
         # Create an embed for team announcement

@@ -24,14 +24,19 @@ class MatchSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def create_match(self, match_id, team1, team2, channel_id):
+    def create_match(self, match_id, team1, team2, channel_id, is_global=None):
         """Create a new match entry"""
         # Generate a shorter match ID that's easier for users to type
         short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
 
-        # Determine if this is a global match based on channel name
-        channel = self.bot.get_channel(int(channel_id)) if self.bot else None
-        is_global = channel and channel.name.lower() == "global"
+        # Use provided is_global flag or fall back to detection
+        if is_global is None:
+            # Only try to determine if not explicitly provided
+            channel = self.bot.get_channel(int(channel_id)) if self.bot else None
+            is_global = channel and channel.name.lower() == "global"
+
+        # Debug print
+        print(f"Created match with ID: {short_id}, status: in_progress, is_global: {is_global}")
 
         match_data = {
             "match_id": short_id,  # Use the shorter ID
