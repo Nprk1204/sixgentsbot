@@ -86,13 +86,6 @@ class CaptainsSystem:
 
         print(f"Captain selection for channel: {channel.name}, is_global: {is_global}")
 
-        # When creating match, pass the is_global parameter
-        match_id = self.match_system.create_match(
-            # other parameters...
-            channel_id,
-            is_global=is_global
-        )
-
         # Check if selection is active for this channel
         if not self.is_selection_active(channel_id):
             return
@@ -185,7 +178,8 @@ class CaptainsSystem:
                 str(uuid.uuid4()),
                 captain1_team,
                 captain2_team,
-                channel_id
+                channel_id,
+                is_global=is_global
             )
 
             # Create team announcement embed
