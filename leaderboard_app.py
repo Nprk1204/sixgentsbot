@@ -42,7 +42,11 @@ print("===================================\n")
 
 # Session config
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
-app.config['SESSION_TYPE'] = 'filesystem'
+
+# Secure cookie settings
+app.config['SESSION_COOKIE_SECURE'] = True  # Only send cookies over HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Restrict cross-site requests
 
 # User login requirement decorator
 def login_required(f):
@@ -77,8 +81,12 @@ def discord_login():
 # Discord OAuth2 callback route
 @app.route('/callback')
 def discord_callback():
+    print("\n=== CALLBACK DEBUG ===")
+    print("Received callback with args:", dict(request.args))
+
     code = request.args.get('code')
     if not code:
+        print("No authorization code received!")
         flash('Authentication failed: No authorization code received', 'danger')
         return redirect(url_for('home'))
 
@@ -117,6 +125,9 @@ def discord_callback():
 
     user_data = user_response.json()
 
+    # Before storing in session
+    print("About to store user in session:", user_data.get('username'))
+
     # Store in session
     session['discord_user'] = {
         'id': user_data.get('id'),
@@ -126,6 +137,11 @@ def discord_callback():
             'avatar') else "https://cdn.discordapp.com/embed/avatars/0.png",
         'access_token': access_token
     }
+
+    # After storing in session
+    print("Session now contains:", list(session.keys()))
+    print("User now in session:", 'discord_user' in session)
+    print("======================\n")
 
     # Check if user is in the required Discord server
     guilds_response = requests.get(
@@ -349,6 +365,16 @@ except Exception as e:
 @app.route('/')
 def home():
     """Display the home page with stats and featured players"""
+    # Added debug logging
+    print("\n=== SESSION DEBUG INFO ===")
+    print("Session contains keys:", list(session.keys()))
+    print("User logged in:", 'discord_user' in session)
+    if 'discord_user' in session:
+        print("Username:", session['discord_user'].get('username'))
+    else:
+        print("No user in session")
+    print("=========================\n")
+
     # Get total player count
     player_count = players_collection.count_documents({})
 
