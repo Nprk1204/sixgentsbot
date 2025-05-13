@@ -8,6 +8,30 @@
         <h2>Rocket League Rank Check</h2>
     </div>
 
+    {% if discord_user %}
+    <div class="alert alert-info mb-4">
+        <div class="d-flex align-items-center">
+            <div class="me-3">
+                <img src="{{ discord_user.avatar_url }}" alt="{{ discord_user.username }}" class="rounded-circle" style="width: 48px; height: 48px;">
+            </div>
+            <div>
+                <h5 class="mb-1">Hello, {{ discord_user.username }}!</h5>
+                <p class="mb-0">Your Discord account is connected. We'll automatically update your Discord role based on your rank.</p>
+            </div>
+        </div>
+    </div>
+    <!-- Pre-fill Discord username in the form -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const discordUsernameField = document.getElementById('discordUsername');
+            if (discordUsernameField) {
+                discordUsernameField.value = "{{ discord_user.username }}";
+                discordUsernameField.readOnly = true;
+            }
+        });
+    </script>
+    {% endif %}
+
     <div class="row mb-4">
         <div class="col-lg-6">
             <div class="card bg-dark-medium mb-4">

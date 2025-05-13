@@ -64,6 +64,95 @@
     </div>
 </div>
 
+<div class="content-container mb-4">
+    <div class="content-header">
+        <h2>Discord Integration</h2>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fab fa-discord me-2"></i> Account Connection
+                </div>
+                <div class="card-body">
+                    {% if discord_user %}
+                    <div class="d-flex align-items-center mb-3">
+                        <img src="{{ discord_user.avatar_url }}" alt="{{ discord_user.username }}" class="rounded-circle me-3" style="width: 64px; height: 64px;">
+                        <div>
+                            <h5 class="mb-1">{{ discord_user.username }}</h5>
+                            <p class="mb-0 text-muted">#{{ discord_user.discriminator }}</p>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success">
+                        <i class="fas fa-check-circle me-2"></i> Your Discord account is connected!
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('profile') }}" class="btn btn-discord">
+                            <i class="fas fa-user me-2"></i> View Your Profile
+                        </a>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4">
+                        <div class="mb-3">
+                            <i class="fab fa-discord fa-4x text-muted"></i>
+                        </div>
+                        <h5>Connect Your Discord Account</h5>
+                        <p>Link your Discord account to access personalized features:</p>
+                        <ul class="text-start mb-4">
+                            <li>View your personal stats and match history</li>
+                            <li>Monitor active queues in real-time</li>
+                            <li>Automatic rank verification</li>
+                        </ul>
+                        <a href="{{ url_for('discord_login') }}" class="btn btn-lg btn-discord">
+                            <i class="fab fa-discord me-2"></i> Login with Discord
+                        </a>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+                <div class="card-header">
+                    <i class="fas fa-gamepad me-2"></i> Queue Status
+                </div>
+                <div class="card-body">
+                    {% if discord_user %}
+                    <div class="queue-status-cards">
+                        {% for channel in ['rank-a', 'rank-b', 'rank-c', 'global'] %}
+                        <div class="queue-status-card mb-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">{{ channel|replace('-', ' ')|title }}</h6>
+                                <span class="badge bg-primary queue-count" data-channel="{{ channel }}">Loading...</span>
+                            </div>
+                            <div class="progress mt-2" style="height: 10px;">
+                                <div class="progress-bar bg-primary queue-progress" role="progressbar" style="width: 0%;"
+                                    data-channel="{{ channel }}" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="d-grid gap-2 mt-4">
+                        <a href="{{ url_for('queue_monitor') }}" class="btn btn-discord">
+                            <i class="fas fa-list me-2"></i> View Full Queue Monitor
+                        </a>
+                    </div>
+                    {% else %}
+                    <div class="text-center py-4">
+                        <p class="mb-0 text-muted">Login with Discord to see active queue status</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Featured Players and Recent Matches -->
 <div class="content-container">
     <ul class="nav nav-tabs mb-3" id="featuredPlayersTabs" role="tablist">
@@ -500,4 +589,67 @@
             });
     }
 </script>
+
+{{ super() }}
+{% if discord_user %}
+<script>
+    // Function to update queue status
+    function updateQueueStatus() {
+        fetch('/api/queue-status')
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const queueData = data.data;
+
+                    // Update each queue's status
+                    for (const channel in queueData) {
+                        const channelData = queueData[channel];
+
+                        // Update count badge
+                        const countElement = document.querySelector(`.queue-count[data-channel="${channel}"]`);
+                        if (countElement) {
+                            countElement.textContent = `${channelData.count}/6 Players`;
+
+                            // Update badge color based on status
+                            countElement.className = countElement.className.replace(/bg-\w+/, '');
+                            if (channelData.status === 'full') {
+                                countElement.classList.add('bg-success');
+                            } else if (channelData.status === 'waiting') {
+                                countElement.classList.add('bg-warning');
+                            } else {
+                                countElement.classList.add('bg-secondary');
+                            }
+                        }
+
+                        // Update progress bar
+                        const progressElement = document.querySelector(`.queue-progress[data-channel="${channel}"]`);
+                        if (progressElement) {
+                            progressElement.style.width = `${channelData.percent}%`;
+                            progressElement.setAttribute('aria-valuenow', channelData.percent);
+
+                            // Update progress bar color
+                            progressElement.className = progressElement.className.replace(/bg-\w+/, '');
+                            if (channelData.status === 'full') {
+                                progressElement.classList.add('bg-success');
+                            } else if (channelData.status === 'waiting') {
+                                progressElement.classList.add('bg-warning');
+                            } else {
+                                progressElement.classList.add('bg-secondary');
+                            }
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error updating queue status:', error);
+            });
+    }
+
+    // Update immediately and then every 10 seconds
+    document.addEventListener('DOMContentLoaded', function() {
+        updateQueueStatus();
+        setInterval(updateQueueStatus, 10000);
+    });
+</script>
+{% endif %}
 {% endblock %}
