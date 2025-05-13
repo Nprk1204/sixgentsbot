@@ -16,6 +16,7 @@ from flask import Flask, render_template, jsonify, request, redirect, url_for, f
 from functools import wraps
 from urllib.parse import urlencode
 from queue_handler import QueueHandler
+from datetime import timedelta
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -33,18 +34,31 @@ DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.
 DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
 
 # Debug environment variables
-print("\n=== ENVIRONMENT VARIABLES DEBUG ===")
-print(f"DISCORD_TOKEN exists: {'Yes' if DISCORD_TOKEN else 'No'}")
-print(f"DISCORD_TOKEN length: {len(DISCORD_TOKEN) if DISCORD_TOKEN else 0}")
-print(f"DISCORD_GUILD_ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
-print(f"DISCORD_GUILD_ID value: '{DISCORD_GUILD_ID}'")
-print("===================================\n")
+print("\n=== CRITICAL ENVIRONMENT VARIABLES CHECK ===")
+if not DISCORD_CLIENT_SECRET:
+    print("WARNING: DISCORD_CLIENT_SECRET is not set. Discord authentication will fail!")
+else:
+    print("DISCORD_CLIENT_SECRET is set ✓")
+
+if not DISCORD_REDIRECT_URI:
+    print("WARNING: DISCORD_REDIRECT_URI is not set. Discord authentication will fail!")
+else:
+    print(f"Using redirect URI: {DISCORD_REDIRECT_URI} ✓")
+
+if not DISCORD_CLIENT_ID:
+    print("WARNING: DISCORD_CLIENT_ID is not set. Discord authentication will fail!")
+else:
+    print(f"DISCORD_CLIENT_ID is set ✓")
+print("=======================================\n")
 
 # Session config
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'd0eedfeb52dee80f603650825b98f78b')
 
 # Secure cookie settings
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_TYPE'] = 'filesystem'
+app.config['SESSION_PERMANENT'] = True
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Keep sessions for 7 days
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # True in production only
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
@@ -77,7 +91,7 @@ def discord_login():
         'client_id': DISCORD_CLIENT_ID,
         'redirect_uri': DISCORD_REDIRECT_URI,
         'response_type': 'code',
-        'scope': 'identify guilds'  # Add additional scopes as needed
+        'scope': 'identify guilds'  # These are the permissions we need
     }
     return redirect(oauth2_url + urlencode(params))
 
@@ -110,12 +124,22 @@ def discord_callback():
 
     response = requests.post(f'{DISCORD_API_ENDPOINT}/oauth2/token', data=data, headers=headers)
 
+    # Add additional debugging
+    print(f"Token response status: {response.status_code}")
+    print(f"Token response content: {response.text[:100]}...")  # Print first 100 chars to avoid sensitive data
+
     if response.status_code != 200:
+        print(f"Failed to obtain token: {response.status_code}")
         flash('Authentication failed: Could not retrieve access token', 'danger')
         return redirect(url_for('home'))
 
     tokens = response.json()
     access_token = tokens.get('access_token')
+
+    if not access_token:
+        print("No access token in response")
+        flash('Authentication failed: Missing access token in response', 'danger')
+        return redirect(url_for('home'))
 
     # Get user information
     user_response = requests.get(
@@ -123,14 +147,18 @@ def discord_callback():
         headers={'Authorization': f'Bearer {access_token}'}
     )
 
+    print(f"User info response status: {user_response.status_code}")
+
     if user_response.status_code != 200:
+        print(f"Failed to retrieve user info: {user_response.status_code}")
         flash('Authentication failed: Could not retrieve user information', 'danger')
         return redirect(url_for('home'))
 
     user_data = user_response.json()
+    print(f"User data: {user_data.get('username')}, ID: {user_data.get('id')}")
 
-    # Before storing in session
-    print("About to store user in session:", user_data.get('username'))
+    # Ensure session is cleared before setting new data
+    session.clear()
 
     # Store in session
     session['discord_user'] = {
@@ -142,11 +170,10 @@ def discord_callback():
         'access_token': access_token
     }
 
-    # After storing in session
-    print(f"Session cookie will be set with these settings:")
-    print(f"  Secure: {app.config.get('SESSION_COOKIE_SECURE')}")
-    print(f"  HttpOnly: {app.config.get('SESSION_COOKIE_HTTPONLY')}")
-    print(f"  SameSite: {app.config.get('SESSION_COOKIE_SAMESITE')}")
+    # Force save the session
+    session.modified = True
+
+    print(f"Session after setting: {session.get('discord_user', {}).get('username')}")
 
     # Check if user is in the required Discord server
     guilds_response = requests.get(
@@ -158,6 +185,7 @@ def discord_callback():
         guilds = guilds_response.json()
         in_server = any(g.get('id') == DISCORD_GUILD_ID for g in guilds)
         session['discord_user']['in_server'] = in_server
+        session.modified = True  # Force save again after modification
 
     flash('Successfully logged in with Discord!', 'success')
     return redirect(url_for('home'))
@@ -166,7 +194,9 @@ def discord_callback():
 # Logout route
 @app.route('/logout')
 def logout():
+    print("Logging out user:", session.get('discord_user', {}).get('username'))
     session.pop('discord_user', None)
+    session.clear()  # Fully clear the session
     flash('You have been logged out', 'info')
     return redirect(url_for('home'))
 
@@ -367,6 +397,30 @@ except Exception as e:
 
 
 # Routes
+
+@app.route('/debug-session')
+def debug_session():
+    """Debug endpoint to check session state"""
+    print("DEBUG SESSION CONTENTS:", dict(session))
+
+    if 'discord_user' in session:
+        return jsonify({
+            "logged_in": True,
+            "user": {
+                "id": session['discord_user'].get('id'),
+                "username": session['discord_user'].get('username'),
+                "discriminator": session['discord_user'].get('discriminator', '0000'),
+                "in_server": session['discord_user'].get('in_server', False),
+                "has_avatar": 'avatar_url' in session['discord_user']
+            },
+            "session_keys": list(session.keys())
+        })
+    else:
+        return jsonify({
+            "logged_in": False,
+            "session_keys": list(session.keys())
+        })
+
 @app.route('/')
 def home():
     """Display the home page with stats and featured players"""
