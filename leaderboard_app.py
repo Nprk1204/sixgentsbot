@@ -10,13 +10,6 @@ from functools import lru_cache
 from dotenv import load_dotenv
 import functools
 import re
-import os
-import requests
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session
-from functools import wraps
-from urllib.parse import urlencode
-from queue_handler import QueueHandler
-from datetime import timedelta
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -28,255 +21,15 @@ MONGO_URI = os.getenv('MONGO_URI')
 RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
 DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '1365506343015944222')  # Provide hardcoded fallback
-DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1365584495989751889')
-DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET')
-DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.onrender.com/callback')
-DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
 
 # Debug environment variables
-print("\n=== CRITICAL ENVIRONMENT VARIABLES CHECK ===")
-if not DISCORD_CLIENT_SECRET:
-    print("WARNING: DISCORD_CLIENT_SECRET is not set. Discord authentication will fail!")
-else:
-    print("DISCORD_CLIENT_SECRET is set ✓")
+print("\n=== ENVIRONMENT VARIABLES DEBUG ===")
+print(f"DISCORD_TOKEN exists: {'Yes' if DISCORD_TOKEN else 'No'}")
+print(f"DISCORD_TOKEN length: {len(DISCORD_TOKEN) if DISCORD_TOKEN else 0}")
+print(f"DISCORD_GUILD_ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
+print(f"DISCORD_GUILD_ID value: '{DISCORD_GUILD_ID}'")
+print("===================================\n")
 
-if not DISCORD_REDIRECT_URI:
-    print("WARNING: DISCORD_REDIRECT_URI is not set. Discord authentication will fail!")
-else:
-    print(f"Using redirect URI: {DISCORD_REDIRECT_URI} ✓")
-
-if not DISCORD_CLIENT_ID:
-    print("WARNING: DISCORD_CLIENT_ID is not set. Discord authentication will fail!")
-else:
-    print(f"DISCORD_CLIENT_ID is set ✓")
-print("=======================================\n")
-
-# Session config
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'd0eedfeb52dee80f603650825b98f78b')
-
-# Secure cookie settings
-app.config['SESSION_TYPE'] = 'filesystem'
-app.config['SESSION_PERMANENT'] = True
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Keep sessions for 7 days
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'  # True in production only
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-
-# User login requirement decorator
-def login_required(f):
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'discord_user' not in session:
-            return redirect(url_for('discord_login'))
-        return f(*args, **kwargs)
-
-    return decorated_function
-
-
-# Add Discord user data to all templates
-@app.context_processor
-def inject_discord_user():
-    return {'discord_user': session.get('discord_user')}
-
-
-# Discord OAuth2 login route
-@app.route('/discord-login')
-def discord_login():
-    # Clear any existing session first (force logout)
-    session.clear()
-    print("Session cleared before login")
-
-    oauth2_url = f'{DISCORD_API_ENDPOINT}/oauth2/authorize?'
-    params = {
-        'client_id': DISCORD_CLIENT_ID,
-        'redirect_uri': DISCORD_REDIRECT_URI,
-        'response_type': 'code',
-        'scope': 'identify guilds'  # These are the permissions we need
-    }
-    return redirect(oauth2_url + urlencode(params))
-
-
-# Discord OAuth2 callback route
-@app.route('/callback')
-def discord_callback():
-    print("\n=== CALLBACK DEBUG ===")
-    print("Received callback with args:", dict(request.args))
-
-    code = request.args.get('code')
-    if not code:
-        print("No authorization code received!")
-        flash('Authentication failed: No authorization code received', 'danger')
-        return redirect(url_for('home'))
-
-    # Exchange code for access token
-    data = {
-        'client_id': DISCORD_CLIENT_ID,
-        'client_secret': DISCORD_CLIENT_SECRET,
-        'grant_type': 'authorization_code',
-        'code': code,
-        'redirect_uri': DISCORD_REDIRECT_URI,
-        'scope': 'identify guilds'
-    }
-
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
-
-    response = requests.post(f'{DISCORD_API_ENDPOINT}/oauth2/token', data=data, headers=headers)
-
-    # Add additional debugging
-    print(f"Token response status: {response.status_code}")
-    print(f"Token response content: {response.text[:100]}...")  # Print first 100 chars to avoid sensitive data
-
-    if response.status_code != 200:
-        print(f"Failed to obtain token: {response.status_code}")
-        flash('Authentication failed: Could not retrieve access token', 'danger')
-        return redirect(url_for('home'))
-
-    tokens = response.json()
-    access_token = tokens.get('access_token')
-
-    if not access_token:
-        print("No access token in response")
-        flash('Authentication failed: Missing access token in response', 'danger')
-        return redirect(url_for('home'))
-
-    # Get user information
-    user_response = requests.get(
-        f'{DISCORD_API_ENDPOINT}/users/@me',
-        headers={'Authorization': f'Bearer {access_token}'}
-    )
-
-    print(f"User info response status: {user_response.status_code}")
-
-    if user_response.status_code != 200:
-        print(f"Failed to retrieve user info: {user_response.status_code}")
-        flash('Authentication failed: Could not retrieve user information', 'danger')
-        return redirect(url_for('home'))
-
-    user_data = user_response.json()
-    print(f"User data: {user_data.get('username')}, ID: {user_data.get('id')}")
-
-    # Ensure session is cleared before setting new data
-    session.clear()
-
-    # Store in session
-    session['discord_user'] = {
-        'id': user_data.get('id'),
-        'username': user_data.get('username'),
-        'discriminator': user_data.get('discriminator', '0000'),
-        'avatar_url': f"https://cdn.discordapp.com/avatars/{user_data.get('id')}/{user_data.get('avatar')}.png" if user_data.get(
-            'avatar') else "https://cdn.discordapp.com/embed/avatars/0.png",
-        'access_token': access_token
-    }
-
-    # Force save the session
-    session.modified = True
-
-    print(f"Session after setting: {session.get('discord_user', {}).get('username')}")
-
-    # Check if user is in the required Discord server
-    guilds_response = requests.get(
-        f'{DISCORD_API_ENDPOINT}/users/@me/guilds',
-        headers={'Authorization': f'Bearer {access_token}'}
-    )
-
-    if guilds_response.status_code == 200:
-        guilds = guilds_response.json()
-        in_server = any(g.get('id') == DISCORD_GUILD_ID for g in guilds)
-        session['discord_user']['in_server'] = in_server
-        session.modified = True  # Force save again after modification
-
-    flash('Successfully logged in with Discord!', 'success')
-    return redirect(url_for('home'))
-
-
-# Logout route
-@app.route('/logout')
-def logout():
-    print("Logging out user:", session.get('discord_user', {}).get('username'))
-    session.pop('discord_user', None)
-    session.clear()  # Fully clear the session
-    flash('You have been logged out', 'info')
-    return redirect(url_for('home'))
-
-
-# Profile page for linked Discord account
-@app.route('/profile')
-@login_required
-def profile():
-    discord_user = session.get('discord_user', {})
-
-    # Get user's player data from database
-    player_data = players_collection.find_one({"id": discord_user.get('id')})
-
-    # Get user's rank data
-    rank_record = db.get_collection('ranks').find_one({"discord_id": discord_user.get('id')})
-
-    # Get user's recent matches
-    recent_matches = list(matches_collection.find(
-        {"$or": [
-            {"team1.id": discord_user.get('id')},
-            {"team2.id": discord_user.get('id')}
-        ], "status": "completed"},
-        {"_id": 0}
-    ).sort("completed_at", -1).limit(10))
-
-    return render_template('profile.html',
-                           player=player_data,
-                           rank=rank_record,
-                           recent_matches=recent_matches)
-
-
-@app.route('/api/queue-status')
-def queue_status_api():
-    """API endpoint to get current queue status for all channels"""
-    try:
-        # Check if request has valid API token or user is logged in
-        if 'discord_user' not in session:
-            api_key = request.args.get('api_key')
-            if not api_key or api_key != os.getenv('API_KEY'):
-                return jsonify({"error": "Unauthorized"}), 401
-
-        # Get queue data for all channels
-        queue_data = {}
-        queue_channels = ["rank-a", "rank-b", "rank-c", "global"]
-
-        for channel in queue_channels:
-            # Count players in each queue
-            count = queue_handler.queue_collection.count_documents({"channel": channel})
-            queue_data[channel] = {
-                "count": count,
-                "max": 6,
-                "percent": round((count / 6) * 100),
-                "status": "full" if count >= 6 else "waiting" if count > 0 else "empty"
-            }
-
-        return jsonify({
-            "success": True,
-            "data": queue_data,
-            "updated_at": datetime.datetime.now().isoformat()
-        })
-
-    except Exception as e:
-        print(f"Error getting queue status: {str(e)}")
-        return jsonify({"error": "Internal server error"}), 500
-
-
-# Queue monitoring page (requires login)
-@app.route('/queue-monitor')
-@login_required
-def queue_monitor():
-    # Get all active queues
-    active_queues = {}
-    queue_channels = ["rank-a", "rank-b", "rank-c", "global"]
-
-    for channel in queue_channels:
-        # Query queue data for each channel
-        players = list(queue_handler.queue_collection.find({"channel": channel}))
-        active_queues[channel] = players
-
-    return render_template('queue_monitor.html', queues=active_queues)
 
 # Simple cache implementation
 class SimpleCache:
@@ -344,22 +97,6 @@ try:
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
-    # After the MongoDB connection is established and db is created
-    try:
-        queue_handler = QueueHandler(db)
-        print("Queue handler initialized successfully!")
-    except Exception as e:
-        print(f"Error initializing queue handler: {e}")
-
-
-        # Create a fallback implementation
-        class FallbackQueueHandler:
-            def __init__(self):
-                self.queue_collection = db.get_collection('queues')
-
-
-        queue_handler = FallbackQueueHandler()
-
 
     # Fallback data for development if MongoDB connection fails
     class FallbackDB:
@@ -397,43 +134,9 @@ except Exception as e:
 
 
 # Routes
-
-@app.route('/debug-session')
-def debug_session():
-    """Debug endpoint to check session state"""
-    print("DEBUG SESSION CONTENTS:", dict(session))
-
-    if 'discord_user' in session:
-        return jsonify({
-            "logged_in": True,
-            "user": {
-                "id": session['discord_user'].get('id'),
-                "username": session['discord_user'].get('username'),
-                "discriminator": session['discord_user'].get('discriminator', '0000'),
-                "in_server": session['discord_user'].get('in_server', False),
-                "has_avatar": 'avatar_url' in session['discord_user']
-            },
-            "session_keys": list(session.keys())
-        })
-    else:
-        return jsonify({
-            "logged_in": False,
-            "session_keys": list(session.keys())
-        })
-
 @app.route('/')
 def home():
     """Display the home page with stats and featured players"""
-    # Added debug logging
-    print("\n=== SESSION DEBUG INFO ===")
-    print("Session contains keys:", list(session.keys()))
-    print("User logged in:", 'discord_user' in session)
-    if 'discord_user' in session:
-        print("Username:", session['discord_user'].get('username'))
-    else:
-        print("No user in session")
-    print("=========================\n")
-
     # Get total player count
     player_count = players_collection.count_documents({})
 
@@ -529,6 +232,15 @@ def leaderboard():
 def leaderboard_by_type(board_type):
     """Display the leaderboard page for a specific type"""
     return render_template('leaderboard.html', board_type=board_type)
+
+
+@app.route('/rank-check')
+def rank_check():
+    """Display the rank check page"""
+    # Get all discord roles
+    roles = ["Rank A", "Rank B", "Rank C"]
+
+    return render_template('rank_check.html', roles=roles)
 
 
 @app.route('/api/leaderboard')
@@ -1055,14 +767,9 @@ def check_rank():
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
+    discord_id = request.args.get('discord_id', '')  # Add this if possible
     manual_tier = request.args.get('manual_tier', '')
     manual_mmr = request.args.get('manual_mmr', '')
-
-    # Check if user is logged in with Discord - use that ID if available
-    discord_id = None
-    if 'discord_user' in session:
-        discord_id = session['discord_user'].get('id')
-        discord_username = session['discord_user'].get('username')
 
     # Debug logging
     print(f"=== RANK CHECK DEBUG ===")
@@ -1119,11 +826,6 @@ def check_rank():
         mock_data["role_assignment"] = role_result
 
     return jsonify(mock_data)
-
-@app.route('/rank-check')
-def rank_check():
-    """Display the rank check page"""
-    return render_template('rank_check.html')
 
 
 @app.route('/api/user-rank/<discord_username>')

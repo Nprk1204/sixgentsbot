@@ -1,273 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Rocket League 6 Gents{% endblock %}</title>
 
-    <!-- Bootstrap 5.3 CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
 
-    <!-- Google Fonts - Inter (modern, clean font) -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <!-- Font Awesome 6 -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <!-- Custom CSS -->
-    <style>
-        :root {
-            --primary: #5865f2;      /* Discord blue */
-            --primary-dark: #4752c4;
-            --secondary: #36393f;    /* Discord dark */
-            --dark: #202225;         /* Discord darker */
-            --light: #ffffff;
-            --muted: #8e9297;
-            --success: #43b581;
-            --danger: #f04747;
-            --warning: #faa61a;
-            --border: #2c2f33;
-            --card-bg: #2f3136;
-        }
-
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: var(--dark);
-            color: var(--light);
-            line-height: 1.6;
-        }
-
-        /* Modern header with gradient */
-        .main-header {
-            background: linear-gradient(90deg, #5865f2 0%, #7289da 100%);
-            padding: 2rem 0;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        }
-
-        .site-title {
-            font-weight: 800;
-            margin: 0;
-            font-size: 2.5rem;
-        }
-
-        .site-subtitle {
-            font-weight: 500;
-            opacity: 0.9;
-        }
-
-        /* Navigation bar */
-        .main-nav {
-            background-color: var(--secondary);
-            border-radius: 8px;
-            margin-bottom: 2rem;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .main-nav .nav-link {
-            color: var(--light);
-            font-weight: 500;
-            padding: 0.8rem 1.2rem;
-            border-radius: 6px;
-            transition: all 0.2s ease;
-        }
-
-        .main-nav .nav-link:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-
-        .main-nav .nav-link.active {
-            background-color: var(--primary);
-            color: white;
-        }
-
-        /* Content containers */
-        .content-container {
-            background-color: var(--secondary);
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-            border: 1px solid var(--border);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        }
-
-        .content-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-            padding-bottom: 1rem;
-            border-bottom: 1px solid var(--border);
-        }
-
-        /* Cards */
-        .card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-        }
-
-        .card-header {
-            background-color: rgba(0, 0, 0, 0.2);
-            border-bottom: 1px solid var(--border);
-            font-weight: 600;
-        }
-
-        /* Discord-style buttons */
-        .btn-discord {
-            background-color: var(--primary);
-            color: white;
-            border: none;
-            font-weight: 500;
-            border-radius: 4px;
-            padding: 0.6rem 1.2rem;
-            transition: all 0.2s ease;
-        }
-
-        .btn-discord:hover {
-            background-color: var(--primary-dark);
-            color: white;
-        }
-
-        /* Discord login button */
-        .btn-discord-login {
-            background-color: var(--primary);
-            color: white;
-            border-radius: 4px;
-            padding: 0.6rem 1.2rem;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            transition: all 0.2s ease;
-        }
-
-        .btn-discord-login:hover {
-            background-color: var(--primary-dark);
-            color: white;
-            transform: translateY(-2px);
-        }
-
-        .btn-discord-login i {
-            margin-right: 8px;
-        }
-
-        /* Footer */
-        .main-footer {
-            background-color: var(--secondary);
-            padding: 2rem 0;
-            margin-top: 3rem;
-            border-top: 1px solid var(--border);
-        }
-
-        .main-footer h4 {
-            font-weight: 600;
-            margin-bottom: 1.2rem;
-        }
-
-        .main-footer a {
-            color: var(--muted);
-            text-decoration: none;
-            transition: color 0.2s ease;
-        }
-
-        .main-footer a:hover {
-            color: var(--primary);
-        }
-
-        .footer-bottom {
-            background-color: var(--dark);
-            padding: 1rem 0;
-            text-align: center;
-        }
-
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
-            .site-title {
-                font-size: 2rem;
-            }
-        }
-
-        /* Discord profile card */
-        .discord-profile {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            padding: 1rem;
-            display: flex;
-            align-items: center;
-            margin-bottom: 1rem;
-        }
-
-        .discord-avatar {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            margin-right: 12px;
-        }
-
-        .discord-username {
-            font-weight: 600;
-            margin: 0;
-        }
-
-        .discord-tag {
-            color: var(--muted);
-            font-size: 0.9rem;
-        }
-
-        /* Queue monitoring section */
-        .queue-monitor {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-top: 1rem;
-        }
-
-        .queue-status {
-            padding: 0.5rem;
-            border-radius: 4px;
-            background-color: rgba(0, 0, 0, 0.2);
-            margin-bottom: 0.5rem;
-        }
-
-        .queue-players {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }
-
-        .queue-player {
-            background-color: var(--secondary);
-            border-radius: 4px;
-            padding: 0.3rem 0.6rem;
-            font-size: 0.9rem;
-        }
-
-        /* Tables */
-        .table {
-            color: var(--light);
-        }
-
-        .table-dark {
-            background-color: var(--card-bg);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        /* Block for forms */
-        .form-control, .form-select {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border);
-            color: var(--light);
-        }
-
-        .form-control:focus, .form-select:focus {
-            background-color: var(--card-bg);
-            border-color: var(--primary);
-            box-shadow: 0 0 0 0.2rem rgba(88, 101, 242, 0.25);
-            color: var(--light);
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
     <!-- Additional CSS -->
     {% block extra_css %}{% endblock %}
@@ -281,35 +29,12 @@
         </div>
     </header>
 
-    <!-- Discord Login/Profile Area -->
-    <div class="ms-auto d-flex align-items-center">
-        {% if discord_user %}
-        <div class="dropdown">
-            <a class="btn btn-outline-light dropdown-toggle d-flex align-items-center" href="#" role="button" id="profileDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <img src="{{ discord_user.avatar_url }}" alt="{{ discord_user.username }}" class="rounded-circle me-2" style="width: 24px; height: 24px;">
-                {{ discord_user.username }}
-            </a>
-            <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="profileDropdown">
-                <li><a class="dropdown-item" href="{{ url_for('profile') }}"><i class="fas fa-user me-2"></i> My Profile</a></li>
-                <li><a class="dropdown-item" href="{{ url_for('queue_monitor') }}"><i class="fas fa-list me-2"></i> Queue Monitor</a></li>
-                <li><hr class="dropdown-divider"></li>
-                <li><a class="dropdown-item" href="{{ url_for('logout') }}"><i class="fas fa-sign-out-alt me-2"></i> Logout</a></li>
-            </ul>
-        </div>
-        {% else %}
-        <a href="{{ url_for('discord_login') }}" class="btn-discord-login">
-            <i class="fab fa-discord"></i> Login with Discord
-        </a>
-        {% endif %}
-    </div>
-</div>
-
     <!-- Navigation -->
-    <div class="container">
+    <div class="container mb-4">
         <nav class="navbar navbar-expand-lg main-nav">
             <div class="container-fluid">
                 <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                    <i class="fas fa-bars text-light"></i>
+                    <i class="fas fa-bars"></i>
                 </button>
                 <div class="collapse navbar-collapse" id="navbarNav">
                     <ul class="navbar-nav me-auto">
@@ -329,38 +54,6 @@
                             </a>
                         </li>
                     </ul>
-                    <!-- Discord-specific navigation items -->
-                    {% if discord_user %}
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/profile' %}active{% endif %}" href="{{ url_for('profile') }}">
-                            <i class="fas fa-user"></i> My Profile
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/queue-monitor' %}active{% endif %}" href="{{ url_for('queue_monitor') }}">
-                            <i class="fas fa-list"></i> Queue Monitor
-                        </a>
-                    </li>
-                    {% endif %}
-                </ul>
-
-                    <!-- Discord Login/Profile Area -->
-                    <div class="ms-auto d-flex align-items-center">
-                        {% if discord_user %}
-                        <div class="discord-profile">
-                            <img src="{{ discord_user.avatar_url }}" alt="{{ discord_user.username }}" class="discord-avatar">
-                            <div>
-                                <h6 class="discord-username">{{ discord_user.username }}</h6>
-                                <span class="discord-tag">{{ discord_user.discriminator }}</span>
-                            </div>
-                            <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light ms-3">Logout</a>
-                        </div>
-                        {% else %}
-                        <a href="{{ url_for('discord_login') }}" class="btn-discord-login">
-                            <i class="fab fa-discord"></i> Login with Discord
-                        </a>
-                        {% endif %}
-                    </div>
                 </div>
             </div>
         </nav>
@@ -371,52 +64,51 @@
         {% block content %}{% endblock %}
     </div>
 
-    <!-- Footer -->
+        <!-- Footer -->
     <footer class="main-footer">
         <div class="container">
             <div class="row">
                 <div class="col-lg-6 col-md-6 mb-4 mb-md-0">
-                    <h4>About 6 Gents</h4>
+                    <h4 class="footer-title">About 6 Gents</h4>
                     <p>The casual competitive matchmaking system for the banditos server!</p>
                 </div>
 
                 <div class="col-lg-6 col-md-6 mb-4 mb-md-0">
-                    <h4>Links</h4>
-                    <ul class="list-unstyled">
+                    <h4 class="footer-title">Links</h4>
+                    <ul class="footer-links">
                         <li><a href="{{ url_for('home') }}">Home</a></li>
                         <li><a href="{{ url_for('leaderboard') }}">Leaderboard</a></li>
                         <li><a href="{{ url_for('rank_check') }}">Rank Check</a></li>
-                        {% if not discord_user %}
-                        <li><a href="{{ url_for('discord_login') }}">Login with Discord</a></li>
-                        {% endif %}
                     </ul>
                 </div>
             </div>
         </div>
 
-        <div class="footer-bottom">
+        <div class="footer-bottom mt-4">
             <div class="container">
-                <p class="mb-0">© 2025 Rocket League 6 Gents Bot. All rights reserved.</p>
+                <p>© 2025 Rocket League 6 Gents Bot. All rights reserved.</p>
             </div>
         </div>
     </footer>
 
     <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- jQuery (for some additional features) -->
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
 
     <!-- Custom JS -->
-    <script>
-        // Initialize tooltips
-        document.addEventListener('DOMContentLoaded', function() {
-            var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-            var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl)
-            });
-        });
-    </script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 
     <!-- Additional JS -->
-    {% block extra_js %}
-    {% endblock %}
+    {% block extra_js %}{% endblock %}
+
+    <script>
+        // Initialize tooltips
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl)
+        });
+    </script>
 </body>
 </html>
