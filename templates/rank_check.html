@@ -26,30 +26,18 @@
                 </div>
             </div>
 
-            <div class="card bg-dark-medium">
-                <div class="card-header">
-                    <h4 class="mb-0">Select Your Rank</h4>
-                </div>
-                <div class="card-body">
+            <div class="rank-selection-card">
+            <div class="card-header">
+                <h4>Select Your Rank</h4>
+            </div>
+            <div class="card-body">
                 <div class="mb-3">
                     <label for="rlRank" class="form-label">Your Rocket League 3v3 Rank</label>
                     <select class="form-select" id="rlRank">
                         <option value="" selected disabled>Select your 3v3 competitive rank</option>
-
-                        <!-- Rank C Group -->
-                        <option value="rank_c" data-mmr="600" data-tier="Rank C" data-icon="/static/img/ranks/diamond_3.png">
-                            Bronze I - Diamond III
-                        </option>
-
-                        <!-- Rank B Group -->
-                        <option value="rank_b" data-mmr="1350" data-tier="Rank B" data-icon="/static/img/ranks/champion_3.png">
-                            Champion I - Champion III
-                        </option>
-
-                        <!-- Rank A Group -->
-                        <option value="rank_a" data-mmr="1850" data-tier="Rank A" data-icon="/static/img/ranks/ssl.png">
-                            Grand Champion I - Supersonic Legend
-                        </option>
+                        <option value="rank_c" data-mmr="600" data-tier="Rank C">Bronze I - Diamond III</option>
+                        <option value="rank_b" data-mmr="1350" data-tier="Rank B">Champion I - Champion III</option>
+                        <option value="rank_a" data-mmr="1850" data-tier="Rank A">Grand Champion I - SSL</option>
                     </select>
                     <div id="rankPreview" class="mt-3 text-center d-none">
                         <img id="rankImage" src="" alt="Rank Icon" class="img-fluid mb-2" style="max-width: 80px;">
@@ -57,77 +45,57 @@
                     </div>
                 </div>
 
-                    <div class="mb-3">
-                        <label for="discordUsername" class="form-label">Discord Username for role assignment</label>
-                        <div class="input-group">
-                            <span class="input-group-text"><i class="fab fa-discord"></i></span>
-                            <input type="text" class="form-control" id="discordUsername" placeholder="e.g., Display name or account name" value="">
-                        </div>
-                        <small class="form-text text-muted">Your Discord username as shown in the server</small>
+                <div class="mb-3">
+                    <label for="discordUsername" class="form-label">Discord Username</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="fab fa-discord"></i></span>
+                        <input type="text" class="form-control" id="discordUsername" placeholder="Your Discord username">
                     </div>
+                </div>
 
-                    <div class="d-grid">
-                        <button type="button" id="verifyRankButton" class="btn btn-primary">
-                            <i class="fas fa-check-circle me-2"></i> Verify My Rank
-                        </button>
-                    </div>
+                <div class="d-grid">
+                    <button type="button" id="verifyRankButton" class="btn btn-primary">
+                        <i class="fas fa-check-circle me-2"></i> Verify My Rank
+                    </button>
                 </div>
             </div>
         </div>
 
         <div class="col-lg-6 mt-4 mt-lg-0">
-            <h4 class="mb-3">Rank Tiers</h4>
+            <div class="rank-tiers-container">
+                <h4>SixGents Rank Tiers</h4>
 
-                <div class="row">
-                    <div class="col-md-4 mb-3">
-                        <div class="rank-card">
-                            <div class="rank-header rank-a">
-                                <i class="fas fa-trophy fa-2x"></i>
-                            </div>
-                            <div class="rank-body">
-                                <h5 class="rank-title">Rank A</h5>
-                                <p class="rank-description">Grand Champion I & Above</p>
-                                <p class="rank-mmr">Starting MMR: 1850</p>
-                                <span class="badge bg-danger">Rank A Role</span>
-                            </div>
+                <div class="rank-tiers">
+                    <div class="rank-tier-card rank-a">
+                        <div class="rank-tier-icon">A</div>
+                        <div class="rank-tier-content">
+                            <h5>Rank A</h5>
+                            <p>Grand Champion I & Above</p>
+                            <div class="rank-tier-mmr">Starting MMR: 1850</div>
                         </div>
                     </div>
 
-                    <div class="col-md-4 mb-3">
-                        <div class="rank-card">
-                            <div class="rank-header rank-b">
-                                <i class="fas fa-award fa-2x"></i>
-                            </div>
-                            <div class="rank-body">
-                                <h5 class="rank-title">Rank B</h5>
-                                <p class="rank-description">Champion I - Champion III</p>
-                                <p class="rank-mmr">Starting MMR: 1350</p>
-                                <span class="badge bg-primary">Rank B Role</span>
-                            </div>
+                    <div class="rank-tier-card rank-b">
+                        <div class="rank-tier-icon">B</div>
+                        <div class="rank-tier-content">
+                            <h5>Rank B</h5>
+                            <p>Champion I - Champion III</p>
+                            <div class="rank-tier-mmr">Starting MMR: 1350</div>
                         </div>
                     </div>
 
-                    <div class="col-md-4 mb-3">
-                        <div class="rank-card">
-                            <div class="rank-header rank-c">
-                                <i class="fas fa-medal fa-2x"></i>
-                            </div>
-                            <div class="rank-body">
-                                <h5 class="rank-title">Rank C</h5>
-                                <p class="rank-description">Bronze I - Diamond III</p>
-                                <p class="rank-mmr">Starting MMR: 600</p>
-                                <span class="badge bg-success">Rank C Role</span>
-                            </div>
+                    <div class="rank-tier-card rank-c">
+                        <div class="rank-tier-icon">C</div>
+                        <div class="rank-tier-content">
+                            <h5>Rank C</h5>
+                            <p>Bronze I - Diamond III</p>
+                            <div class="rank-tier-mmr">Starting MMR: 600</div>
                         </div>
                     </div>
                 </div>
 
-            <div class="card bg-dark-medium mt-4">
-                <div class="card-header">
-                    <h5 class="mb-0">Verification Result</h5>
-                </div>
-                <div class="card-body" id="verificationResult">
-                    <p class="text-center text-muted">Select your Rocket League rank and click "Verify My Rank" to see your results</p>
+                <div id="verificationResult" class="mt-4">
+                    <p class="text-center text-muted">Select your Rocket League rank to see your results</p>
                 </div>
             </div>
 

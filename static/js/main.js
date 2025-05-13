@@ -228,3 +228,57 @@ document.addEventListener('DOMContentLoaded', function() {
         return colors[tier] || 'secondary';
     }
 });
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Add subtle hover animations to buttons
+    const buttons = document.querySelectorAll('.btn');
+    buttons.forEach(button => {
+        button.addEventListener('mouseenter', function() {
+            this.style.transform = 'translateY(-2px)';
+            this.style.transition = 'all 0.2s ease';
+        });
+
+        button.addEventListener('mouseleave', function() {
+            this.style.transform = 'translateY(0)';
+        });
+    });
+
+    // Add fade-in animation to content containers when they enter viewport
+    const contentContainers = document.querySelectorAll('.content-container');
+
+    // Simple function to check if element is in viewport
+    function isInViewport(element) {
+        const rect = element.getBoundingClientRect();
+        return (
+            rect.top >= 0 &&
+            rect.left >= 0 &&
+            rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+            rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+        );
+    }
+
+    // Add initial opacity of 0 to containers not in viewport
+    contentContainers.forEach(container => {
+        if (!isInViewport(container)) {
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(20px)';
+            container.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        }
+    });
+
+    // Function to check and animate containers
+    function fadeInContainers() {
+        contentContainers.forEach(container => {
+            if (isInViewport(container) && container.style.opacity === '0') {
+                container.style.opacity = '1';
+                container.style.transform = 'translateY(0)';
+            }
+        });
+    }
+
+    // Trigger on scroll
+    window.addEventListener('scroll', fadeInContainers);
+
+    // Initial check
+    fadeInContainers();
+});
