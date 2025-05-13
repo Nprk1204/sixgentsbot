@@ -29,7 +29,7 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
 DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '1365506343015944222')  # Provide hardcoded fallback
 DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1365584495989751889')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET')
-DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'http://localhost:10000/callback')
+DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI')
 DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
 
 # Debug environment variables
