@@ -1035,6 +1035,11 @@ def check_rank():
 
     return jsonify(mock_data)
 
+@app.route('/rank-check')
+def rank_check():
+    """Display the rank check page"""
+    return render_template('rank_check.html')
+
 
 @app.route('/api/user-rank/<discord_username>')
 def get_user_rank(discord_username):
