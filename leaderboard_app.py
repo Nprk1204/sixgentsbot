@@ -44,9 +44,9 @@ print("===================================\n")
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
 
 # Secure cookie settings
-app.config['SESSION_COOKIE_SECURE'] = True  # Only send cookies over HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Restrict cross-site requests
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # User login requirement decorator
 def login_required(f):
@@ -68,6 +68,10 @@ def inject_discord_user():
 # Discord OAuth2 login route
 @app.route('/discord-login')
 def discord_login():
+    # Clear any existing session first (force logout)
+    session.clear()
+    print("Session cleared before login")
+
     oauth2_url = f'{DISCORD_API_ENDPOINT}/oauth2/authorize?'
     params = {
         'client_id': DISCORD_CLIENT_ID,
@@ -139,9 +143,10 @@ def discord_callback():
     }
 
     # After storing in session
-    print("Session now contains:", list(session.keys()))
-    print("User now in session:", 'discord_user' in session)
-    print("======================\n")
+    print(f"Session cookie will be set with these settings:")
+    print(f"  Secure: {app.config.get('SESSION_COOKIE_SECURE')}")
+    print(f"  HttpOnly: {app.config.get('SESSION_COOKIE_HTTPONLY')}")
+    print(f"  SameSite: {app.config.get('SESSION_COOKIE_SAMESITE')}")
 
     # Check if user is in the required Discord server
     guilds_response = requests.get(
