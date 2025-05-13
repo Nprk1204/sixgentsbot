@@ -66,10 +66,6 @@
 
 <!-- Featured Players and Recent Matches -->
 <div class="content-container">
-    <div class="content-header">
-        <h2>Featured Players</h2>
-    </div>
-
     <ul class="nav nav-tabs mb-3" id="featuredPlayersTabs" role="tablist">
         <li class="nav-item" role="presentation">
             <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
@@ -91,36 +87,28 @@
             <div class="row">
                 {% for player in featured_players %}
                 <div class="col-md-6">
-                    <div class="player-card" data-player-id="{{ player.id }}">
-                        <div class="player-card-header">
-                            <div class="player-rank">{{ loop.index }}</div>
-                            <h4 class="player-name">{{ player.name }}</h4>
-                            {% if player.mmr >= 1600 %}
-                            <div class="player-badge rank-a">A</div>
-                            {% elif player.mmr >= 1100 %}
-                            <div class="player-badge rank-b">B</div>
-                            {% else %}
-                            <div class="player-badge rank-c">C</div>
-                            {% endif %}
+                    <div class="featured-player" data-player-id="{{ player.id }}">
+                        <div class="featured-player-header">
+                            {{ player.name }}
                         </div>
-                        <div class="player-card-stats">
-                            <div class="stat-item">
-                                <div class="stat-value">{{ player.mmr }}</div>
-                                <div class="stat-label">MMR</div>
+
+                        <div class="featured-player-body">
+                            <div class="featured-player-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.mmr }}</span>
+                                    <span class="stat-label">MMR</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.win_rate }}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.matches }}</span>
+                                    <span class="stat-label">Matches</span>
+                                </div>
                             </div>
-                            <div class="stat-item">
-                                <div class="stat-value">{{ player.win_rate }}%</div>
-                                <div class="stat-label">Win Rate</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">{{ player.matches }}</div>
-                                <div class="stat-label">Matches</div>
-                            </div>
-                        </div>
-                        <div class="player-card-footer">
-                            <button class="btn btn-outline-primary btn-sm" onclick="showPlayerDetails('{{ player.id }}')">
-                                View Details
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -128,41 +116,33 @@
             </div>
         </div>
 
-        <!-- Global Players Tab with same structure -->
+        <!-- Global Players Tab -->
         <div class="tab-pane fade" id="global-players" role="tabpanel">
             <div class="row">
                 {% for player in featured_global_players %}
                 <div class="col-md-6">
-                    <div class="player-card" data-player-id="{{ player.id }}">
-                        <div class="player-card-header">
-                            <div class="player-rank">{{ loop.index }}</div>
-                            <h4 class="player-name">{{ player.name }}</h4>
-                            {% if player.mmr >= 1600 %}
-                            <div class="player-badge rank-a">A</div>
-                            {% elif player.mmr >= 1100 %}
-                            <div class="player-badge rank-b">B</div>
-                            {% else %}
-                            <div class="player-badge rank-c">C</div>
-                            {% endif %}
+                    <div class="featured-player" data-player-id="{{ player.id }}">
+                        <div class="featured-player-header">
+                            {{ player.name }}
                         </div>
-                        <div class="player-card-stats">
-                            <div class="stat-item">
-                                <div class="stat-value">{{ player.mmr }}</div>
-                                <div class="stat-label">Global MMR</div>
+
+                        <div class="featured-player-body">
+                            <div class="featured-player-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.mmr }}</span>
+                                    <span class="stat-label">Global MMR</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.win_rate }}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
+
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.global_matches }}</span>
+                                    <span class="stat-label">Matches</span>
+                                </div>
                             </div>
-                            <div class="stat-item">
-                                <div class="stat-value">{{ player.win_rate }}%</div>
-                                <div class="stat-label">Win Rate</div>
-                            </div>
-                            <div class="stat-item">
-                                <div class="stat-value">{{ player.global_matches }}</div>
-                                <div class="stat-label">Matches</div>
-                            </div>
-                        </div>
-                        <div class="player-card-footer">
-                            <button class="btn btn-outline-primary btn-sm" onclick="showPlayerDetails('{{ player.id }}')">
-                                View Details
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -173,56 +153,62 @@
 </div>
 
     <!-- Recent Matches -->
-    <div class="content-container mt-4">
-    <div class="content-header">
-        <h2>Recent Matches</h2>
+    <div class="col-lg-6">
+        <div class="content-container">
+            <div class="content-header">
+                <h2>Recent Matches</h2>
+            </div>
+
+            {% if recent_matches %}
+                {% for match in recent_matches %}
+                <div class="match-card">
+                    <div class="match-header">
+                        <span class="match-date">{{ match.date }}</span>
+                        <div>
+                            {% if match.is_global %}
+                            <span class="badge bg-info me-2">Global</span>
+                            {% endif %}
+                            <span class="match-id">Match ID: {{ match.match_id }}</span>
+                        </div>
+                    </div>
+                    <div class="match-body">
+                        <div class="team team1 {% if match.winner == 1 %}team-winner{% endif %}">
+                            <div class="team-header">
+                                <i class="fas fa-users me-2"></i> Team 1
+                                {% if match.winner == 1 %}
+                                <span class="badge bg-success ms-2">Winner</span>
+                                {% endif %}
+                            </div>
+                            <div class="team-members">
+                                {{ match.team1|join(', ') }}
+                            </div>
+                        </div>
+
+                        <div class="text-center my-2">
+                            <span class="badge bg-dark">VS</span>
+                        </div>
+
+                        <div class="team team2 {% if match.winner == 2 %}team-winner{% endif %}">
+                            <div class="team-header">
+                                <i class="fas fa-users me-2"></i> Team 2
+                                {% if match.winner == 2 %}
+                                <span class="badge bg-success ms-2">Winner</span>
+                                {% endif %}
+                            </div>
+                            <div class="team-members">
+                                {{ match.team2|join(', ') }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center py-4">
+                    <p>No matches have been played yet.</p>
+                </div>
+            {% endif %}
+        </div>
     </div>
-
-    {% if recent_matches %}
-        {% for match in recent_matches %}
-        <div class="match-card">
-            <div class="match-card-header">
-                <span class="match-date">{{ match.date }}</span>
-                <div class="match-tags">
-                    {% if match.is_global %}
-                    <span class="match-tag">Global</span>
-                    {% endif %}
-                    <span class="match-id">ID: {{ match.match_id }}</span>
-                </div>
-            </div>
-
-            <div class="match-card-body">
-                <div class="match-team {% if match.winner == 1 %}team-winner{% endif %}">
-                    <div class="team-header">
-                        <i class="fas fa-users"></i> Team 1
-                        {% if match.winner == 1 %}
-                        <span class="team-badge">Winner</span>
-                        {% endif %}
-                    </div>
-                    <div class="team-players">{{ match.team1|join(', ') }}</div>
-                </div>
-
-                <div class="match-vs">
-                    <span>VS</span>
-                </div>
-
-                <div class="match-team {% if match.winner == 2 %}team-winner{% endif %}">
-                    <div class="team-header">
-                        <i class="fas fa-users"></i> Team 2
-                        {% if match.winner == 2 %}
-                        <span class="team-badge">Winner</span>
-                        {% endif %}
-                    </div>
-                    <div class="team-players">{{ match.team2|join(', ') }}</div>
-                </div>
-            </div>
-        </div>
-        {% endfor %}
-    {% else %}
-        <div class="text-center py-4">
-            <p>No matches have been played yet.</p>
-        </div>
-    {% endif %}
 </div>
 
 <!-- How It Works Section -->
