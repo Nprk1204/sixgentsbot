@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 import os
@@ -13,26 +13,14 @@ import re
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'd0eedfeb52dee80f603650825b98f78b')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
 
 # Load environment variables
 load_dotenv()
-
-# Discord OAuth2 settings
-DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1365584495989751889')
-DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
-DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.onrender.com/callback')
-DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
-
-if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI]):
-    print("Warning: Discord OAuth2 settings not properly configured")
-
-oauth2_session = requests.Session()
-
 MONGO_URI = os.getenv('MONGO_URI')
 RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
-DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')  # Provide hardcoded fallback
+DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '1365506343015944222')  # Provide hardcoded fallback
 
 # Debug environment variables
 print("\n=== ENVIRONMENT VARIABLES DEBUG ===")
@@ -1083,118 +1071,14 @@ def verify_rank():
             "message": f"Error: {str(e)}"
         }), 500
 
-@app.route('/login')
-def login():
-    # Generate state parameter for security
-    state = os.urandom(16).hex()
-    session['oauth2_state'] = state
-
-    auth_url = f'https://discord.com/api/oauth2/authorize'
-    params = {
-        'client_id': DISCORD_CLIENT_ID,
-        'redirect_uri': DISCORD_REDIRECT_URI,
-        'response_type': 'code',
-        'scope': 'identify email',
-        'state': state
-    }
-    return redirect(f"{auth_url}?{'&'.join(f'{k}={v}' for k, v in params.items())}")
-
-@app.route('/callback')
-def callback():
-    error = request.args.get('error')
-    if error:
-        flash(f'OAuth error: {error}', 'error')
-        return redirect('/')
-
-    # Verify state parameter
-    state = request.args.get('state')
-    stored_state = session.pop('oauth2_state', None)
-    if not state or state != stored_state:
-        flash('Invalid OAuth state', 'error')
-        return redirect('/')
-
-    code = request.args.get('code')
-    if not code:
-        flash('No authorization code received', 'error')
-        return redirect('/')
-
-    # Exchange code for token
-    token_url = f'{DISCORD_API_ENDPOINT}/oauth2/token'
-    data = {
-        'client_id': DISCORD_CLIENT_ID,
-        'client_secret': DISCORD_CLIENT_SECRET,
-        'grant_type': 'authorization_code',
-        'code': code,
-        'redirect_uri': DISCORD_REDIRECT_URI,
-        'scope': 'identify email'
-    }
-
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
-
-    try:
-        token_response = requests.post(token_url, data=data, headers=headers)
-        token_response.raise_for_status()
-        tokens = token_response.json()
-
-        # Get user info
-        user_url = f'{DISCORD_API_ENDPOINT}/users/@me'
-        headers = {'Authorization': f'Bearer {tokens["access_token"]}'}
-        user_response = requests.get(user_url, headers=headers)
-        user_response.raise_for_status()
-
-        user_data = user_response.json()
-        session['user'] = user_data
-        flash('Successfully logged in!', 'success')
-        return redirect('/profile')
-
-    except requests.exceptions.RequestException as e:
-        print(f"OAuth error: {str(e)}")
-        flash('Failed to authenticate with Discord', 'error')
-        return redirect('/')
-
-@app.route('/profile')
-def profile():
-    if 'user' not in session:
-        return redirect('/login')
-
-    user = session['user']
-    discord_id = user['id']
-
-    # Get player stats
-    player_data = players_collection.find_one({"id": discord_id})
-    rank_data = ranks_collection.find_one({"discord_id": discord_id})
-
-    # Get recent matches
-    recent_matches = list(matches_collection.find(
-        {"$or": [
-            {"team1.id": discord_id},
-            {"team2.id": discord_id}
-        ]},
-        {"_id": 0}
-    ).sort("completed_at", -1).limit(10))
-
-    return render_template('profile.html',
-                         user=user,
-                         player_data=player_data,
-                         rank_data=rank_data,
-                         recent_matches=recent_matches)
-
-@app.route('/settings')
-def settings():
-    if 'user' not in session:
-        return redirect('/login')
-    return render_template('settings.html', user=session['user'])
-
-@app.route('/logout')
-def logout():
-    session.clear()
-    return redirect('/')
-
 @app.errorhandler(404)
 def page_not_found(e):
     return render_template('404.html'), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('500.html'), 500
 
 
 if __name__ == '__main__':
