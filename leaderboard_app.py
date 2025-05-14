@@ -13,14 +13,14 @@ import re
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', '')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'd0eedfeb52dee80f603650825b98f78b')
 
 # Load environment variables
 load_dotenv()
 
 # Discord OAuth2 settings
 DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1365584495989751889')
-DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', 'UUAPJHFiZf9_sWd0Eh4Na9i_KF_lyTnU')
+DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
 DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.onrender.com/callback')
 DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
 
