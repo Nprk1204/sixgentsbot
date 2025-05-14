@@ -19,7 +19,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', '')
 load_dotenv()
 
 # Discord OAuth2 settings
-DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '')
+DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '1365584495989751889')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
 DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.onrender.com/callback')
 DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
