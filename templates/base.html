@@ -109,6 +109,13 @@
     <!-- Additional JS -->
     {% block extra_js %}{% endblock %}
 
+    <!-- Discord Auth Status -->
+    <div class="auth-container">
+        {% if discord_user %}
+            <span>Welcome, {{ discord_user.name }}!</span>
+        {% endif %}
+    </div>
+
     <script>
         // Initialize tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
