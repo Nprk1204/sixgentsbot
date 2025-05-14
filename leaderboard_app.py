@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 import os
@@ -17,6 +17,15 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', '')
 
 # Load environment variables
 load_dotenv()
+
+# Discord OAuth2 settings
+DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID')
+DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET')
+DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.onrender.com/callback')
+DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
+
+oauth2_session = requests.Session()
+
 MONGO_URI = os.getenv('MONGO_URI')
 RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
@@ -1071,14 +1080,82 @@ def verify_rank():
             "message": f"Error: {str(e)}"
         }), 500
 
+@app.route('/login')
+def login():
+    return redirect(f'https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&redirect_uri={DISCORD_REDIRECT_URI}&response_type=code&scope=identify%20email')
+
+@app.route('/callback')
+def callback():
+    code = request.args.get('code')
+    data = {
+        'client_id': DISCORD_CLIENT_ID,
+        'client_secret': DISCORD_CLIENT_SECRET,
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': DISCORD_REDIRECT_URI,
+        'scope': 'identify email'
+    }
+
+    # Get access token
+    response = requests.post(f'{DISCORD_API_ENDPOINT}/oauth2/token', data=data)
+    if response.status_code != 200:
+        return 'Failed to get access token', 400
+
+    tokens = response.json()
+    access_token = tokens['access_token']
+
+    # Get user info
+    headers = {'Authorization': f'Bearer {access_token}'}
+    user_response = requests.get(f'{DISCORD_API_ENDPOINT}/users/@me', headers=headers)
+
+    if user_response.status_code != 200:
+        return 'Failed to get user info', 400
+
+    user_data = user_response.json()
+    session['user'] = user_data
+    return redirect('/profile')
+
+@app.route('/profile')
+def profile():
+    if 'user' not in session:
+        return redirect('/login')
+
+    user = session['user']
+    discord_id = user['id']
+
+    # Get player stats
+    player_data = players_collection.find_one({"id": discord_id})
+    rank_data = ranks_collection.find_one({"discord_id": discord_id})
+
+    # Get recent matches
+    recent_matches = list(matches_collection.find(
+        {"$or": [
+            {"team1.id": discord_id},
+            {"team2.id": discord_id}
+        ]},
+        {"_id": 0}
+    ).sort("completed_at", -1).limit(10))
+
+    return render_template('profile.html',
+                         user=user,
+                         player_data=player_data,
+                         rank_data=rank_data,
+                         recent_matches=recent_matches)
+
+@app.route('/settings')
+def settings():
+    if 'user' not in session:
+        return redirect('/login')
+    return render_template('settings.html', user=session['user'])
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/')
+
 @app.errorhandler(404)
 def page_not_found(e):
     return render_template('404.html'), 404
-
-
-@app.errorhandler(500)
-def internal_server_error(e):
-    return render_template('500.html'), 500
 
 
 if __name__ == '__main__':

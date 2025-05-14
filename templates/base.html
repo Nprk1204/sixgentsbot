@@ -60,8 +60,25 @@
                             </a>
                         </li>
                     </ul>
-                </div>
-            </div>
+                    {% if session.user %}
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="/profile">Profile</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/settings">Settings</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/logout">Logout</a>
+                </li>
+            </ul>
+            {% else %}
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link" href="/login">Login with Discord</a>
+                </li>
+            </ul>
+            {% endif %}
         </nav>
     </div>
 
@@ -108,13 +125,6 @@
 
     <!-- Additional JS -->
     {% block extra_js %}{% endblock %}
-
-    <!-- Discord Auth Status -->
-    <div class="auth-container">
-        {% if discord_user %}
-            <span>Welcome, {{ discord_user.name }}!</span>
-        {% endif %}
-    </div>
 
     <script>
         // Initialize tooltips
