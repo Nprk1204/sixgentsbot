@@ -24,6 +24,9 @@ DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
 DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'https://sixgentsbot-1.onrender.com/callback')
 DISCORD_API_ENDPOINT = 'https://discord.com/api/v10'
 
+if not all([DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_REDIRECT_URI]):
+    print("Warning: Discord OAuth2 settings not properly configured")
+
 oauth2_session = requests.Session()
 
 MONGO_URI = os.getenv('MONGO_URI')
