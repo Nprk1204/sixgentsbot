@@ -1085,11 +1085,41 @@ def verify_rank():
 
 @app.route('/login')
 def login():
-    return redirect(f'https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&redirect_uri={DISCORD_REDIRECT_URI}&response_type=code&scope=identify%20email')
+    # Generate state parameter for security
+    state = os.urandom(16).hex()
+    session['oauth2_state'] = state
+
+    auth_url = f'https://discord.com/api/oauth2/authorize'
+    params = {
+        'client_id': DISCORD_CLIENT_ID,
+        'redirect_uri': DISCORD_REDIRECT_URI,
+        'response_type': 'code',
+        'scope': 'identify email',
+        'state': state
+    }
+    return redirect(f"{auth_url}?{'&'.join(f'{k}={v}' for k, v in params.items())}")
 
 @app.route('/callback')
 def callback():
+    error = request.args.get('error')
+    if error:
+        flash(f'OAuth error: {error}', 'error')
+        return redirect('/')
+
+    # Verify state parameter
+    state = request.args.get('state')
+    stored_state = session.pop('oauth2_state', None)
+    if not state or state != stored_state:
+        flash('Invalid OAuth state', 'error')
+        return redirect('/')
+
     code = request.args.get('code')
+    if not code:
+        flash('No authorization code received', 'error')
+        return redirect('/')
+
+    # Exchange code for token
+    token_url = f'{DISCORD_API_ENDPOINT}/oauth2/token'
     data = {
         'client_id': DISCORD_CLIENT_ID,
         'client_secret': DISCORD_CLIENT_SECRET,
@@ -1099,24 +1129,30 @@ def callback():
         'scope': 'identify email'
     }
 
-    # Get access token
-    response = requests.post(f'{DISCORD_API_ENDPOINT}/oauth2/token', data=data)
-    if response.status_code != 200:
-        return 'Failed to get access token', 400
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded'
+    }
 
-    tokens = response.json()
-    access_token = tokens['access_token']
+    try:
+        token_response = requests.post(token_url, data=data, headers=headers)
+        token_response.raise_for_status()
+        tokens = token_response.json()
 
-    # Get user info
-    headers = {'Authorization': f'Bearer {access_token}'}
-    user_response = requests.get(f'{DISCORD_API_ENDPOINT}/users/@me', headers=headers)
+        # Get user info
+        user_url = f'{DISCORD_API_ENDPOINT}/users/@me'
+        headers = {'Authorization': f'Bearer {tokens["access_token"]}'}
+        user_response = requests.get(user_url, headers=headers)
+        user_response.raise_for_status()
 
-    if user_response.status_code != 200:
-        return 'Failed to get user info', 400
+        user_data = user_response.json()
+        session['user'] = user_data
+        flash('Successfully logged in!', 'success')
+        return redirect('/profile')
 
-    user_data = user_response.json()
-    session['user'] = user_data
-    return redirect('/profile')
+    except requests.exceptions.RequestException as e:
+        print(f"OAuth error: {str(e)}")
+        flash('Failed to authenticate with Discord', 'error')
+        return redirect('/')
 
 @app.route('/profile')
 def profile():
