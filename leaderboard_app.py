@@ -13,14 +13,14 @@ import re
 
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', '')
 
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
 RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
-DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '1365506343015944222')  # Provide hardcoded fallback
+DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')  # Provide hardcoded fallback
 
 # Debug environment variables
 print("\n=== ENVIRONMENT VARIABLES DEBUG ===")
