@@ -12,12 +12,6 @@ import functools
 import re
 from datetime import timedelta
 
-
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
-app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Session lasts for 7 days
-
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
@@ -33,6 +27,10 @@ print(f"DISCORD_GUILD_ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
 print(f"DISCORD_GUILD_ID value: '{DISCORD_GUILD_ID}'")
 print("===================================\n")
 
+# Initialize Flask app
+app = Flask(__name__)
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Session lasts for 7 days
 
 # Simple cache implementation
 class SimpleCache:
@@ -63,10 +61,8 @@ class SimpleCache:
         }
         return True
 
-
 # Initialize cache
 cache = SimpleCache()
-
 
 # Cache decorator
 def cached(timeout=5 * 60, key_prefix='view/%s'):
@@ -85,6 +81,12 @@ def cached(timeout=5 * 60, key_prefix='view/%s'):
 
     return decorator
 
+# Setup initial database connection
+db = None
+players_collection = None
+matches_collection = None
+ranks_collection = None
+resets_collection = None
 
 # Connect to MongoDB with error handling
 try:
@@ -99,16 +101,6 @@ try:
     resets_collection = db['resets']  # New collection for tracking resets
 except Exception as e:
     print(f"MongoDB connection error: {e}")
-
-    from profile import profile_bp
-
-    # Share the database with the profile blueprint
-    profile_bp.app = app
-    profile_bp.app.db = db  # Your MongoDB database
-
-    # Register the profile blueprint
-    app.register_blueprint(profile_bp)
-
 
     # Fallback data for development if MongoDB connection fails
     class FallbackDB:
@@ -137,13 +129,26 @@ except Exception as e:
         def delete_many(self, *args, **kwargs):
             return None
 
-
     db = {'players': FallbackDB(), 'matches': FallbackDB(), 'ranks': FallbackDB(), 'resets': FallbackDB()}
     players_collection = db['players']
     matches_collection = db['matches']
     ranks_collection = db['ranks']
     resets_collection = db['resets']
 
+# IMPORTANT: Register profile blueprint AFTER database setup but BEFORE routes
+# Import the profile blueprint
+from profile import profile_bp
+
+# Share the database with the profile blueprint
+profile_bp.app = app
+# Set the database properly depending on the type
+if isinstance(db, dict):
+    profile_bp.app.db = db  # This is our FallbackDB dictionary
+else:
+    profile_bp.app.db = client['sixgents_db']  # This is a real MongoDB database
+
+# Register the profile blueprint
+app.register_blueprint(profile_bp)
 
 # Routes
 @app.route('/')
