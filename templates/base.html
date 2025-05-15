@@ -59,6 +59,11 @@
                                 <i class="fas fa-check-circle"></i> Rank Check
                             </a>
                         </li>
+                        <li class="nav-item">
+                            <a class="nav-link {% if request.path == '/profile' %}active{% endif %}" href="{{ url_for('profile.profile_page') }}">
+                                <i class="fas fa-user"></i> Profile
+                            </a>
+                        </li>
                     </ul>
                 </div>
             </div>

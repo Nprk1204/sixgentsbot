@@ -10,10 +10,13 @@ from functools import lru_cache
 from dotenv import load_dotenv
 import functools
 import re
+from datetime import timedelta
+
 
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'sixgents-rocket-league-default-key')
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Session lasts for 7 days
 
 # Load environment variables
 load_dotenv()
@@ -96,6 +99,15 @@ try:
     resets_collection = db['resets']  # New collection for tracking resets
 except Exception as e:
     print(f"MongoDB connection error: {e}")
+
+    from profile import profile_bp
+
+    # Share the database with the profile blueprint
+    profile_bp.app = app
+    profile_bp.app.db = db  # Your MongoDB database
+
+    # Register the profile blueprint
+    app.register_blueprint(profile_bp)
 
 
     # Fallback data for development if MongoDB connection fails
