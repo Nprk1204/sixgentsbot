@@ -1,3 +1,5 @@
+import discord
+
 class QueueHandler:
     def __init__(self, db):
         self.db = db

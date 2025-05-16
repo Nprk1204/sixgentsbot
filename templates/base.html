@@ -59,11 +59,6 @@
                                 <i class="fas fa-check-circle"></i> Rank Check
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.path == '/profile' %}active{% endif %}" href="{{ url_for('profile.profile_page') }}">
-                                <i class="fas fa-user"></i> Profile
-                            </a>
-                        </li>
                     </ul>
                 </div>
             </div>
@@ -113,6 +108,13 @@
 
     <!-- Additional JS -->
     {% block extra_js %}{% endblock %}
+
+    <!-- Discord Auth Status -->
+    <div class="auth-container">
+        {% if discord_user %}
+            <span>Welcome, {{ discord_user.name }}!</span>
+        {% endif %}
+    </div>
 
     <script>
         // Initialize tooltips
