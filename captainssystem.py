@@ -201,6 +201,15 @@ class CaptainsSystem:
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
             await self.fallback_to_random(channel_id)
 
+        except Exception as e:
+            import traceback
+            print(f"Error in captain selection: {e}")
+            traceback.print_exc()
+            # Something went wrong
+            await channel.send(
+                f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
+            await self.fallback_to_random(channel_id)
+
     async def get_player_mmrs(self, players):
         """Get MMR for each player"""
         player_mmrs = {}
