@@ -123,8 +123,8 @@ class CaptainsSystem:
             # Initial message to players
             await channel.send(f"📨 DMing captains for team selection... {captain1['mention']} will pick first.")
 
-            # Get player MMRs for display
-            player_mmrs = await self.get_player_mmrs(remaining_players)
+            # Get player MMRs for display - now passing the channel to determine if global or ranked
+            player_mmrs = await self.get_player_mmrs(remaining_players, channel)
 
             # PHASE 1: Captain 1 selects one player
             selected_player = await self.captain1_selection(captain1_user, remaining_players, player_mmrs, channel)
@@ -201,18 +201,21 @@ class CaptainsSystem:
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
             await self.fallback_to_random(channel_id)
 
-        except Exception as e:
-            import traceback
-            print(f"Error in captain selection: {e}")
-            traceback.print_exc()
-            # Something went wrong
-            await channel.send(
-                f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
-            await self.fallback_to_random(channel_id)
+    async def get_player_mmrs(self, players, channel=None):
+        """
+        Get MMR for each player, considering whether it's a global or ranked queue
 
-    async def get_player_mmrs(self, players):
-        """Get MMR for each player"""
+        Args:
+            players: List of player dictionaries
+            channel: The Discord channel object (to determine if it's a global queue)
+
+        Returns:
+            Dictionary mapping player IDs to their appropriate MMR values
+        """
         player_mmrs = {}
+        is_global = channel and channel.name.lower() == "global"
+
+        print(f"Getting player MMRs for {'global' if is_global else 'ranked'} queue")
 
         for player in players:
             player_id = player['id']
@@ -225,21 +228,45 @@ class CaptainsSystem:
             # Get player data for real players
             player_data = self.match_system.players.find_one({"id": player_id})
             if player_data:
-                player_mmrs[player_id] = player_data.get("mmr", 0)
+                # Use global or ranked MMR based on channel type
+                if is_global:
+                    # Use global MMR or default if not available
+                    player_mmrs[player_id] = player_data.get("global_mmr", 300)
+                    print(f"Using global MMR for {player['name']}: {player_mmrs[player_id]}")
+                else:
+                    # Use regular ranked MMR
+                    player_mmrs[player_id] = player_data.get("mmr", 600)
+                    print(f"Using ranked MMR for {player['name']}: {player_mmrs[player_id]}")
             else:
                 # For new players, check rank record
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
-                    tier = rank_record.get("tier", "Rank C")
-                    player_mmrs[player_id] = self.match_system.TIER_MMR.get(tier, 600)
+                    if is_global:
+                        # Use global MMR from rank record or default
+                        player_mmrs[player_id] = rank_record.get("global_mmr", 300)
+                        print(f"Using global MMR from rank record for {player['name']}: {player_mmrs[player_id]}")
+                    else:
+                        # Use tier-based MMR for ranked
+                        tier = rank_record.get("tier", "Rank C")
+                        player_mmrs[player_id] = self.match_system.TIER_MMR.get(tier, 600)
+                        print(f"Using tier-based MMR for {player['name']}: {player_mmrs[player_id]}")
                 else:
-                    # Default MMR
-                    player_mmrs[player_id] = 600
+                    # Default MMR values
+                    if is_global:
+                        player_mmrs[player_id] = 300  # Default global MMR
+                        print(f"Using default global MMR for {player['name']}: 300")
+                    else:
+                        player_mmrs[player_id] = 600  # Default ranked MMR
+                        print(f"Using default ranked MMR for {player['name']}: 600")
 
         return player_mmrs
 
     async def captain1_selection(self, captain, players, player_mmrs, channel):
         """Handle captain 1's selection with buttons - 5 minute timeout"""
+        # Determine if this is a global match
+        is_global = channel.name.lower() == "global"
+        mmr_type = "Global MMR" if is_global else "MMR"
+
         # Create an embed with player information including MMR
         embed = discord.Embed(
             title="**You are Captain 1!**",
@@ -253,7 +280,7 @@ class CaptainsSystem:
             mmr = player_mmrs.get(player_id, "Unknown")
             embed.add_field(
                 name=f"{i + 1}. {player['name']}",
-                value=f"MMR: **{mmr}**",
+                value=f"{mmr_type}: **{mmr}**",
                 inline=False
             )
 
@@ -269,7 +296,7 @@ class CaptainsSystem:
         for i, player in enumerate(players):
             button = Button(
                 style=ButtonStyle.primary,
-                label=f"{i + 1}. {player['name']} (MMR: {player_mmrs.get(player['id'], 'Unknown')})",
+                label=f"{i + 1}. {player['name']} ({mmr_type}: {player_mmrs.get(player['id'], 'Unknown')})",
                 custom_id=f"select_{i}"
             )
 
@@ -294,6 +321,10 @@ class CaptainsSystem:
 
     async def captain2_selection(self, captain, players, player_mmrs, channel):
         """Handle captain 2's selection with buttons, allowing TWO selections - 5 minute timeout"""
+        # Determine if this is a global match
+        is_global = channel.name.lower() == "global"
+        mmr_type = "Global MMR" if is_global else "MMR"
+
         # Create an embed with player information including MMR
         embed = discord.Embed(
             title="**You are Captain 2!**",
@@ -307,7 +338,7 @@ class CaptainsSystem:
             mmr = player_mmrs.get(player_id, "Unknown")
             embed.add_field(
                 name=f"{i + 1}. {player['name']}",
-                value=f"MMR: **{mmr}**",
+                value=f"{mmr_type}: **{mmr}**",
                 inline=False
             )
 
@@ -324,7 +355,7 @@ class CaptainsSystem:
         for i, player in enumerate(players):
             button = Button(
                 style=ButtonStyle.primary,
-                label=f"{i + 1}. {player['name']} (MMR: {player_mmrs.get(player['id'], 'Unknown')})",
+                label=f"{i + 1}. {player['name']} ({mmr_type}: {player_mmrs.get(player['id'], 'Unknown')})",
                 custom_id=f"select_{i}"
             )
 
