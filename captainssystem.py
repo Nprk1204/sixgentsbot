@@ -36,8 +36,10 @@ class CaptainsSystem:
         """Cancel the current selection process for a specific channel or all channels"""
         if channel_id:
             if str(channel_id) in self.active_selections:
+                print(f"Canceling captain selection for channel_id: {channel_id}")
                 del self.active_selections[str(channel_id)]
         else:
+            print("Canceling all captain selections")
             self.active_selections.clear()
 
     def start_captains_selection(self, players, channel_id):
@@ -444,38 +446,58 @@ class CaptainsSystem:
         total_mmr = 0
         player_count = 0
 
+        # Check if the team has any players
+        if not team:
+            print("Warning: Attempting to calculate MMR for empty team")
+            return 0
+
+        print(f"Calculating MMR for team with {len(team)} players")
+
         for player in team:
             player_id = player['id']
+            print(f"Processing player: {player.get('name', 'Unknown')} (ID: {player_id})")
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and 'dummy_mmr' in player:
+                mmr = player['dummy_mmr']
+                print(f"Using dummy_mmr for {player.get('name', 'Unknown')}: {mmr}")
+                total_mmr += mmr
+                player_count += 1
+                continue
 
             # Skip dummy players without MMR
             if player_id.startswith('9000') and 'dummy_mmr' not in player:
-                continue
-
-            # Use stored dummy MMR if available
-            if player_id.startswith('9000') and 'dummy_mmr' in player:
-                total_mmr += player['dummy_mmr']
-                player_count += 1
+                print(f"Skipping dummy player without MMR: {player.get('name', 'Unknown')}")
                 continue
 
             # Get player data for real players
             player_data = self.match_system.players.find_one({"id": player_id})
             if player_data:
-                total_mmr += player_data.get("mmr", 0)
+                # For real players, use their stored MMR
+                mmr = player_data.get("mmr", 0)
+                print(f"Using stored MMR for {player.get('name', 'Unknown')}: {mmr}")
+                total_mmr += mmr
                 player_count += 1
             else:
                 # For new players, check rank record
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
                     tier = rank_record.get("tier", "Rank C")
-                    total_mmr += self.match_system.TIER_MMR.get(tier, 600)
+                    mmr = self.match_system.TIER_MMR.get(tier, 600)
+                    print(f"Using tier-based MMR for {player.get('name', 'Unknown')}: {mmr} (Tier: {tier})")
+                    total_mmr += mmr
                     player_count += 1
                 else:
-                    # Default MMR
-                    total_mmr += 600
+                    # Default MMR for players with no data
+                    mmr = 600
+                    print(f"Using default MMR for {player.get('name', 'Unknown')}: {mmr}")
+                    total_mmr += mmr
                     player_count += 1
 
         # Return average MMR rounded to nearest integer
-        return round(total_mmr / player_count) if player_count > 0 else 0
+        avg_mmr = round(total_mmr / player_count) if player_count > 0 else 0
+        print(f"Team average MMR: {avg_mmr} (Total: {total_mmr}, Players: {player_count})")
+        return avg_mmr
 
     async def wait_for_captain_response(self, captain, timeout):
         """Wait for a captain to respond to a DM"""
@@ -490,9 +512,11 @@ class CaptainsSystem:
     async def fallback_to_random(self, channel_id):
         """Fall back to random team selection if captain selection fails"""
         channel_id = str(channel_id)
+        print(f"Starting fallback_to_random for channel_id: {channel_id}")
 
         # Get selection state for this channel
         if channel_id not in self.active_selections:
+            print(f"No active selection found for channel_id: {channel_id}")
             return
 
         selection_state = self.active_selections[channel_id]
@@ -500,10 +524,12 @@ class CaptainsSystem:
         # Get the announcement channel
         channel = selection_state.get('announcement_channel')
         if not channel:
+            print("Cannot proceed with fallback: No announcement channel found")
             return  # Can't proceed without a channel to send messages to
 
         # Get all players
         all_players = selection_state['match_players']
+        print(f"Fallback: Got {len(all_players)} players for random team assignment")
 
         # Create random teams
         random.shuffle(all_players)
@@ -518,21 +544,26 @@ class CaptainsSystem:
         team1_mmr = self.calculate_team_mmr(team1)
         team2_mmr = self.calculate_team_mmr(team2)
 
-        is_global = False
-        for guild in self.bot.guilds:
-            for channel in guild.text_channels:
-                if str(channel.id) == channel_id and channel.name.lower() == "global":
-                    is_global = True
-                    break
+        # Determine if this is a global match
+        is_global = channel.name.lower() == "global"
+        print(f"Fallback: Channel {channel.name}, is_global: {is_global}")
 
-        # Create match record
-        match_id = self.match_system.create_match(
-            str(uuid.uuid4()),
-            team1,
-            team2,
-            channel_id,
-            is_global=is_global
-        )
+        # Create match record with explicit is_global flag
+        try:
+            match_id = self.match_system.create_match(
+                str(uuid.uuid4()),
+                team1,
+                team2,
+                channel_id,
+                is_global=is_global
+            )
+            print(f"Fallback: Created match with ID {match_id}")
+        except Exception as e:
+            print(f"Error creating match in fallback: {str(e)}")
+            # Even if match creation fails, still try to send a message to the channel
+            await channel.send(f"❌ Error creating match: {str(e)}")
+            self.cancel_selection(channel_id)
+            return
 
         # Create an embed for team announcement
         embed = discord.Embed(
@@ -545,13 +576,29 @@ class CaptainsSystem:
         embed.add_field(name=f"Team 2 - Avg MMR: {team2_mmr}", value=", ".join(team2_mentions), inline=False)
         embed.add_field(
             name="Report Results",
-            value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
+            value=f"Play your match and report the result using `/report {match_id} win` or `/report {match_id} loss`",
             inline=False
         )
 
         # Send team announcement as embed
-        await channel.send(embed=embed)
+        try:
+            await channel.send(embed=embed)
+            print(f"Fallback: Sent team announcement embed to channel {channel.name}")
+        except Exception as e:
+            print(f"Error sending team announcement in fallback: {str(e)}")
+            # Try sending a plain text message if embed fails
+            try:
+                await channel.send(f"Teams have been randomly assigned. Match ID: {match_id}")
+            except:
+                pass
 
         # Clean up
-        self.queue.remove_players_from_queue(all_players)
-        self.cancel_selection(channel_id)
+        try:
+            print(f"Fallback: Removing {len(all_players)} players from queue")
+            self.queue.remove_players_from_queue(all_players)
+            print(f"Fallback: Canceling selection for channel {channel_id}")
+            self.cancel_selection(channel_id)
+        except Exception as e:
+            print(f"Error in cleanup during fallback: {str(e)}")
+            # Try to cancel the selection anyway
+            self.cancel_selection(channel_id)
