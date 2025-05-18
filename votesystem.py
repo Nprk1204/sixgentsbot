@@ -381,6 +381,12 @@ class VoteSystem:
             is_global
         )
 
+        # Ensure the match status is explicitly set to "in_progress"
+        self.match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {"status": "in_progress"}}
+        )
+
         # Create an embed for team announcement
         embed = discord.Embed(
             title="Match Created! (Balanced Random Teams)",

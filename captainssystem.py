@@ -184,6 +184,12 @@ class CaptainsSystem:
                 is_global=is_global
             )
 
+            # Ensure the match status is explicitly set to "in_progress"
+            self.match_system.matches.update_one(
+                {"match_id": match_id},
+                {"$set": {"status": "in_progress"}}
+            )
+
             # Create team announcement embed
             embed = self.create_teams_embed(match_id, captain1, captain2, captain1_team, captain2_team)
 
@@ -564,6 +570,12 @@ class CaptainsSystem:
             await channel.send(f"❌ Error creating match: {str(e)}")
             self.cancel_selection(channel_id)
             return
+
+            # Ensure the match status is explicitly set to "in_progress"
+        self.match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {"status": "in_progress"}}
+        )
 
         # Create an embed for team announcement
         embed = discord.Embed(
