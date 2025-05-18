@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import discord
 
 class QueueHandler:
@@ -11,6 +13,10 @@ class QueueHandler:
     def set_bot(self, bot):
         """Set the bot instance"""
         self.bot = bot
+
+        # Start background task to remove inactive players
+        if bot:
+            bot.loop.create_task(self.remove_inactive_players())
 
     def set_vote_system(self, channel_id, vote_system):
         """Set the vote system reference for a specific channel"""
@@ -57,7 +63,8 @@ class QueueHandler:
                     "name": player_name,
                     "mention": player_mention,
                     "channel_id": channel_id,
-                    "is_global": is_global
+                    "is_global": is_global,
+                    "joined_at": datetime.datetime.utcnow()  # Add timestamp
                 })
 
                 count = self.queue_collection.count_documents({"channel_id": channel_id})
@@ -71,20 +78,35 @@ class QueueHandler:
                 # Fallback if channel ID is invalid but not None
                 return f"{player_mention} is already in another queue. Please leave that queue first."
 
-        # Store player in queue with channel ID
+        # Store player in queue with channel ID and timestamp
         self.queue_collection.insert_one({
             "id": player_id,
             "name": player_name,
             "mention": player_mention,
             "channel_id": channel_id,
-            "is_global": is_global
+            "is_global": is_global,
+            "joined_at": datetime.datetime.utcnow()  # Add timestamp
         })
 
         # Count players in this channel's queue
         count = self.queue_collection.count_documents({"channel_id": channel_id})
 
-        # Start vote if queue is full for this channel
-        if count >= 6:
+        # Check if team selection is active in this channel
+        vote_active = False
+        captains_active = False
+
+        if channel_id in self.vote_systems:
+            vote_active = self.vote_systems[channel_id].is_voting_active(channel_id)
+
+        if channel_id in self.captains_systems:
+            captains_active = self.captains_systems[channel_id].is_selection_active(channel_id)
+
+        # If team selection is active, inform the player but don't start another vote
+        if vote_active or captains_active:
+            return f"{player_mention} has joined the queue! There are {count}/6 players. (Another team selection is in progress and you'll be in the next match)"
+
+        # Start vote if queue is full for this channel and no selection is active
+        if count >= 6 and not (vote_active or captains_active):
             return f"{player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
 
         return f"{player_mention} has joined the queue! There are {count}/6 players"
@@ -170,3 +192,43 @@ class QueueHandler:
         """Get all channel IDs that have active queues"""
         channels = self.queue_collection.distinct("channel_id")
         return channels
+
+    async def remove_inactive_players(self):
+        """Check and remove players who have been in queue for too long (60 minutes)"""
+        while True:
+            try:
+                # Sleep first to avoid immediate checks on startup
+                await asyncio.sleep(300)  # Check every 5 minutes
+
+                # Calculate cutoff time (60 minutes ago)
+                cutoff_time = datetime.datetime.utcnow() - datetime.timedelta(minutes=60)
+
+                # Find players to remove
+                expired_players = list(self.queue_collection.find({"joined_at": {"$lt": cutoff_time}}))
+
+                # Remove them and send notifications
+                for player in expired_players:
+                    player_id = player.get("id")
+                    player_mention = player.get("mention")
+                    channel_id = player.get("channel_id")
+
+                    # Remove from queue
+                    self.queue_collection.delete_one({"id": player_id})
+
+                    # Send notification if channel exists
+                    if self.bot:
+                        try:
+                            channel = self.bot.get_channel(int(channel_id))
+                            if channel:
+                                await channel.send(
+                                    f"{player_mention} has been removed from the queue due to inactivity (60+ minutes)."
+                                )
+                        except Exception as e:
+                            print(f"Error sending queue timeout notification: {e}")
+
+                # Log how many players were removed
+                if expired_players:
+                    print(f"Removed {len(expired_players)} players from queue due to inactivity")
+
+            except Exception as e:
+                print(f"Error in remove_inactive_players task: {e}")

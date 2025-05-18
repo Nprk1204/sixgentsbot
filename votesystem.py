@@ -88,7 +88,7 @@ class VoteSystem:
                                  emoji="👑")
 
         # Create View
-        view = View(timeout=60)
+        view = View(timeout=30)
         view.add_item(random_button)
         view.add_item(captains_button)
 
@@ -108,7 +108,7 @@ class VoteSystem:
         self.active_votes[channel_id]['view'] = view
 
         # Start vote timeout
-        self.bot.loop.create_task(self.vote_timeout(channel_id, 60))
+        self.bot.loop.create_task(self.vote_timeout(channel_id, 30))
 
         return True  # Vote started successfully
 
@@ -125,10 +125,18 @@ class VoteSystem:
 
         vote_state = self.active_votes[channel_id]
 
-        # Check if user is in queue
+        # Check if user is in queue AND in the original set of players being considered for this vote
         player_id = str(user_id)
-        if not self.queue.is_player_in_queue(player_id, channel_id):
-            await interaction.response.send_message("Only players in the queue can vote!", ephemeral=True)
+
+        # Get the original players from the queue when voting started
+        players = self.queue.get_players_for_match(channel_id)
+        player_ids = [str(p['id']) for p in players]
+
+        # Only let players who were in the queue when voting started to vote
+        if player_id not in player_ids:
+            await interaction.response.send_message(
+                "Only players who were in the queue when voting started can vote on this team selection!",
+                ephemeral=True)
             return
 
         # Add user to voters if not already tracked
