@@ -52,10 +52,16 @@ class VoteSystem:
         if channel_id in self.active_votes:
             self.cancel_voting(channel_id)
 
+        # Get players from the queue
         players = self.queue.get_players_for_match(channel_id)
         if len(players) < 6:
             await channel.send("Not enough players to start voting!")
             return False
+
+        # Mark these players as part of active selection
+        # This should be a new method in QueueHandler class
+        if hasattr(self.queue, 'mark_active_selection_players'):
+            self.queue.mark_active_selection_players(channel_id)
 
         # Initialize voting state for this channel
         self.active_votes[channel_id] = {
@@ -65,7 +71,8 @@ class VoteSystem:
             'user_votes': {},
             'random_votes': 0,
             'captains_votes': 0,
-            'view': None  # Store the View object
+            'view': None,  # Store the View object
+            'player_ids': [p['id'] for p in players]  # Store original player IDs
         }
 
         # Get mentions of queued players
@@ -77,7 +84,7 @@ class VoteSystem:
             description=(
                     "Vote for team selection method:\n\n"
                     "Queued players: " + ", ".join(player_mentions) + "\n"
-                                                                      "All 6 players must vote! (60 second timeout)"
+                                                                      "All 6 players must vote! (30 second timeout)"
             ),
             color=0x3498db
         )
@@ -87,7 +94,7 @@ class VoteSystem:
         captains_button = Button(style=discord.ButtonStyle.primary, custom_id="captains", label="Captains Pick",
                                  emoji="👑")
 
-        # Create View
+        # Create View with 30 second timeout
         view = View(timeout=30)
         view.add_item(random_button)
         view.add_item(captains_button)
@@ -125,18 +132,21 @@ class VoteSystem:
 
         vote_state = self.active_votes[channel_id]
 
-        # Check if user is in queue AND in the original set of players being considered for this vote
+        # Check if user is in queue and part of active selection
         player_id = str(user_id)
 
-        # Get the original players from the queue when voting started
-        players = self.queue.get_players_for_match(channel_id)
-        player_ids = [str(p['id']) for p in players]
+        # Get the player from the database
+        player_record = self.queue.queue_collection.find_one({
+            "id": player_id,
+            "channel_id": channel_id,
+            "active_selection": True  # Must be part of active selection
+        })
 
-        # Only let players who were in the queue when voting started to vote
-        if player_id not in player_ids:
+        if not player_record:
             await interaction.response.send_message(
-                "Only players who were in the queue when voting started can vote on this team selection!",
-                ephemeral=True)
+                "Only players who are part of the current team selection can vote!",
+                ephemeral=True
+            )
             return
 
         # Add user to voters if not already tracked

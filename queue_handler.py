@@ -1,7 +1,8 @@
-import asyncio
+import discord
 import datetime
 
-import discord
+import asyncio
+
 
 class QueueHandler:
     def __init__(self, db):
@@ -10,22 +11,16 @@ class QueueHandler:
         self.vote_systems = {}  # Map of channel_id to VoteSystem
         self.captains_systems = {}  # Map of channel_id to CaptainsSystem
         self.bot = None
+        self.active_selection_queues = {}  # Track channels with active selections
 
     def set_bot(self, bot):
         """Set the bot instance"""
         self.bot = bot
-
         # Start background task to remove inactive players
         if bot:
             bot.loop.create_task(self.remove_inactive_players())
 
-    def set_vote_system(self, channel_id, vote_system):
-        """Set the vote system reference for a specific channel"""
-        self.vote_systems[channel_id] = vote_system
-
-    def set_captains_system(self, channel_id, captains_system):
-        """Set the captains system reference for a specific channel"""
-        self.captains_systems[channel_id] = captains_system
+    # ... other existing methods ...
 
     def add_player(self, player, channel_id):
         player_id = str(player.id)
@@ -65,10 +60,11 @@ class QueueHandler:
                     "mention": player_mention,
                     "channel_id": channel_id,
                     "is_global": is_global,
-                    "joined_at": datetime.datetime.utcnow()  # Add timestamp
+                    "joined_at": datetime.datetime.utcnow(),
+                    "active_selection": False  # Flag to track if in active selection
                 })
 
-                count = self.queue_collection.count_documents({"channel_id": channel_id})
+                count = self.queue_collection.count_documents({"channel_id": channel_id, "active_selection": False})
                 return f"{player_mention} has joined the queue! There are {count}/6 players"
 
             # Only format as mention if we have a valid channel ID
@@ -79,71 +75,92 @@ class QueueHandler:
                 # Fallback if channel ID is invalid but not None
                 return f"{player_mention} is already in another queue. Please leave that queue first."
 
-        # Store player in queue with channel ID and timestamp
+        # Check if team selection is active in this channel
+        selection_active = False
+
+        if channel_id in self.vote_systems and self.vote_systems[channel_id].is_voting_active(channel_id):
+            selection_active = True
+
+        if channel_id in self.captains_systems and self.captains_systems[channel_id].is_selection_active(channel_id):
+            selection_active = True
+
+        # Store player in queue with channel ID, timestamp, and active_selection flag
         self.queue_collection.insert_one({
             "id": player_id,
             "name": player_name,
             "mention": player_mention,
             "channel_id": channel_id,
             "is_global": is_global,
-            "joined_at": datetime.datetime.utcnow()  # Add timestamp
+            "joined_at": datetime.datetime.utcnow(),
+            "active_selection": False  # New players always join the next queue
         })
 
-        # Count players in this channel's queue
-        count = self.queue_collection.count_documents({"channel_id": channel_id})
+        # Update the active_selection_queues tracking
+        if selection_active and channel_id not in self.active_selection_queues:
+            # Mark existing players as part of active selection
+            self.mark_active_selection_players(channel_id)
 
-        # Check if team selection is active in this channel
-        vote_active = False
-        captains_active = False
+        # Count players in the new queue (not in active selection)
+        count = self.queue_collection.count_documents({
+            "channel_id": channel_id,
+            "active_selection": False
+        })
 
-        if channel_id in self.vote_systems:
-            vote_active = self.vote_systems[channel_id].is_voting_active(channel_id)
+        # Count players in the active queue (already in selection)
+        active_count = self.queue_collection.count_documents({
+            "channel_id": channel_id,
+            "active_selection": True
+        })
 
-        if channel_id in self.captains_systems:
-            captains_active = self.captains_systems[channel_id].is_selection_active(channel_id)
-
-        # If team selection is active, inform the player but don't start another vote
-        if vote_active or captains_active:
+        # If team selection is active in this channel, inform the player they'll be in the next match
+        if selection_active:
             return f"{player_mention} has joined the queue! There are {count}/6 players. (Another team selection is in progress and you'll be in the next match)"
 
         # Start vote if queue is full for this channel and no selection is active
-        if count >= 6 and not (vote_active or captains_active):
+        if count >= 6 and not selection_active:
             return f"{player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
 
         return f"{player_mention} has joined the queue! There are {count}/6 players"
 
-    def remove_player(self, player, channel_id):
-        """Remove a player from a specific channel's queue"""
-        player_id = str(player.id)
+    def mark_active_selection_players(self, channel_id):
+        """Mark the first 6 players in a channel's queue as part of the active selection"""
         channel_id = str(channel_id)
+        self.active_selection_queues[channel_id] = True
 
-        # Only delete from the specific channel queue
-        result = self.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
+        # Get the first 6 players
+        players = list(self.queue_collection.find({"channel_id": channel_id}).limit(6))
 
-        # Cancel any active votes or selections for this channel
-        if channel_id in self.vote_systems:
-            self.vote_systems[channel_id].cancel_voting()
-
-        if channel_id in self.captains_systems:
-            self.captains_systems[channel_id].cancel_selection()
-
-        if result.deleted_count > 0:
-            return f"{player.mention} has left the queue!"
-        else:
-            return f"{player.mention} was not in this queue!"
+        # Mark them as part of active selection
+        for player in players:
+            self.queue_collection.update_one(
+                {"_id": player["_id"]},
+                {"$set": {"active_selection": True}}
+            )
 
     def get_queue_status(self, channel_id):
         """Get the current status of a specific channel's queue"""
         channel_id = str(channel_id)
 
-        # Get all players currently in this channel's queue
-        players = list(self.queue_collection.find({"channel_id": channel_id}))
-        count = len(players)
+        # Get all players currently in this channel's queue, separated by active_selection
+        active_players = list(self.queue_collection.find({
+            "channel_id": channel_id,
+            "active_selection": True
+        }))
+
+        waiting_players = list(self.queue_collection.find({
+            "channel_id": channel_id,
+            "active_selection": False
+        }))
+
+        # Combined players for total count (for backward compatibility)
+        all_players = active_players + waiting_players
+        count = len(all_players)
+        waiting_count = len(waiting_players)
 
         # Create an embed instead of plain text
         embed = discord.Embed(
             title="Queue Status",
-            description=f"**Current Queue: {count}/6 players**",
+            description=f"**Current Queue: {waiting_count}/6 players**",
             color=0x3498db
         )
 
@@ -151,48 +168,88 @@ class QueueHandler:
             embed.add_field(name="Status", value="Queue is empty! Use `/join` to join the queue.", inline=False)
             return embed
 
-        # Create a list of player mentions
-        player_mentions = [player['mention'] for player in players]
+        # Create lists of player mentions
+        if active_players:
+            active_mentions = [player['mention'] for player in active_players]
+            embed.add_field(
+                name="Players in Active Selection",
+                value=", ".join(active_mentions),
+                inline=False
+            )
 
-        # Add player list to embed
-        embed.add_field(name="Players", value=", ".join(player_mentions), inline=False)
+        if waiting_players:
+            waiting_mentions = [player['mention'] for player in waiting_players]
+            embed.add_field(
+                name="Players in Queue",
+                value=", ".join(waiting_mentions),
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Players in Queue",
+                value="No players waiting in queue",
+                inline=False
+            )
 
         # Add info about how many more players are needed
-        if count < 6:
-            more_needed = 6 - count
+        if waiting_count < 6:
+            more_needed = 6 - waiting_count
             embed.add_field(name="Info", value=f"{more_needed} more player(s) needed for a match.", inline=False)
         elif channel_id in self.vote_systems and self.vote_systems[channel_id].is_voting_active():
             embed.add_field(name="Status", value="**Voting in progress!** React to the vote message.",
                             inline=False)
         elif channel_id in self.captains_systems and self.captains_systems[channel_id].is_selection_active():
             embed.add_field(name="Status", value="**Captain selection in progress!**", inline=False)
+        else:
+            # Queue is full but no selection active
+            embed.add_field(name="Status", value="**Queue is FULL!** Ready to start match.", inline=False)
 
         return embed
 
     def get_players_for_match(self, channel_id):
         """Get players in the queue for a match in a specific channel"""
         channel_id = str(channel_id)
-        return list(self.queue_collection.find({"channel_id": channel_id}).limit(6))
+
+        # Check if there's an active selection in this channel
+        if channel_id in self.active_selection_queues and self.active_selection_queues[channel_id]:
+            # Get players marked as part of active selection
+            return list(self.queue_collection.find({
+                "channel_id": channel_id,
+                "active_selection": True
+            }))
+        else:
+            # Otherwise get first 6 non-active-selection players
+            return list(self.queue_collection.find({
+                "channel_id": channel_id,
+                "active_selection": False
+            }).limit(6))
 
     def remove_players_from_queue(self, players, channel_id=None):
         """Remove players from the queue, optionally filtering by channel"""
-        for player in players:
-            if channel_id:
-                self.queue_collection.delete_one({"id": player['id'], "channel_id": str(channel_id)})
-            else:
-                self.queue_collection.delete_one({"id": player['id']})
+        # Get player IDs
+        player_ids = [player['id'] for player in players]
 
-    def is_player_in_queue(self, player_id, channel_id=None):
-        """Check if a player is in a specific channel's queue or any queue"""
         if channel_id:
-            return self.queue_collection.find_one({"id": player_id, "channel_id": str(channel_id)}) is not None
-        else:
-            return self.queue_collection.find_one({"id": player_id}) is not None
+            # Delete specified players in specified channel
+            self.queue_collection.delete_many({
+                "id": {"$in": player_ids},
+                "channel_id": str(channel_id)
+            })
 
-    def get_queue_channels(self):
-        """Get all channel IDs that have active queues"""
-        channels = self.queue_collection.distinct("channel_id")
-        return channels
+            # Check if we should clear active selection tracking
+            if channel_id in self.active_selection_queues:
+                # Check if any players still have active_selection=True
+                remaining = self.queue_collection.find_one({
+                    "channel_id": str(channel_id),
+                    "active_selection": True
+                })
+
+                if not remaining:
+                    # No more players in active selection, clear tracking
+                    del self.active_selection_queues[channel_id]
+        else:
+            # Delete specified players from all channels
+            self.queue_collection.delete_many({"id": {"$in": player_ids}})
 
     async def remove_inactive_players(self):
         """Check and remove players who have been in queue for too long (60 minutes)"""
