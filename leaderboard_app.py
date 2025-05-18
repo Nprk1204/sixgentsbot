@@ -350,11 +350,24 @@ def get_leaderboard_by_type(board_type):
 
 @app.route('/api/player/<player_id>')
 def get_player(player_id):
-    """API endpoint to get player data"""
+    """API endpoint to get player data with improved error handling"""
     try:
+        # Remove any unexpected suffixes from player_id (like :1)
+        if ':' in player_id:
+            print(f"Warning: Player ID contains colon, cleaning: {player_id}")
+            player_id = player_id.split(':')[0]
+
+        print(f"Fetching player data for ID: {player_id}")
+
+        # Validate player_id format
+        if not player_id or not isinstance(player_id, str):
+            return jsonify({"error": "Invalid player ID format"}), 400
+
+        # Try to find the player
         player = players_collection.find_one({"id": player_id}, {"_id": 0})
 
         if not player:
+            print(f"Player not found: {player_id}")
             return jsonify({"error": "Player not found"}), 404
 
         # Ensure player has global MMR fields
@@ -374,58 +387,72 @@ def get_player(player_id):
         global_wins = player.get("global_wins", 0)
         player["global_win_rate"] = round((global_wins / global_matches) * 100, 2) if global_matches > 0 else 0
 
-        # Get recent matches for this player
-        recent_matches = list(matches_collection.find(
-            {"$or": [
+        # Get recent matches for this player - handle potential errors
+        try:
+            query = {"$or": [
                 {"team1.id": player_id},
                 {"team2.id": player_id}
-            ], "status": "completed"},
-            {"_id": 0}
-        ).sort("completed_at", -1).limit(20))  # Increased limit to get more matches
+            ], "status": "completed"}
+
+            recent_matches = list(matches_collection.find(
+                query,
+                {"_id": 0}
+            ).sort("completed_at", -1).limit(20))  # Increased limit to get more matches
+
+            print(f"Found {len(recent_matches)} recent matches for player {player_id}")
+        except Exception as match_error:
+            print(f"Error fetching matches for player {player_id}: {str(match_error)}")
+            recent_matches = []
 
         # Format match data and include is_global flag
+        formatted_matches = []
         for match in recent_matches:
-            # Determine if the player won or lost
-            player_in_team1 = False
-            for p in match.get("team1", []):
-                if p.get("id") == player_id:
-                    player_in_team1 = True
-                    break
+            try:
+                # Determine if the player won or lost
+                player_in_team1 = False
+                for p in match.get("team1", []):
+                    if p.get("id") == player_id:
+                        player_in_team1 = True
+                        break
 
-            winner = match.get("winner")
+                winner = match.get("winner")
 
-            if (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2):
-                match["player_result"] = "Win"
-            else:
-                match["player_result"] = "Loss"
+                if (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2):
+                    match["player_result"] = "Win"
+                else:
+                    match["player_result"] = "Loss"
 
-            # Add is_global flag if missing
-            if "is_global" not in match:
-                # For backwards compatibility, determine based on channel
-                channel_id = match.get("channel_id")
-                is_global = False
+                # Add is_global flag if missing
+                if "is_global" not in match:
+                    # For backwards compatibility, determine based on channel
+                    channel_id = match.get("channel_id")
+                    # Default to non-global
+                    match["is_global"] = False
 
-                # Infer from channel ID - this is a best guess
-                if channel_id:
-                    # Try to find channel name somehow
-                    # This is a placeholder - in real implementation you'd need to determine this
-                    is_global = (channel_id == "your_global_channel_id")
+                # Format date
+                if "completed_at" in match and match["completed_at"]:
+                    match["date"] = match["completed_at"].strftime("%Y-%m-%d")
+                    del match["completed_at"]
+                else:
+                    match["date"] = "Unknown"
 
-                match["is_global"] = is_global
-
-            # Format date
-            if "completed_at" in match:
-                match["date"] = match["completed_at"].strftime("%Y-%m-%d")
-                del match["completed_at"]
+                formatted_matches.append(match)
+            except Exception as format_error:
+                print(f"Error formatting match {match.get('match_id', 'unknown')}: {str(format_error)}")
+                # Skip this match if there's an error formatting it
+                continue
 
         # Add match history
-        player["recent_matches"] = recent_matches
+        player["recent_matches"] = formatted_matches
 
         return jsonify(player)
 
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
         print(f"Error getting player {player_id}: {str(e)}")
-        return jsonify({"error": "Internal server error"}), 500
+        print(f"Detailed error: {error_details}")
+        return jsonify({"error": "Internal server error", "message": str(e)}), 500
 
 
 @app.route('/api/search')
