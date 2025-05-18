@@ -6,6 +6,7 @@ import datetime
 import time
 import requests
 import json
+from bson import json_util
 from functools import lru_cache
 from dotenv import load_dotenv
 import functools
@@ -350,7 +351,7 @@ def get_leaderboard_by_type(board_type):
 
 @app.route('/api/player/<player_id>')
 def get_player(player_id):
-    """API endpoint to get player data with improved error handling"""
+    """API endpoint to get player data with improved error handling and proper ObjectId serialization"""
     try:
         # Remove any unexpected suffixes from player_id (like :1)
         if ':' in player_id:
@@ -364,11 +365,15 @@ def get_player(player_id):
             return jsonify({"error": "Invalid player ID format"}), 400
 
         # Try to find the player
-        player = players_collection.find_one({"id": player_id}, {"_id": 0})
+        player = players_collection.find_one({"id": player_id})
 
         if not player:
             print(f"Player not found: {player_id}")
             return jsonify({"error": "Player not found"}), 404
+
+        # Remove MongoDB _id field which is not JSON serializable
+        if '_id' in player:
+            del player['_id']
 
         # Ensure player has global MMR fields
         if "global_mmr" not in player:
@@ -395,8 +400,7 @@ def get_player(player_id):
             ], "status": "completed"}
 
             recent_matches = list(matches_collection.find(
-                query,
-                {"_id": 0}
+                query
             ).sort("completed_at", -1).limit(20))  # Increased limit to get more matches
 
             print(f"Found {len(recent_matches)} recent matches for player {player_id}")
@@ -408,6 +412,21 @@ def get_player(player_id):
         formatted_matches = []
         for match in recent_matches:
             try:
+                # Remove MongoDB _id from match
+                if '_id' in match:
+                    del match['_id']
+
+                # Remove MongoDB _id from team members
+                if 'team1' in match and isinstance(match['team1'], list):
+                    for team_member in match['team1']:
+                        if '_id' in team_member:
+                            del team_member['_id']
+
+                if 'team2' in match and isinstance(match['team2'], list):
+                    for team_member in match['team2']:
+                        if '_id' in team_member:
+                            del team_member['_id']
+
                 # Determine if the player won or lost
                 player_in_team1 = False
                 for p in match.get("team1", []):
@@ -429,10 +448,14 @@ def get_player(player_id):
                     # Default to non-global
                     match["is_global"] = False
 
-                # Format date
+                # Format date - protect against missing/invalid dates
                 if "completed_at" in match and match["completed_at"]:
-                    match["date"] = match["completed_at"].strftime("%Y-%m-%d")
-                    del match["completed_at"]
+                    try:
+                        match["date"] = match["completed_at"].strftime("%Y-%m-%d")
+                    except (AttributeError, ValueError) as e:
+                        match["date"] = "Unknown"
+                    # Convert completed_at to string to avoid serialization issues
+                    match["completed_at"] = str(match["completed_at"])
                 else:
                     match["date"] = "Unknown"
 
@@ -445,6 +468,7 @@ def get_player(player_id):
         # Add match history
         player["recent_matches"] = formatted_matches
 
+        # Use Flask's jsonify which properly handles serialization
         return jsonify(player)
 
     except Exception as e:
