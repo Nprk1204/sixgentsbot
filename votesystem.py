@@ -257,6 +257,19 @@ class VoteSystem:
 
         await vote_state['message'].edit(view=vote_state['view'])
 
+        # IMPORTANT: Cancel any existing matches in "voting" or "selection" status for these players
+        for player in players:
+            player_id = player["id"]
+            self.match_system.matches.update_many(
+                {
+                    "players.id": player_id,
+                    "status": {"$in": ["voting", "selection"]}
+                },
+                {
+                    "$set": {"status": "cancelled"}
+                }
+            )
+
         # Determine winner (default to random if tied or no votes)
         if vote_state['captains_votes'] > vote_state['random_votes']:
             # Cancel this vote
@@ -386,6 +399,9 @@ class VoteSystem:
             {"match_id": match_id},
             {"$set": {"status": "in_progress"}}
         )
+
+        # Debug print to confirm the status
+        print(f"DEBUG: Match {match_id} status set to 'in_progress'")
 
         # Create an embed for team announcement
         embed = discord.Embed(

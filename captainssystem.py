@@ -190,6 +190,9 @@ class CaptainsSystem:
                 {"$set": {"status": "in_progress"}}
             )
 
+            # Debug print to confirm the status
+            print(f"DEBUG: Match {match_id} status set to 'in_progress'")
+
             # Create team announcement embed
             embed = self.create_teams_embed(match_id, captain1, captain2, captain1_team, captain2_team)
 
@@ -576,6 +579,9 @@ class CaptainsSystem:
             {"match_id": match_id},
             {"$set": {"status": "in_progress"}}
         )
+
+        # Debug print to confirm the status
+        print(f"DEBUG: Match {match_id} status set to 'in_progress'")
 
         # Create an embed for team announcement
         embed = discord.Embed(

@@ -37,15 +37,35 @@ class QueueHandler:
         player_name = player.display_name
         channel_id = str(channel_id)
 
-        # Check if this channel has an active match in early stages
-        active_match = self.matches_collection.find_one({
-            "channel_id": channel_id,
+        # Debug the player's current status in all matches
+        print(f"DEBUG: Checking status for player {player_name} (ID: {player_id}) in channel {channel_id}")
+
+        # Get ALL matches this player is in (active or otherwise)
+        player_matches = list(self.matches_collection.find({"players.id": player_id}))
+
+        for match in player_matches:
+            match_id = match.get("match_id", "unknown")
+            match_status = match.get("status", "unknown")
+            match_channel = match.get("channel_id", "unknown")
+            print(f"DEBUG: Player has match: ID={match_id}, status={match_status}, channel={match_channel}")
+
+        # CRITICAL FIX: Search specifically for matches where this player is in VOTING or SELECTION
+        active_team_selection = self.matches_collection.find_one({
             "players.id": player_id,
-            "status": {"$in": ["voting", "selection"]}  # Only check for early stages
+            "status": {"$in": ["voting", "selection"]}
         })
 
-        if active_match:
-            return f"{player_mention} cannot join the queue while team selection is in progress!"
+        if active_team_selection:
+            # Get the actual channel name if possible
+            team_selection_channel = "another channel"
+            other_channel_id = active_team_selection.get("channel_id")
+
+            if self.bot and other_channel_id and other_channel_id.isdigit():
+                other_channel = self.bot.get_channel(int(other_channel_id))
+                if other_channel:
+                    team_selection_channel = f"#{other_channel.name}"
+
+            return f"{player_mention} cannot join the queue while team selection is in progress in {team_selection_channel}!"
 
         # Check if player is already in this channel's queue
         if self.queue_collection.find_one({"id": player_id, "channel_id": channel_id}):
@@ -60,23 +80,6 @@ class QueueHandler:
                 return f"{player_mention} is already in a queue in {channel_mention}. Please leave that queue first."
             else:
                 return f"{player_mention} is already in another queue. Please leave that queue first."
-
-        # IMPROVED CHECK: Only prevent joining if in early match stages in any channel
-        other_match = self.matches_collection.find_one({
-            "players.id": player_id,
-            "status": {"$in": ["voting", "selection"]}  # Only check for early stages
-        })
-
-        if other_match:
-            other_channel_id = other_match.get("channel_id")
-            # Get the actual channel name to provide better feedback
-            channel_name = "another channel"
-            if self.bot and other_channel_id and other_channel_id.isdigit():
-                channel = self.bot.get_channel(int(other_channel_id))
-                if channel:
-                    channel_name = f"#{channel.name}"
-
-            return f"{player_mention} is already in team selection in {channel_name}."
 
         # Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
