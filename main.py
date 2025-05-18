@@ -1796,81 +1796,94 @@ async def remove_match_results(ctx, match):
 
         return embed
 
+
 @bot.tree.command(name="forcestart", description="Force start the team selection process (Admin only)")
 async def forcestart_slash(interaction: discord.Interaction):
-        # Check if command is used in an allowed channel
-        if not is_queue_channel(interaction.channel):
-            await interaction.response.send_message(
-                f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
-                ephemeral=True
-            )
-            return
+    # Check if command is used in an allowed channel
+    if not is_queue_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
+            ephemeral=True
+        )
+        return
 
-        # Check if user has admin permissions
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                    ephemeral=True)
-            return
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
 
-        # Cancel any existing votes to ensure we can start a new one
-        if vote_system.is_voting_active():
-            vote_system.cancel_voting()
+    # Cancel any existing votes to ensure we can start a new one
+    if vote_system.is_voting_active():
+        vote_system.cancel_voting()
 
-        if captains_system.is_selection_active():
-            captains_system.cancel_selection()
+    if captains_system.is_selection_active():
+        captains_system.cancel_selection()
 
-        # Get current players in queue
-        channel_id = str(interaction.channel.id)
-        players = queue_handler.get_players_for_match(channel_id)
-        player_count = len(players)
+    # Get current players in queue
+    channel_id = str(interaction.channel.id)
+    players = queue_handler.get_players_for_match(channel_id)
+    player_count = len(players)
 
-        if player_count == 0:
-            await interaction.response.send_message("Can't force start: Queue is empty!")
-            return
+    if player_count == 0:
+        await interaction.response.send_message("Can't force start: Queue is empty!")
+        return
 
-        # Before adding dummy players, determine the MMR range based on the channel
-        # This ensures dummy players have appropriate MMR for each rank channel
-        channel_name = interaction.channel.name.lower()
-        if channel_name == "rank-a":
-            min_mmr = 1600
-            max_mmr = 2100
-        elif channel_name == "rank-b":
-            min_mmr = 1100
-            max_mmr = 1599
-        else:  # rank-c or global
-            min_mmr = 600
-            max_mmr = 1099
+    # Before adding dummy players, determine the MMR range based on the channel
+    # This ensures dummy players have appropriate MMR for each rank channel
+    channel_name = interaction.channel.name.lower()
+    if channel_name == "rank-a":
+        min_mmr = 1600
+        max_mmr = 2100
+    elif channel_name == "rank-b":
+        min_mmr = 1100
+        max_mmr = 1599
+    else:  # rank-c or global
+        min_mmr = 600
+        max_mmr = 1099
 
-        # If fewer than 6 players, add dummy players to fill the queue
-        if player_count < 6:
-            # Create dummy players to fill the queue
-            needed = 6 - player_count
-            await interaction.response.send_message(f"Adding {needed} dummy players to fill the queue for testing...")
+    # If fewer than 6 players, add dummy players to fill the queue
+    if player_count < 6:
+        # Create dummy players to fill the queue
+        needed = 6 - player_count
+        await interaction.response.send_message(f"Adding {needed} dummy players to fill the queue for testing...")
 
-            for i in range(needed):
-                # Use numeric IDs starting from 9000 to prevent parsing issues
-                dummy_id = f"9000{i + 1}"  # 90001, 90002, etc
-                dummy_name = f"TestPlayer{i + 1}"
-                dummy_mention = f"@TestPlayer{i + 1}"
+        for i in range(needed):
+            # Use numeric IDs starting from 9000 to prevent parsing issues
+            dummy_id = f"9000{i + 1}"  # 90001, 90002, etc
+            dummy_name = f"TestPlayer{i + 1}"
+            dummy_mention = f"@TestPlayer{i + 1}"
 
-                # Generate a random MMR value appropriate for the channel
-                dummy_mmr = random.randint(min_mmr, max_mmr)
+            # Generate a random MMR value appropriate for the channel
+            dummy_mmr = random.randint(min_mmr, max_mmr)
 
-                # Store MMR in a special field we'll check later
-                dummy_player = {
-                    "id": dummy_id,
-                    "name": dummy_name,
-                    "mention": dummy_mention,
-                    "channel_id": channel_id,
-                    "dummy_mmr": dummy_mmr  # Add MMR for the dummy player
-                }
+            # Store MMR in a special field we'll check later
+            dummy_player = {
+                "id": dummy_id,
+                "name": dummy_name,
+                "mention": dummy_mention,
+                "channel_id": channel_id,
+                "dummy_mmr": dummy_mmr,  # Add MMR for the dummy player
+                "joined_at": datetime.datetime.utcnow(),
+                "active_selection": True  # IMPORTANT: Mark as active selection
+            }
 
-                # Add dummy player to queue
-                queue_handler.queue_collection.insert_one(dummy_player)
+            # Add dummy player to queue
+            queue_handler.queue_collection.insert_one(dummy_player)
 
-        # Force start the vote
-        await interaction.channel.send("**Force starting team selection!**")
-        await vote_system.start_vote(interaction.channel)
+        # Mark this channel as having an active selection
+        if hasattr(queue_handler, 'active_selection_queues'):
+            queue_handler.active_selection_queues[channel_id] = True
+
+        # Also make sure real players are marked as active_selection
+        queue_handler.queue_collection.update_many(
+            {"channel_id": channel_id, "active_selection": False},
+            {"$set": {"active_selection": True}}
+        )
+
+    # Force start the vote
+    await interaction.channel.send("**Force starting team selection!**")
+    await vote_system.start_vote(interaction.channel)
 
 @bot.tree.command(name="forcestop",
                       description="Force stop any active votes or selections and clear the queue (Admin only)")
