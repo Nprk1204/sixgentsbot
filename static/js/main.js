@@ -387,7 +387,7 @@ function showPlayerDetails(playerId) {
                 modalTitle.textContent = player.name || 'Player Details';
             }
 
-            // First, create the tabs navigation at the top
+            // Create just the tabs with no header stats
             let content = `
                 <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
                     <li class="nav-item" role="presentation">
@@ -409,14 +409,17 @@ function showPlayerDetails(playerId) {
                 <div class="tab-content" id="playerStatsContent">
                     <!-- Ranked Stats Tab -->
                     <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
-                        <!-- Ranked Stats Content -->
+                        <!-- RANKED TAB CONTENT -->
                         <div class="card bg-dark-medium mb-4">
                             <div class="card-body">
-                                <div class="row align-items-center">
-                                    <div class="col-md-6">
-                                        <h2 class="mb-3">MMR: <span class="badge bg-primary">${player.mmr || 0}</span></h2>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="mmr-display">
+                                            <h4 class="mmr-label">MMR</h4>
+                                            <div class="mmr-value">${player.mmr || 0}</div>
+                                        </div>
                                     </div>
-                                    <div class="col-md-6">
+                                    <div class="col-md-8">
                                         <div class="stats-grid">
                                             <div class="stat-item">
                                                 <h5>Win Rate</h5>
@@ -496,20 +499,23 @@ function showPlayerDetails(playerId) {
                 content += `<p class="text-muted">No recent ranked matches found.</p>`;
             }
 
-            // Close ranked stats tab
+            // Close ranked stats tab and begin global stats tab
             content += `
                     </div>
 
                     <!-- Global Stats Tab -->
                     <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
-                        <!-- Global Stats Content -->
+                        <!-- GLOBAL TAB CONTENT -->
                         <div class="card bg-dark-medium mb-4">
                             <div class="card-body">
-                                <div class="row align-items-center">
-                                    <div class="col-md-6">
-                                        <h2 class="mb-3">Global MMR: <span class="badge bg-primary">${player.global_mmr || 300}</span></h2>
+                                <div class="row">
+                                    <div class="col-md-4">
+                                        <div class="mmr-display global">
+                                            <h4 class="mmr-label">Global MMR</h4>
+                                            <div class="mmr-value">${player.global_mmr || 300}</div>
+                                        </div>
                                     </div>
-                                    <div class="col-md-6">
+                                    <div class="col-md-8">
                                         <div class="stats-grid">
                                             <div class="stat-item">
                                                 <h5>Win Rate</h5>

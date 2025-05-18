@@ -1911,7 +1911,7 @@ img {
   }
 }
 
-/* Player Modal Styling */
+/* Player Modal Styling - Updated Version */
 .modal-content {
     border-radius: 12px;
     overflow: hidden;
@@ -1939,19 +1939,71 @@ img {
     background-color: var(--dark-medium);
 }
 
+/* MMR Display */
+.mmr-display {
+    text-align: center;
+    background-color: rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
+    padding: 15px;
+    position: relative;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 120px;
+}
+
+.mmr-display::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: var(--primary);
+    background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
+}
+
+.mmr-display.global::before {
+    background: var(--secondary);
+    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
+}
+
+.mmr-label {
+    font-size: 1rem;
+    margin-bottom: 10px;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.mmr-value {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.mmr-display.global .mmr-value {
+    color: var(--secondary);
+}
+
 /* Stats Grid */
 .stats-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 15px;
+    height: 100%;
 }
 
 .stat-item {
     text-align: center;
-    padding: 10px;
+    padding: 15px 10px;
     background-color: rgba(0, 0, 0, 0.15);
     border-radius: 8px;
     transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .stat-item:hover {
@@ -1962,7 +2014,7 @@ img {
 .stat-item h5 {
     font-size: 0.85rem;
     color: var(--text-muted);
-    margin-bottom: 5px;
+    margin-bottom: 8px;
     font-weight: 500;
 }
 
@@ -2100,17 +2152,27 @@ img {
 
 /* Responsive adjustments */
 @media (max-width: 767.98px) {
+    .mmr-display {
+        min-height: auto;
+        margin-bottom: 15px;
+    }
+
+    .mmr-value {
+        font-size: 1.8rem;
+    }
+
     .stats-grid {
         grid-template-columns: repeat(3, 1fr);
         gap: 10px;
     }
 
     .stat-item {
-        padding: 8px 5px;
+        padding: 10px 5px;
     }
 
     .stat-item h5 {
         font-size: 0.7rem;
+        margin-bottom: 5px;
     }
 
     .stat-item .stat-value {
