@@ -451,8 +451,8 @@ function showPlayerDetails(playerId) {
                         <table class="table table-dark table-striped match-table">
                             <thead>
                                 <tr>
-                                    <th>Date</th>
-                                    <th>Result</th>
+                                    <th style="width:120px">Date</th>
+                                    <th style="width:90px;text-align:center">Result</th>
                                     <th>Teams</th>
                                 </tr>
                             </thead>
@@ -476,15 +476,20 @@ function showPlayerDetails(playerId) {
                         team2Names = 'Error loading team';
                     }
 
-                    // Determine result color
+                    // Determine result class
                     let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
+                    let resultBadge = match.player_result === 'Win' ?
+                        '<span class="badge bg-success">Win</span>' :
+                        '<span class="badge bg-danger">Loss</span>';
 
                     content += `
                         <tr>
-                            <td>${match.date || 'Unknown'}</td>
-                            <td class="${resultClass}">${match.player_result || 'Unknown'}</td>
-                            <td>
-                                <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
+                            <td style="vertical-align:middle">${match.date || 'Unknown'}</td>
+                            <td style="text-align:center;vertical-align:middle">${resultBadge}</td>
+                            <td style="vertical-align:middle">
+                                <span style="display:inline-block;margin-right:5px">${team1Names}</span>
+                                <span class="badge bg-dark mx-2">vs</span>
+                                <span style="display:inline-block;margin-left:5px">${team2Names}</span>
                             </td>
                         </tr>
                     `;
@@ -545,8 +550,8 @@ function showPlayerDetails(playerId) {
                         <table class="table table-dark table-striped match-table">
                             <thead>
                                 <tr>
-                                    <th>Date</th>
-                                    <th>Result</th>
+                                    <th style="width:120px">Date</th>
+                                    <th style="width:90px;text-align:center">Result</th>
                                     <th>Teams</th>
                                 </tr>
                             </thead>
@@ -570,15 +575,20 @@ function showPlayerDetails(playerId) {
                         team2Names = 'Error loading team';
                     }
 
-                    // Determine result color
+                    // Determine result class
                     let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
+                    let resultBadge = match.player_result === 'Win' ?
+                        '<span class="badge bg-success">Win</span>' :
+                        '<span class="badge bg-danger">Loss</span>';
 
                     content += `
                         <tr>
-                            <td>${match.date || 'Unknown'}</td>
-                            <td class="${resultClass}">${match.player_result || 'Unknown'}</td>
-                            <td>
-                                <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
+                            <td style="vertical-align:middle">${match.date || 'Unknown'}</td>
+                            <td style="text-align:center;vertical-align:middle">${resultBadge}</td>
+                            <td style="vertical-align:middle">
+                                <span style="display:inline-block;margin-right:5px">${team1Names}</span>
+                                <span class="badge bg-dark mx-2">vs</span>
+                                <span style="display:inline-block;margin-left:5px">${team2Names}</span>
                             </td>
                         </tr>
                     `;
