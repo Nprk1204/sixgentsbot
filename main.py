@@ -919,7 +919,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     elif mmr >= 1100:
         tier = "Rank B"
 
-    tier_color = 0x1287438  # Default color for Rank C (green)
+    tier_color = 0x128743  # Default color for Rank C (green)
     if tier == "Rank A":
         tier_color = 0xC41E3A  # Red color for Rank A
     elif tier == "Rank B":
