@@ -313,8 +313,24 @@ function setupPlayerClickHandlers() {
 }
 
 function showPlayerDetails(playerId) {
-    // Get the modal object
-    const playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
+    // First check if the modal element exists
+    const modalElement = document.getElementById('playerModal');
+    if (!modalElement) {
+        console.error("Player modal element not found");
+        return;
+    }
+
+    // Find or create the Bootstrap Modal instance
+    let playerModal;
+
+    // Check if Bootstrap is available
+    if (typeof bootstrap !== 'undefined') {
+        // Try to get existing modal instance or create a new one
+        playerModal = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    } else {
+        console.error("Bootstrap is not available");
+        return;
+    }
 
     // Clean playerId by removing any suffixes (like :1)
     if (playerId.includes(':')) {
@@ -341,7 +357,13 @@ function showPlayerDetails(playerId) {
     `;
 
     // Show modal while loading data
-    playerModal.show();
+    try {
+        playerModal.show();
+    } catch (error) {
+        console.error("Error showing modal:", error);
+        // Try an alternative approach if the first fails
+        $(modalElement).modal('show');
+    }
 
     // Fetch player data with improved error handling
     console.log(`Fetching player data for ID: ${playerId}`);
