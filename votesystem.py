@@ -52,16 +52,15 @@ class VoteSystem:
         if channel_id in self.active_votes:
             self.cancel_voting(channel_id)
 
-        # Get players from the queue
+        # Get the active match players from queue handler
         players = self.queue.get_players_for_match(channel_id)
         if len(players) < 6:
             await channel.send("Not enough players to start voting!")
             return False
 
-        # Mark these players as part of active selection
-        # This should be a new method in QueueHandler class
-        if hasattr(self.queue, 'mark_active_selection_players'):
-            self.queue.mark_active_selection_players(channel_id)
+        # Update match status to "voting"
+        if hasattr(self.queue, 'update_match_status'):
+            self.queue.update_match_status(channel_id, "voting")
 
         # Initialize voting state for this channel
         self.active_votes[channel_id] = {
@@ -75,7 +74,7 @@ class VoteSystem:
             'player_ids': [p['id'] for p in players]  # Store original player IDs
         }
 
-        # Get mentions of queued players
+        # Get mentions of match players
         player_mentions = [p['mention'] for p in players]
 
         # Create and send vote message with buttons
@@ -83,8 +82,8 @@ class VoteSystem:
             title="🗳️ Team Selection Vote",
             description=(
                     "Vote for team selection method:\n\n"
-                    "Queued players: " + ", ".join(player_mentions) + "\n"
-                                                                      "All 6 players must vote! (30 second timeout)"
+                    "Match players: " + ", ".join(player_mentions) + "\n"
+                                                                     "All 6 players must vote! (30 second timeout)"
             ),
             color=0x3498db
         )
@@ -132,21 +131,12 @@ class VoteSystem:
 
         vote_state = self.active_votes[channel_id]
 
-        # Check if user is in queue and part of active selection
+        # Check if player is in the active match
         player_id = str(user_id)
 
-        # Get the player from the database
-        player_record = self.queue.queue_collection.find_one({
-            "id": player_id,
-            "channel_id": channel_id,
-            "active_selection": True  # Must be part of active selection
-        })
-
-        if not player_record:
-            await interaction.response.send_message(
-                "Only players who are part of the current team selection can vote!",
-                ephemeral=True
-            )
+        # Check if this user is in the list of players for this vote
+        if player_id not in vote_state['player_ids']:
+            await interaction.response.send_message("Only players in this match can vote!", ephemeral=True)
             return
 
         # Add user to voters if not already tracked
@@ -258,7 +248,7 @@ class VoteSystem:
         # Get the channel object
         channel = vote_state['channel']
 
-        # Get players from the queue
+        # Get players from the active match
         players = self.queue.get_players_for_match(channel_id)
 
         # Disable the buttons in the view
@@ -272,7 +262,11 @@ class VoteSystem:
             # Cancel this vote
             self.cancel_voting(channel_id)
 
-            # Use the captains_system reference instead of match_system
+            # Update match status to "selection"
+            if hasattr(self.queue, 'update_match_status'):
+                self.queue.update_match_status(channel_id, "selection")
+
+            # Use the captains_system reference
             if self.captains_system:
                 captains_result = self.captains_system.start_captains_selection(players, channel_id)
                 await channel.send(embed=captains_result)
@@ -280,10 +274,13 @@ class VoteSystem:
             else:
                 # Fallback to random teams if captains_system is not set
                 await channel.send("Captains system not available. Falling back to random teams...")
-                # Continue to the random teams code below
                 await self.create_balanced_random_teams(channel, players, channel_id)
         else:
             # Create balanced random teams
+            # Update match status to "playing"
+            if hasattr(self.queue, 'update_match_status'):
+                self.queue.update_match_status(channel_id, "playing")
+
             await self.create_balanced_random_teams(channel, players, channel_id)
 
     # New method to create balanced random teams

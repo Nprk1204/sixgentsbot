@@ -1820,27 +1820,22 @@ async def forcestart_slash(interaction: discord.Interaction):
     if captains_system.is_selection_active():
         captains_system.cancel_selection()
 
-    # Get current players in queue
+    # Get current players in queue and active match
     channel_id = str(interaction.channel.id)
 
-    # Get all players in the queue for this channel (regardless of active_selection flag)
+    # Check if there's already an active match
+    active_match = queue_handler.matches_collection.find_one({"channel_id": channel_id})
+    if active_match:
+        await interaction.response.send_message("An active match is already in progress in this channel!")
+        return
+
+    # Get players from the queue
     players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
     player_count = len(players)
 
     if player_count == 0:
         await interaction.response.send_message("Can't force start: Queue is empty!")
         return
-
-    # Mark all existing players as part of active selection
-    queue_handler.queue_collection.update_many(
-        {"channel_id": channel_id},
-        {"$set": {"active_selection": True}}
-    )
-
-    # Set the channel as having an active selection
-    if not hasattr(queue_handler, 'active_selection_queues'):
-        queue_handler.active_selection_queues = {}  # Initialize if it doesn't exist
-    queue_handler.active_selection_queues[channel_id] = True
 
     # Before adding dummy players, determine the MMR range based on the channel
     channel_name = interaction.channel.name.lower()
@@ -1853,6 +1848,9 @@ async def forcestart_slash(interaction: discord.Interaction):
     else:  # rank-c or global
         min_mmr = 600
         max_mmr = 1099
+
+    # Determine if this is a global queue
+    is_global = channel_name == "global"
 
     # If fewer than 6 players, add dummy players to fill the queue
     if player_count < 6:
@@ -1876,12 +1874,34 @@ async def forcestart_slash(interaction: discord.Interaction):
                 "mention": dummy_mention,
                 "channel_id": channel_id,
                 "dummy_mmr": dummy_mmr,  # Add MMR for the dummy player
-                "joined_at": datetime.datetime.utcnow(),
-                "active_selection": True  # Mark as active selection
+                "joined_at": datetime.datetime.utcnow()
             }
 
             # Add dummy player to queue
             queue_handler.queue_collection.insert_one(dummy_player)
+
+    # Create active match
+    match_id = str(uuid.uuid4())[:8]
+
+    # Get all players (real + dummy) - up to 6
+    all_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}).limit(6))
+
+    # Create active match entry
+    active_match = {
+        "match_id": match_id,
+        "channel_id": channel_id,
+        "players": all_players,
+        "created_at": datetime.datetime.utcnow(),
+        "is_global": is_global,
+        "status": "voting"  # Initial status is voting
+    }
+
+    # Insert into active matches collection
+    queue_handler.matches_collection.insert_one(active_match)
+
+    # Remove these players from the queue
+    for player in all_players:
+        queue_handler.queue_collection.delete_one({"_id": player["_id"]})
 
     # Force start the vote
     await interaction.channel.send("**Force starting team selection!**")
