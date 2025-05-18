@@ -1045,7 +1045,7 @@ def handle_verify_rank_check(discord_username, tier, discord_id=None):
 
     # Perform the Discord role assignment - passing the Discord ID if available
     assignment_result = assign_discord_role(
-        username=discord_username,
+        username=discord_username, 
         role_name=tier,
         discord_id=discord_id
     )
@@ -1120,7 +1120,11 @@ def check_rank():
                             discord_id=discord_id)
 
             # Try the role assignment - pass discord_id as well when available
-            role_result = handle_verify_rank_check(discord_username, manual_tier, discord_id=discord_id)
+            role_result = assign_discord_role(
+                username=discord_username,
+                role_name=manual_tier,
+                discord_id=discord_id
+            )
 
             # Store the result
             manual_result["role_assignment"] = role_result
@@ -1136,81 +1140,14 @@ def check_rank():
     if discord_username:
         tier = mock_data.get("tier")
         store_rank_data(discord_username, username or discord_username, platform, mock_data, discord_id=discord_id)
-        role_result = handle_verify_rank_check(discord_username, tier, discord_id=discord_id)
-        mock_data["role_assignment"] = role_result
 
-    return jsonify(mock_data)
+        # Direct call to assign_discord_role with the discord_id if available
+        role_result = assign_discord_role(
+            username=discord_username,
+            role_name=tier,
+            discord_id=discord_id
+        )
 
-
-@app.route('/api/rank-check', methods=['GET'])
-def check_rank():
-    """API endpoint to check Rocket League rank with Discord username verification"""
-    platform = request.args.get('platform', '')
-    username = request.args.get('username', '')
-    discord_username = request.args.get('discord_username', '')
-    discord_id = request.args.get('discord_id', '')  # Add this if possible
-    manual_tier = request.args.get('manual_tier', '')
-    manual_mmr = request.args.get('manual_mmr', '')
-
-    # Debug logging
-    print(f"=== RANK CHECK DEBUG ===")
-    print(f"Platform: {platform}")
-    print(f"Username: {username}")
-    print(f"Discord username: {discord_username}")
-    print(f"Discord ID: {discord_id}")
-    print(f"Manual tier: {manual_tier}")
-    print(f"Manual MMR: {manual_mmr}")
-    print(f"========================")
-
-    # PRIORITY 1: Handle manual tier selection if provided
-    if manual_tier:
-        print(f"Using manually provided tier: {manual_tier}")
-        # Use provided MMR if available, otherwise fallback
-        mmr = int(manual_mmr) if manual_mmr and manual_mmr.isdigit() else get_mmr_from_rank(manual_tier)
-        print(f"Using MMR: {mmr}")  # Debug MMR value
-
-        manual_result = {
-            "success": True,
-            "username": username or "Manual Entry",
-            "platform": platform or "unknown",
-            "rank": manual_tier,
-            "tier": manual_tier,
-            "mmr": mmr,
-            "global_mmr": 300,  # Initialize Global MMR at 300
-            "timestamp": time.time(),
-            "manual_verification": True
-        }
-
-        # NEW: Add debug print to confirm MMR
-        print(f"DEBUG: Setting MMR to {mmr} for player with Discord username {discord_username}")
-
-        # Handle Discord role assignment if username provided
-        role_result = {"success": False, "message": "No Discord username provided"}
-
-        if discord_username:
-            print(f"Storing manual rank data for Discord user: {discord_username}")
-            # Pass the Discord ID if available
-            store_rank_data(discord_username, username or discord_username, platform or "unknown", manual_result,
-                            discord_id=discord_id)
-
-            # Try the role assignment with debugging
-            role_result = handle_verify_rank_check(discord_username, manual_tier)
-
-            # Store the result
-            manual_result["role_assignment"] = role_result
-
-        return jsonify(manual_result)
-
-    # Since we don't use the RLTracker API anymore, use mock data directly
-    print("Using mock data for rank verification")
-    mock_data = get_mock_rank_data(username, platform)
-    mock_data["fallback_method"] = "This is mock data as no manual tier was provided"
-
-    # Handle Discord verification for mock data
-    if discord_username:
-        tier = mock_data.get("tier")
-        store_rank_data(discord_username, username or discord_username, platform, mock_data, discord_id=discord_id)
-        role_result = handle_verify_rank_check(discord_username, tier)
         mock_data["role_assignment"] = role_result
 
     return jsonify(mock_data)
