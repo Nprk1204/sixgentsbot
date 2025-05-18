@@ -381,224 +381,217 @@ function showPlayerDetails(playerId) {
                 return;
             }
 
-            // Build player stats with proper error checking
-            let content = `
-                <div class="row mb-4">
-                    <div class="col-md-6">
-                        <h3>${player.name || 'Unknown Player'}</h3>
-                        <p class="lead">MMR: <span class="badge bg-primary">${player.mmr || 0}</span></p>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card bg-dark">
-                            <div class="card-body">
-                                <h5 class="card-title">Stats</h5>
-                                <div class="row">
-                                    <div class="col-6">Win Rate: ${player.win_rate || 0}%</div>
-                                    <div class="col-6">Record: ${player.wins || 0}-${player.losses || 0}</div>
-                                    <div class="col-6">Matches: ${player.matches || 0}</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            // Add tabs for ranked vs global stats if global data exists
-            if (player.global_matches && player.global_matches > 0) {
-                content += `
-                    <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
-                                    data-bs-target="#ranked-stats" type="button" role="tab"
-                                    aria-controls="ranked-stats" aria-selected="true">
-                                Ranked Stats
-                            </button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="global-tab" data-bs-toggle="tab"
-                                    data-bs-target="#global-stats" type="button" role="tab"
-                                    aria-controls="global-stats" aria-selected="false">
-                                Global Stats
-                            </button>
-                        </li>
-                    </ul>
-
-                    <div class="tab-content" id="playerStatsContent">
-                        <!-- Ranked Stats Tab -->
-                        <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
-                `;
+            // Update the modal title with player name
+            const modalTitle = document.getElementById('playerModalLabel');
+            if (modalTitle) {
+                modalTitle.textContent = player.name || 'Player Details';
             }
 
-            // Display recent matches if available
-            const hasMatches = player.recent_matches && player.recent_matches.length > 0;
+            // First, create the tabs navigation at the top
+            let content = `
+                <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
+                                data-bs-target="#ranked-stats" type="button" role="tab"
+                                aria-controls="ranked-stats" aria-selected="true">
+                            Ranked Stats
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="global-tab" data-bs-toggle="tab"
+                                data-bs-target="#global-stats" type="button" role="tab"
+                                aria-controls="global-stats" aria-selected="false">
+                            Global Stats
+                        </button>
+                    </li>
+                </ul>
 
-            if (hasMatches) {
-                // For tabbed view, filter by match type
-                let displayMatches = player.recent_matches;
-
-                if (player.global_matches && player.global_matches > 0) {
-                    // Filter out global matches for the ranked tab
-                    displayMatches = player.recent_matches.filter(match => !match.is_global);
-                }
-
-                if (displayMatches && displayMatches.length > 0) {
-                    content += `
-                        <h4>Recent Matches</h4>
-                        <div class="table-responsive">
-                            <table class="table table-dark table-striped">
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Result</th>
-                                        <th>Teams</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                    `;
-
-                    displayMatches.forEach(match => {
-                        // Safely format teams with error checking
-                        let team1Names = '';
-                        let team2Names = '';
-
-                        try {
-                            team1Names = match.team1 && Array.isArray(match.team1) ?
-                                match.team1.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
-
-                            team2Names = match.team2 && Array.isArray(match.team2) ?
-                                match.team2.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
-                        } catch (e) {
-                            console.error("Error formatting teams:", e);
-                            team1Names = 'Error loading team';
-                            team2Names = 'Error loading team';
-                        }
-
-                        // Determine result color
-                        let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
-
-                        content += `
-                            <tr>
-                                <td>${match.date || 'Unknown'}</td>
-                                <td class="${resultClass}">${match.player_result || 'Unknown'}</td>
-                                <td>
-                                    <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
-                                </td>
-                            </tr>
-                        `;
-                    });
-
-                    content += `
-                                </tbody>
-                            </table>
-                        </div>
-                    `;
-                } else {
-                    content += `<p>No recent ranked matches found for this player.</p>`;
-                }
-
-                // Close ranked stats tab if using tabs
-                if (player.global_matches && player.global_matches > 0) {
-                    content += `
-                        </div>
-
-                        <!-- Global Stats Tab -->
-                        <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
-                            <div class="row mb-3">
-                                <div class="col-md-6">
-                                    <p class="lead">Global MMR: <span class="badge bg-primary">${player.global_mmr || 300}</span></p>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="card bg-dark">
-                                        <div class="card-body">
-                                            <h5 class="card-title">Global Stats</h5>
-                                            <div class="row">
-                                                <div class="col-6">Win Rate: ${player.global_win_rate || 0}%</div>
-                                                <div class="col-6">Record: ${player.global_wins || 0}-${player.global_losses || 0}</div>
-                                                <div class="col-6">Matches: ${player.global_matches || 0}</div>
+                <div class="tab-content" id="playerStatsContent">
+                    <!-- Ranked Stats Tab -->
+                    <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
+                        <!-- Ranked Stats Content -->
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-body">
+                                <div class="row align-items-center">
+                                    <div class="col-md-6">
+                                        <h2 class="mb-3">MMR: <span class="badge bg-primary">${player.mmr || 0}</span></h2>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="stats-grid">
+                                            <div class="stat-item">
+                                                <h5>Win Rate</h5>
+                                                <span class="stat-value">${player.win_rate || 0}%</span>
+                                            </div>
+                                            <div class="stat-item">
+                                                <h5>Record</h5>
+                                                <span class="stat-value">${player.wins || 0}-${player.losses || 0}</span>
+                                            </div>
+                                            <div class="stat-item">
+                                                <h5>Matches</h5>
+                                                <span class="stat-value">${player.matches || 0}</span>
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                    `;
-
-                    // Show global matches
-                    const globalMatches = player.recent_matches.filter(match => match.is_global);
-                    if (globalMatches && globalMatches.length > 0) {
-                        content += `
-                            <h4>Recent Global Matches</h4>
-                            <div class="table-responsive">
-                                <table class="table table-dark table-striped">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Result</th>
-                                            <th>Teams</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                        `;
-
-                        globalMatches.forEach(match => {
-                            // Safely format teams with error checking
-                            let team1Names = '';
-                            let team2Names = '';
-
-                            try {
-                                team1Names = match.team1 && Array.isArray(match.team1) ?
-                                    match.team1.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
-
-                                team2Names = match.team2 && Array.isArray(match.team2) ?
-                                    match.team2.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
-                            } catch (e) {
-                                console.error("Error formatting teams:", e);
-                                team1Names = 'Error loading team';
-                                team2Names = 'Error loading team';
-                            }
-
-                            // Determine result color
-                            let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
-
-                            content += `
-                                <tr>
-                                    <td>${match.date || 'Unknown'}</td>
-                                    <td class="${resultClass}">${match.player_result || 'Unknown'}</td>
-                                    <td>
-                                        <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
-                                    </td>
-                                </tr>
-                            `;
-                        });
-
-                        content += `
-                                </tbody>
-                            </table>
                         </div>
-                        `;
-                    } else {
-                        content += `<p>No recent global matches found for this player.</p>`;
+            `;
+
+            // Display recent ranked matches if available
+            const hasMatches = player.recent_matches && player.recent_matches.length > 0;
+            const rankedMatches = hasMatches ? player.recent_matches.filter(match => !match.is_global) : [];
+
+            if (rankedMatches.length > 0) {
+                content += `
+                    <h4 class="section-header">Recent Ranked Matches</h4>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped match-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Result</th>
+                                    <th>Teams</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                rankedMatches.forEach(match => {
+                    // Safely format teams with error checking
+                    let team1Names = '';
+                    let team2Names = '';
+
+                    try {
+                        team1Names = match.team1 && Array.isArray(match.team1) ?
+                            match.team1.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
+
+                        team2Names = match.team2 && Array.isArray(match.team2) ?
+                            match.team2.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
+                    } catch (e) {
+                        console.error("Error formatting teams:", e);
+                        team1Names = 'Error loading team';
+                        team2Names = 'Error loading team';
                     }
 
-                    // Close global stats tab
-                    content += `
-                        </div>
-                    </div>
-                    `;
-                }
-            } else {
-                content += `<p>No recent matches found for this player.</p>`;
+                    // Determine result color
+                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
 
-                // Close tabs if needed
-                if (player.global_matches && player.global_matches > 0) {
                     content += `
-                            </div>
-                            <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
-                                <p>No global matches found for this player.</p>
+                        <tr>
+                            <td>${match.date || 'Unknown'}</td>
+                            <td class="${resultClass}">${match.player_result || 'Unknown'}</td>
+                            <td>
+                                <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                content += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } else {
+                content += `<p class="text-muted">No recent ranked matches found.</p>`;
+            }
+
+            // Close ranked stats tab
+            content += `
+                    </div>
+
+                    <!-- Global Stats Tab -->
+                    <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
+                        <!-- Global Stats Content -->
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-body">
+                                <div class="row align-items-center">
+                                    <div class="col-md-6">
+                                        <h2 class="mb-3">Global MMR: <span class="badge bg-primary">${player.global_mmr || 300}</span></h2>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="stats-grid">
+                                            <div class="stat-item">
+                                                <h5>Win Rate</h5>
+                                                <span class="stat-value">${player.global_win_rate || 0}%</span>
+                                            </div>
+                                            <div class="stat-item">
+                                                <h5>Record</h5>
+                                                <span class="stat-value">${player.global_wins || 0}-${player.global_losses || 0}</span>
+                                            </div>
+                                            <div class="stat-item">
+                                                <h5>Matches</h5>
+                                                <span class="stat-value">${player.global_matches || 0}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
+            `;
+
+            // Display recent global matches
+            const globalMatches = hasMatches ? player.recent_matches.filter(match => match.is_global) : [];
+            if (globalMatches.length > 0) {
+                content += `
+                    <h4 class="section-header">Recent Global Matches</h4>
+                    <div class="table-responsive">
+                        <table class="table table-dark table-striped match-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Result</th>
+                                    <th>Teams</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+
+                globalMatches.forEach(match => {
+                    // Safely format teams with error checking
+                    let team1Names = '';
+                    let team2Names = '';
+
+                    try {
+                        team1Names = match.team1 && Array.isArray(match.team1) ?
+                            match.team1.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
+
+                        team2Names = match.team2 && Array.isArray(match.team2) ?
+                            match.team2.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
+                    } catch (e) {
+                        console.error("Error formatting teams:", e);
+                        team1Names = 'Error loading team';
+                        team2Names = 'Error loading team';
+                    }
+
+                    // Determine result color
+                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
+
+                    content += `
+                        <tr>
+                            <td>${match.date || 'Unknown'}</td>
+                            <td class="${resultClass}">${match.player_result || 'Unknown'}</td>
+                            <td>
+                                <strong>${team1Names}</strong> vs <strong>${team2Names}</strong>
+                            </td>
+                        </tr>
                     `;
-                }
+                });
+
+                content += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            } else {
+                content += `<p class="text-muted">No recent global matches found.</p>`;
             }
+
+            // Close global stats tab
+            content += `
+                    </div>
+                </div>
+            `;
 
             modalContent.innerHTML = content;
         })
