@@ -37,35 +37,49 @@ class QueueHandler:
         player_name = player.display_name
         channel_id = str(channel_id)
 
-        # Debug the player's current status in all matches
-        print(f"DEBUG: Checking status for player {player_name} (ID: {player_id}) in channel {channel_id}")
+        print(f"Attempting to add player {player_name} (ID: {player_id}) to queue in channel {channel_id}")
 
-        # Get ALL matches this player is in (active or otherwise)
-        player_matches = list(self.matches_collection.find({"players.id": player_id}))
+        # EMERGENCY FIX: Clear any stale voting/selection statuses for this player
+        # This ensures they're never stuck in a ghost state
+        self.matches_collection.update_many(
+            {
+                "players.id": player_id,
+                "status": {"$in": ["voting", "selection"]}
+            },
+            {
+                "$set": {"status": "cancelled"}
+            }
+        )
 
-        for match in player_matches:
-            match_id = match.get("match_id", "unknown")
-            match_status = match.get("status", "unknown")
-            match_channel = match.get("channel_id", "unknown")
-            print(f"DEBUG: Player has match: ID={match_id}, status={match_status}, channel={match_channel}")
-
-        # CRITICAL FIX: Search specifically for matches where this player is in VOTING or SELECTION
-        active_team_selection = self.matches_collection.find_one({
+        # Get all active matches the player is in to check current status
+        active_matches = list(self.matches_collection.find({
             "players.id": player_id,
-            "status": {"$in": ["voting", "selection"]}
-        })
+            "status": {"$in": ["voting", "selection", "in_progress"]}
+        }))
+
+        # Log all active matches for debugging
+        print(f"Found {len(active_matches)} active matches for player {player_name}:")
+        for match in active_matches:
+            print(
+                f"  Match ID: {match.get('match_id')}, Status: {match.get('status')}, Channel: {match.get('channel_id')}")
+
+        # Now ONLY check for matches in voting or selection states
+        active_team_selection = None
+        for match in active_matches:
+            if match.get("status") in ["voting", "selection"]:
+                active_team_selection = match
+                break
 
         if active_team_selection:
-            # Get the actual channel name if possible
-            team_selection_channel = "another channel"
             other_channel_id = active_team_selection.get("channel_id")
+            channel_name = "another channel"
 
             if self.bot and other_channel_id and other_channel_id.isdigit():
-                other_channel = self.bot.get_channel(int(other_channel_id))
-                if other_channel:
-                    team_selection_channel = f"#{other_channel.name}"
+                channel = self.bot.get_channel(int(other_channel_id))
+                if channel:
+                    channel_name = f"#{channel.name}"
 
-            return f"{player_mention} cannot join the queue while team selection is in progress in {team_selection_channel}!"
+            return f"{player_mention} cannot join the queue while team selection is in progress in {channel_name}!"
 
         # Check if player is already in this channel's queue
         if self.queue_collection.find_one({"id": player_id, "channel_id": channel_id}):

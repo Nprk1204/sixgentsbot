@@ -25,7 +25,6 @@ class MatchSystem:
         self.bot = bot
 
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
-        print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
         """Create a new match entry"""
         # Generate a shorter match ID that's easier for users to type
         short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
@@ -49,22 +48,29 @@ class MatchSystem:
         else:
             print(f"Using provided is_global={is_global} without re-detection")
 
-        # Clear debug print
-        print(f"Created match with ID: {short_id}, status: in_progress, is_global: {is_global}")
-
+        # Create match data with explicit in_progress status
         match_data = {
             "match_id": short_id,  # Use the shorter ID
             "team1": team1,
             "team2": team2,
-            "status": "in_progress",  # Make sure this is set correctly
+            "status": "in_progress",  # CRITICAL: Always set to in_progress
             "winner": None,
             "score": {"team1": 0, "team2": 0},
             "channel_id": channel_id,
             "created_at": datetime.datetime.utcnow(),
             "completed_at": None,
             "reported_by": None,
-            "is_global": is_global  # Add this line to track global matches
+            "is_global": is_global
         }
+
+        # CRITICAL ADDITION: Clear status for all players involved
+        # This ensures no player remains in a "ghost" selection state
+        all_players = team1 + team2
+        for player in all_players:
+            player_id = player["id"]
+            # Skip dummy players (non-real players)
+            if not player_id.startswith('9000'):
+                self.clear_player_match_status(player_id, short_id)
 
         # Store in database
         self.matches.insert_one(match_data)
@@ -75,7 +81,7 @@ class MatchSystem:
         # Debug print to confirm match creation
         print(f"Created match with ID: {short_id}, status: {match_data['status']}, is_global: {is_global}")
 
-        return short_id  # Return the short ID
+        return short_id
 
     def get_active_match_by_channel(self, channel_id):
         """Get active match by channel ID"""
@@ -687,6 +693,36 @@ class MatchSystem:
             del self.active_matches[match["match_id"]]
 
         return updated_match, None
+
+    # Add this to the MatchSystem class in match_system.py
+
+    def clear_player_match_status(self, player_id, new_match_id=None):
+        """
+        Clear a player's status in all matches except for a specific new match.
+        This ensures no "ghost" statuses remain when a player joins a new match.
+        """
+        print(f"Clearing match status for player {player_id}")
+
+        # Find all matches the player is in
+        matches = list(self.matches.find({"players.id": player_id}))
+
+        for match in matches:
+            match_id = match.get("match_id")
+
+            # Skip the new match we're creating (if provided)
+            if new_match_id and match_id == new_match_id:
+                continue
+
+            match_status = match.get("status")
+            print(f"Found match {match_id} with status {match_status}")
+
+            # For matches in voting or selection, mark them as cancelled
+            if match_status in ["voting", "selection"]:
+                print(f"Cancelling match {match_id} for player {player_id}")
+                self.matches.update_one(
+                    {"match_id": match_id},
+                    {"$set": {"status": "cancelled"}}
+                )
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
         """Update a player's Discord role based on their new MMR"""
