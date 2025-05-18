@@ -218,11 +218,8 @@ class QueueHandler:
                 "active_selection": True
             }))
         else:
-            # Otherwise get first 6 non-active-selection players
-            return list(self.queue_collection.find({
-                "channel_id": channel_id,
-                "active_selection": False
-            }).limit(6))
+            # The key fix: Just get all players in the channel's queue if no active selection
+            return list(self.queue_collection.find({"channel_id": channel_id}))
 
     def remove_players_from_queue(self, players, channel_id=None):
         """Remove players from the queue, optionally filtering by channel"""

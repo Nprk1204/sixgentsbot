@@ -1822,15 +1822,27 @@ async def forcestart_slash(interaction: discord.Interaction):
 
     # Get current players in queue
     channel_id = str(interaction.channel.id)
-    players = queue_handler.get_players_for_match(channel_id)
+
+    # Get all players in the queue for this channel (regardless of active_selection flag)
+    players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
     player_count = len(players)
 
     if player_count == 0:
         await interaction.response.send_message("Can't force start: Queue is empty!")
         return
 
+    # Mark all existing players as part of active selection
+    queue_handler.queue_collection.update_many(
+        {"channel_id": channel_id},
+        {"$set": {"active_selection": True}}
+    )
+
+    # Set the channel as having an active selection
+    if not hasattr(queue_handler, 'active_selection_queues'):
+        queue_handler.active_selection_queues = {}  # Initialize if it doesn't exist
+    queue_handler.active_selection_queues[channel_id] = True
+
     # Before adding dummy players, determine the MMR range based on the channel
-    # This ensures dummy players have appropriate MMR for each rank channel
     channel_name = interaction.channel.name.lower()
     if channel_name == "rank-a":
         min_mmr = 1600
@@ -1865,21 +1877,11 @@ async def forcestart_slash(interaction: discord.Interaction):
                 "channel_id": channel_id,
                 "dummy_mmr": dummy_mmr,  # Add MMR for the dummy player
                 "joined_at": datetime.datetime.utcnow(),
-                "active_selection": True  # IMPORTANT: Mark as active selection
+                "active_selection": True  # Mark as active selection
             }
 
             # Add dummy player to queue
             queue_handler.queue_collection.insert_one(dummy_player)
-
-        # Mark this channel as having an active selection
-        if hasattr(queue_handler, 'active_selection_queues'):
-            queue_handler.active_selection_queues[channel_id] = True
-
-        # Also make sure real players are marked as active_selection
-        queue_handler.queue_collection.update_many(
-            {"channel_id": channel_id, "active_selection": False},
-            {"$set": {"active_selection": True}}
-        )
 
     # Force start the vote
     await interaction.channel.send("**Force starting team selection!**")
