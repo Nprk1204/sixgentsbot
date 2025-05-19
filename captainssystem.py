@@ -42,9 +42,19 @@ class CaptainsSystem:
             print("Canceling all captain selections")
             self.active_selections.clear()
 
-    def start_captains_selection(self, players, channel_id):
-        """Start the captains selection process for a specific channel"""
+    def start_captains_selection(self, players, channel_id, match_id=None):
+        """Start the captains selection process for a specific match"""
         channel_id = str(channel_id)
+
+        # If no match_id provided, try to find it from the active match
+        if not match_id:
+            active_match = self.match_system.matches.find_one({
+                "channel_id": channel_id,
+                "status": "selection"
+            })
+
+            if active_match:
+                match_id = active_match.get("match_id")
 
         if len(players) < 6:
             return "Not enough players to start captain selection!"
@@ -55,14 +65,15 @@ class CaptainsSystem:
         captain2 = players[1]
         remaining_players = players[2:]
 
-        # Initialize selection state for this channel
-        self.active_selections[channel_id] = {
+        # Initialize selection state for this match
+        self.active_selections[match_id if match_id else channel_id] = {
             'captain1': captain1,
             'captain2': captain2,
             'remaining_players': remaining_players,
             'captain1_team': [captain1],
             'captain2_team': [captain2],
             'match_players': players,
+            'match_id': match_id,  # Store the match ID
             'announcement_channel': None
         }
 
@@ -71,7 +82,7 @@ class CaptainsSystem:
 
         # Create an embed instead of plain text
         embed = discord.Embed(
-            title="Match Setup: Captains Mode!",
+            title=f"Match Setup: Captains Mode! - Match {match_id}",
             color=0xf1c40f  # Warm yellow color
         )
 

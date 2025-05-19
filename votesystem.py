@@ -34,9 +34,10 @@ class VoteSystem:
         if match_id:
             return match_id in self.active_votes
         elif channel_id:
-            # Look for any votes in this channel
+            # Look for any votes for this channel
+            channel_id_str = str(channel_id)
             for vote_id, vote_state in self.active_votes.items():
-                if vote_state.get('channel_id') == str(channel_id):
+                if vote_state.get('channel_id') == channel_id_str:
                     return True
             return False
         else:
@@ -60,36 +61,31 @@ class VoteSystem:
         else:
             self.active_votes.clear()
 
-    async def start_vote(self, channel, match_id=None):
-        """Start a vote for team selection using buttons"""
+    async def start_vote(self, channel):
+        """Start a vote for team selection using buttons in a specific channel"""
         channel_id = str(channel.id)
 
-        # If no match_id is provided, get the latest voting match for this channel
-        if not match_id:
-            active_match = self.queue.matches_collection.find_one({
-                "channel_id": channel_id,
-                "status": "voting"
-            })
+        # Get the latest voting match for this channel
+        active_match = self.queue.matches_collection.find_one({
+            "channel_id": channel_id,
+            "status": "voting"
+        })
 
-            if not active_match:
-                await channel.send("No active match found for voting!")
-                return False
+        if not active_match:
+            await channel.send("No active match found for voting!")
+            return False
 
-            match_id = active_match["match_id"]
+        match_id = active_match["match_id"]
 
-        # Make sure any existing vote for this match is canceled first
+        # CRITICAL: Don't cancel existing votes for other matches in the same channel!
+        # Only cancel a vote for THIS specific match if it already exists
         if match_id in self.active_votes:
             self.cancel_voting(match_id=match_id)
 
-        # Get the match data
-        match_data = self.queue.matches_collection.find_one({"match_id": match_id})
-        if not match_data:
-            await channel.send(f"Match with ID {match_id} not found!")
-            return False
-
-        players = match_data.get("players", [])
+        # Get the match players
+        players = active_match.get("players", [])
         if len(players) < 6:
-            await channel.send("Not enough players in the match to start voting!")
+            await channel.send("Not enough players to start voting!")
             return False
 
         # Initialize voting state for this match
@@ -120,11 +116,20 @@ class VoteSystem:
             color=0x3498db
         )
 
-        # Create buttons with match ID in the custom_id
-        random_button = Button(style=discord.ButtonStyle.primary, custom_id=f"random_{match_id}", label="Random Teams",
-                               emoji="🎲")
-        captains_button = Button(style=discord.ButtonStyle.primary, custom_id=f"captains_{match_id}",
-                                 label="Captains Pick", emoji="👑")
+        # Create buttons
+        random_button = Button(
+            style=discord.ButtonStyle.primary,
+            custom_id=f"random_{match_id}",
+            label="Random Teams",
+            emoji="🎲"
+        )
+
+        captains_button = Button(
+            style=discord.ButtonStyle.primary,
+            custom_id=f"captains_{match_id}",
+            label="Captains Pick",
+            emoji="👑"
+        )
 
         # Create View with 30 second timeout
         view = View(timeout=30)
@@ -133,12 +138,10 @@ class VoteSystem:
 
         # Set up button callbacks
         async def random_callback(interaction):
-            vote_match_id = match_id  # Capture the correct match ID
-            await self.handle_button_vote(interaction, "random", vote_match_id)
+            await self.handle_button_vote(interaction, "random", match_id)
 
         async def captains_callback(interaction):
-            vote_match_id = match_id  # Capture the correct match ID
-            await self.handle_button_vote(interaction, "captains", vote_match_id)
+            await self.handle_button_vote(interaction, "captains", match_id)
 
         random_button.callback = random_callback
         captains_button.callback = captains_callback
@@ -154,7 +157,7 @@ class VoteSystem:
         return True  # Vote started successfully
 
     async def handle_button_vote(self, interaction, vote_type, match_id):
-        # Get the channel_id from the interaction
+        """Handle a button vote for a specific match"""
         channel_id = str(interaction.channel.id)
         user_id = interaction.user.id
 
@@ -173,11 +176,11 @@ class VoteSystem:
 
         if not active_match:
             await interaction.response.send_message("This vote is no longer active.", ephemeral=True)
-            # Clean up the vote state since the database shows no active vote
+            # Clean up the vote state
             self.cancel_voting(match_id=match_id)
             return
 
-        # Check if player is in the active match
+        # Check if player is in this specific match
         player_id = str(user_id)
         player_in_match = False
 
@@ -267,7 +270,7 @@ class VoteSystem:
         vote_state = self.active_votes[match_id]
         channel_id = vote_state.get('channel_id')
 
-        # Get the current active vote to make sure it hasn't changed
+        # Verify the match is still in voting status in the database
         active_vote = None
         try:
             active_vote = self.queue.matches_collection.find_one({
@@ -353,7 +356,7 @@ class VoteSystem:
             return
 
         try:
-            # Get players from the active match in the database to ensure we have the latest
+            # Get the match data from the database
             db_match = self.queue.matches_collection.find_one({"match_id": match_id, "status": "voting"})
 
             if not db_match:
@@ -371,7 +374,7 @@ class VoteSystem:
                 self.cancel_voting(match_id=match_id)
                 return
 
-            # Disable the buttons in the view if it exists
+            # Disable the buttons in the view
             if vote_state.get('view'):
                 for item in vote_state['view'].children:
                     item.disabled = True
@@ -390,10 +393,10 @@ class VoteSystem:
                     {"$set": {"status": "selection"}}
                 )
 
-                # Cancel this vote before starting captain selection
+                # Cancel this vote since we're moving to the next stage
                 self.cancel_voting(match_id=match_id)
 
-                # Use the captains_system reference
+                # Use the captains_system
                 if self.captains_system:
                     try:
                         captains_result = self.captains_system.start_captains_selection(players, channel_id)
@@ -404,35 +407,35 @@ class VoteSystem:
                             await self.captains_system.execute_captain_selection(channel)
                         else:
                             print(f"Failed to start captains selection for match {match_id}")
-                            # Fallback to random teams if captains_system returns None or empty
+                            # Fallback to random teams
                             await channel.send(
                                 f"Match {match_id}: Unable to start captains selection. Falling back to random teams...")
-                            await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
+                            await self.create_balanced_random_teams(channel, players, channel_id, match_id)
                     except Exception as e:
                         import traceback
                         print(f"Error in captains selection for match {match_id}: {e}")
                         traceback.print_exc()
-                        # Fallback to random teams if captains_system throws an exception
+                        # Fallback to random teams
                         await channel.send(
                             f"Match {match_id}: Error in captains selection: {str(e)}. Falling back to random teams...")
-                        await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
+                        await self.create_balanced_random_teams(channel, players, channel_id, match_id)
                 else:
-                    # Fallback to random teams if captains_system is not set
+                    # Fallback to random teams
                     await channel.send(
                         f"Match {match_id}: Captains system not available. Falling back to random teams...")
-                    await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
+                    await self.create_balanced_random_teams(channel, players, channel_id, match_id)
             else:
-                # Random teams won - update match status
+                # Random teams won - update match status to playing
                 self.queue.matches_collection.update_one(
                     {"_id": db_match["_id"]},
-                    {"$set": {"status": "playing"}}
+                    {"$set": {"status": "in_progress"}}
                 )
 
-                # Cancel this vote before creating teams
+                # Cancel this vote
                 self.cancel_voting(match_id=match_id)
 
                 # Create balanced random teams
-                await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
+                await self.create_balanced_random_teams(channel, players, channel_id, match_id)
         except Exception as e:
             # Log the error and try to recover
             import traceback

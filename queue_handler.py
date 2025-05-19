@@ -39,12 +39,6 @@ class QueueHandler:
 
         print(f"=== ADD PLAYER: {player_name} (ID: {player_id}) to channel {channel_id} ===")
 
-        # EMERGENCY: Force cancel any stale test player matches to prevent broken state
-        self.matches_collection.update_many(
-            {"status": {"$in": ["voting", "selection"]}, "players.id": {"$regex": "^9000"}},
-            {"$set": {"status": "cancelled"}}
-        )
-
         # Check if player is already in this channel's queue
         existing_queue = self.queue_collection.find_one({"id": player_id, "channel_id": channel_id})
         if existing_queue:
@@ -61,15 +55,16 @@ class QueueHandler:
 
             return f"{player_mention} is already in a queue in {channel_identifier}. Please leave that queue first."
 
-        # Check if player is in an active match in ANY channel
+        # Check if player is in ANY active match - this is critical
         active_match = self.matches_collection.find_one({
             "status": {"$in": ["voting", "selection", "in_progress"]},
             "players.id": player_id
         })
 
         if active_match:
-            # Player is in active match in some channel, reject queue join
-            return f"{player_mention} cannot join the queue while you have an active match in progress!"
+            match_id = active_match.get("match_id", "unknown")
+            match_status = active_match.get("status", "active")
+            return f"{player_mention} cannot join the queue while you have an active match in progress! (Match ID: {match_id}, Status: {match_status})"
 
         # Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
@@ -85,28 +80,32 @@ class QueueHandler:
             "joined_at": datetime.datetime.utcnow()
         })
 
-        # Count players in the queue - CHANGE HERE - group by a temporary match group ID
-        # This allows multiple sets of 6 players in the same channel
-        all_queued_players = list(self.queue_collection.find({"channel_id": channel_id}).sort("joined_at", 1))
-        queue_count = len(all_queued_players)
+        # Count players in the queue
+        queue_count = self.queue_collection.count_documents({"channel_id": channel_id})
 
-        # If we have at least 6 players, check if we should form a new match
+        # If queue is full, check if we should start a new match
         if queue_count >= 6:
-            # Take the first 6 players for this match
-            match_players = all_queued_players[:6]
+            # Get the 6 oldest players in the queue by joined_at timestamp
+            players = list(self.queue_collection.find({"channel_id": channel_id}).sort("joined_at", 1).limit(6))
 
             # Generate a unique match ID for the active match
             match_id = str(uuid.uuid4())[:8]
 
-            # Remove these players from the queue BEFORE creating the match
-            for player in match_players:
-                self.queue_collection.delete_one({"_id": player["_id"]})
+            # CRITICAL: Check if there's already an active match in voting status for this channel
+            existing_vote = self.matches_collection.find_one({"channel_id": channel_id, "status": "voting"})
+            if existing_vote:
+                # Don't start a new vote while one is already active in this channel
+                return f"{player_mention} has joined the queue! Queue now has {queue_count}/6 players, but another vote is already in progress. Please wait for the current vote to complete."
+
+            # Remove these specific 6 players from the queue BEFORE creating the match
+            for match_player in players:
+                self.queue_collection.delete_one({"_id": match_player["_id"]})
 
             # Create active match entry
             active_match = {
                 "match_id": match_id,
                 "channel_id": channel_id,
-                "players": match_players,
+                "players": players,
                 "created_at": datetime.datetime.utcnow(),
                 "is_global": is_global,
                 "status": "voting"  # Initial status is voting
