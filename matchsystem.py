@@ -726,6 +726,15 @@ class MatchSystem:
             }}
         )
 
+        # Clear any other active matches for this player
+        await self.clear_player_active_matches(reporter_id)
+
+        # Also clear for all other players in the match
+        for player in winning_team + losing_team:
+            player_id = player.get("id", "")
+            if player_id and player_id != reporter_id and not player_id.startswith('9000'):
+                await self.clear_player_active_matches(player_id)
+
         # After updating MMR for winners and losers:
         if ctx:
             # Update roles for winners
@@ -791,6 +800,28 @@ class MatchSystem:
                     {"match_id": match_id},
                     {"$set": {"status": "cancelled"}}
                 )
+
+    async def clear_player_active_matches(self, player_id):
+        """Clear any active matches for a player after reporting"""
+        print(f"Clearing active matches for player: {player_id}")
+
+        # Find all active matches for this player
+        active_matches = list(self.matches.find({
+            "players.id": player_id,
+            "status": {"$in": ["voting", "selection", "in_progress"]}
+        }))
+
+        for match in active_matches:
+            match_id = match.get("match_id", "unknown")
+            print(f"Found active match {match_id} for player {player_id}, setting to completed")
+
+            # Update match status to completed
+            self.matches.update_one(
+                {"_id": match["_id"]},
+                {"$set": {"status": "completed"}}
+            )
+
+        return len(active_matches)
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
         """Update a player's Discord role based on their new MMR"""

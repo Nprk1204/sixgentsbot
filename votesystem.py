@@ -548,17 +548,46 @@ class VoteSystem:
         team1_avg_mmr = round(team1_mmr / len(team1), 1)
         team2_avg_mmr = round(team2_mmr / len(team2), 1)
 
-        # Remove players from queue
-        self.queue.remove_players_from_queue(players, channel_id)
+        # CRITICAL CHANGE: Always use the provided match_id if it exists
+        if match_id:
+            # Update the existing match with teams and status
+            match_update_result = self.match_system.matches.update_one(
+                {"match_id": match_id},
+                {"$set": {
+                    "team1": team1,
+                    "team2": team2,
+                    "status": "in_progress",
+                    "team1_avg_mmr": team1_avg_mmr,
+                    "team2_avg_mmr": team2_avg_mmr
+                }}
+            )
 
-        # Create match record - using self.match_system
-        match_id = self.match_system.create_match(
-            str(uuid.uuid4()),
-            team1,
-            team2,
-            channel_id,
-            is_global
-        )
+            # Log whether an update actually occurred
+            print(f"Match update result: {match_update_result.modified_count} documents modified")
+
+            # If no documents were modified, the match may not exist
+            if match_update_result.modified_count == 0:
+                print(f"WARNING: Match with ID {match_id} was not found or not updated. Creating a new match entry.")
+                self.match_system.create_match(
+                    match_id,  # Use the same ID that was passed in
+                    team1,
+                    team2,
+                    channel_id,
+                    is_global
+                )
+        else:
+            # No match ID provided, create a new one
+            match_id = str(uuid.uuid4())[:8]
+            print(f"Creating new match with generated ID: {match_id}")
+
+            # Create a new match entry
+            self.match_system.create_match(
+                match_id,
+                team1,
+                team2,
+                channel_id,
+                is_global
+            )
 
         # Ensure the match status is explicitly set to "in_progress"
         self.match_system.matches.update_one(
