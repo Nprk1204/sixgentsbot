@@ -105,7 +105,8 @@ class CaptainsSystem:
         if not active_match:
             print(f"No active match in selection state found for channel {channel_id}")
             await channel.send("⚠️ Error: The captain selection process has been cancelled.")
-            self.cancel_selection(channel_id)
+            # IMPORTANT: Make sure to call fallback_to_random here
+            await self.fallback_to_random(channel_id)
             return
 
         # Use player list from the active match for consistency
@@ -542,7 +543,45 @@ class CaptainsSystem:
         # Get selection state for this channel
         if channel_id not in self.active_selections:
             print(f"No active selection found for channel_id: {channel_id}")
-            return
+
+            # Try to get the channel from the bot
+            channel = None
+            if self.bot:
+                try:
+                    channel = self.bot.get_channel(int(channel_id))
+                except Exception as e:
+                    print(f"Error getting channel: {e}")
+
+            if not channel:
+                print(f"Cannot proceed with fallback: No channel found for ID {channel_id}")
+                return
+
+            # Try to find active match directly from the database
+            active_match = self.match_system.matches.find_one({
+                "channel_id": channel_id,
+                "status": {"$in": ["voting", "selection"]}
+            })
+
+            if not active_match:
+                print(f"Cannot proceed with fallback: No active match found for channel {channel_id}")
+                await channel.send("⚠️ Error: Cannot create random teams - no active match found.")
+                return
+
+            # Create temporary selection state using the active match
+            players = active_match.get("players", [])
+
+            if len(players) < 6:
+                print(f"Cannot proceed with fallback: Not enough players ({len(players)}) in match")
+                await channel.send("⚠️ Error: Cannot create random teams - not enough players.")
+                return
+
+            # Store in selection state for later use
+            self.active_selections[channel_id] = {
+                'match_players': players,
+                'announcement_channel': channel
+            }
+
+            print(f"Created temporary selection state for fallback with {len(players)} players")
 
         selection_state = self.active_selections[channel_id]
 
@@ -555,6 +594,12 @@ class CaptainsSystem:
         # Get all players
         all_players = selection_state['match_players']
         print(f"Fallback: Got {len(all_players)} players for random team assignment")
+
+        if len(all_players) < 6:
+            print(f"Fallback: Not enough players ({len(all_players)}) for a match")
+            await channel.send("⚠️ Error: Not enough players to create random teams.")
+            self.cancel_selection(channel_id)
+            return
 
         # Create random teams
         random.shuffle(all_players)

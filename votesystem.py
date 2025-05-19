@@ -381,9 +381,25 @@ class VoteSystem:
 
                 # Use the captains_system reference
                 if self.captains_system:
-                    captains_result = self.captains_system.start_captains_selection(players, channel_id)
-                    await channel.send(embed=captains_result)
-                    await self.captains_system.execute_captain_selection(channel)
+                    try:
+                        captains_result = self.captains_system.start_captains_selection(players, channel_id)
+                        if captains_result:
+                            await channel.send(embed=captains_result)
+                            # Add a small delay to ensure the embed is sent before starting selection
+                            await asyncio.sleep(0.5)
+                            await self.captains_system.execute_captain_selection(channel)
+                        else:
+                            print(f"Failed to start captains selection, result was: {captains_result}")
+                            # Fallback to random teams if captains_system returns None or empty
+                            await channel.send("Unable to start captains selection. Falling back to random teams...")
+                            await self.create_balanced_random_teams(channel, players, channel_id)
+                    except Exception as e:
+                        import traceback
+                        print(f"Error in captains selection: {e}")
+                        traceback.print_exc()
+                        # Fallback to random teams if captains_system throws an exception
+                        await channel.send(f"Error in captains selection: {str(e)}. Falling back to random teams...")
+                        await self.create_balanced_random_teams(channel, players, channel_id)
                 else:
                     # Fallback to random teams if captains_system is not set
                     await channel.send("Captains system not available. Falling back to random teams...")
