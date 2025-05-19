@@ -197,6 +197,34 @@ class QueueHandler:
         else:
             return f"{player.mention} was not in this queue or active match!"
 
+    def remove_players_from_queue(self, players, channel_id=None):
+        """Remove multiple players from the queue at once"""
+        removed_count = 0
+
+        # If channel_id is not provided, try to remove the players from any channel
+        if channel_id:
+            # Convert to string to ensure consistent comparison
+            channel_id = str(channel_id)
+
+            # Remove players from this specific channel's queue
+            for player in players:
+                player_id = player.get("id")
+                if player_id:
+                    result = self.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
+                    if result.deleted_count > 0:
+                        removed_count += 1
+        else:
+            # Remove players from any channel's queue
+            for player in players:
+                player_id = player.get("id")
+                if player_id:
+                    result = self.queue_collection.delete_one({"id": player_id})
+                    if result.deleted_count > 0:
+                        removed_count += 1
+
+        print(f"Removed {removed_count} players from the queue")
+        return removed_count
+
     def get_queue_status(self, channel_id):
         """Get the status of a channel's queue and active match"""
         channel_id = str(channel_id)
