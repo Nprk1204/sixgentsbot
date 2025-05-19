@@ -540,14 +540,17 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         winning_team = match_result["team2"]
         losing_team = match_result["team1"]
 
-    # Initialize empty arrays for MMR changes
+    # Initialize empty arrays for MMR changes and streaks
     winning_team_mmr_changes = ["?"] * len(winning_team)
     losing_team_mmr_changes = ["?"] * len(losing_team)
+    winning_team_streaks = ["?"] * len(winning_team)
+    losing_team_streaks = ["?"] * len(losing_team)
 
     # Extract MMR changes from the match result
     for change in match_result.get("mmr_changes", []):
         player_id = change.get("player_id")
         mmr_change = change.get("mmr_change", 0)
+        streak = change.get("streak", 0)
         is_win = change.get("is_win", False)
 
         # Find the player's index and set their MMR change
@@ -556,6 +559,12 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
             for i, player in enumerate(winning_team):
                 if player["id"] == player_id:
                     winning_team_mmr_changes[i] = f"+{mmr_change}"
+
+                    # Format streak for display
+                    if streak > 0:
+                        winning_team_streaks[i] = f"+{streak}"
+                    else:
+                        winning_team_streaks[i] = f"{streak}"
                     break
         else:
             # This is a loser
@@ -563,25 +572,37 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 if player["id"] == player_id:
                     # MMR change is already negative for losers
                     losing_team_mmr_changes[i] = f"{mmr_change}"
+
+                    # Format streak for display
+                    if streak > 0:
+                        losing_team_streaks[i] = f"+{streak}"
+                    else:
+                        losing_team_streaks[i] = f"{streak}"
                     break
 
     # Handle dummy players (they don't have MMR changes in the database)
     for i, player in enumerate(winning_team):
         if player["id"].startswith('9000'):  # Dummy player
             winning_team_mmr_changes[i] = "+0"
+            winning_team_streaks[i] = "0"
 
     for i, player in enumerate(losing_team):
         if player["id"].startswith('9000'):  # Dummy player
             losing_team_mmr_changes[i] = "-0"
+            losing_team_streaks[i] = "0"
 
     # Check for any remaining unknown MMR changes
     for i in range(len(winning_team_mmr_changes)):
         if winning_team_mmr_changes[i] == "?":
             winning_team_mmr_changes[i] = "+??"
+        if winning_team_streaks[i] == "?":
+            winning_team_streaks[i] = "0"
 
     for i in range(len(losing_team_mmr_changes)):
         if losing_team_mmr_changes[i] == "?":
             losing_team_mmr_changes[i] = "-??"
+        if losing_team_streaks[i] == "?":
+            losing_team_streaks[i] = "0"
 
     # Create the embed with updated formatting
     embed = discord.Embed(
@@ -599,15 +620,36 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Create individual fields for each winning player
     for i, player in enumerate(winning_team):
         try:
-            member = await interaction.guild.fetch_member(int(player["id"]))
+            member = await interaction.guild.fetch_member(int(player["id"]) if player["id"].isdigit() else 0)
             name = member.display_name if member else player['name']
         except:
             name = player["name"]
 
+        # Determine streak icon and style
+        streak_value = winning_team_streaks[i]
+        streak_icon = ""
+        streak_style = ""
+
+        # Add streak indicators
+        if streak_value.startswith("+"):
+            streak_num = int(streak_value[1:])
+            if streak_num >= 5:
+                streak_icon = "🔥"  # Fire emoji for big streaks
+                streak_style = "**"
+            elif streak_num >= 3:
+                streak_icon = "📈"  # Chart up emoji for decent streaks
+            else:
+                streak_icon = "▲"  # Up triangle
+        elif streak_value.startswith("-"):
+            streak_num = int(streak_value[1:])
+            streak_icon = "▼"  # Down triangle
+        else:
+            streak_icon = "•"  # Neutral dot
+
         # Add a field for this player
         embed.add_field(
             name=f"**{name}**",
-            value=f"{winning_team_mmr_changes[i]}",
+            value=f"{winning_team_mmr_changes[i]} MMR\n{streak_style}{streak_icon} Streak: {streak_value}{streak_style}",
             inline=True
         )
 
@@ -624,15 +666,36 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Create individual fields for each losing player
     for i, player in enumerate(losing_team):
         try:
-            member = await interaction.guild.fetch_member(int(player["id"]))
+            member = await interaction.guild.fetch_member(int(player["id"]) if player["id"].isdigit() else 0)
             name = member.display_name if member else player['name']
         except:
             name = player["name"]
 
+        # Determine streak icon and style
+        streak_value = losing_team_streaks[i]
+        streak_icon = ""
+        streak_style = ""
+
+        # Add streak indicators
+        if streak_value.startswith("+"):
+            streak_num = int(streak_value[1:])
+            streak_icon = "▲"  # Up triangle
+        elif streak_value.startswith("-"):
+            streak_num = abs(int(streak_value))
+            if streak_num >= 5:
+                streak_icon = "📉"  # Chart down emoji for big losing streaks
+                streak_style = "**"
+            elif streak_num >= 3:
+                streak_icon = "⚠️"  # Warning emoji for noticeable losing streaks
+            else:
+                streak_icon = "▼"  # Down triangle
+        else:
+            streak_icon = "•"  # Neutral dot
+
         # Add a field for this player
         embed.add_field(
             name=f"**{name}**",
-            value=f"{losing_team_mmr_changes[i]}",
+            value=f"{losing_team_mmr_changes[i]} MMR\n{streak_style}{streak_icon} Streak: {streak_value}{streak_style}",
             inline=True
         )
 
@@ -646,7 +709,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # MMR System explanation
     embed.add_field(
         name="📊 MMR System",
-        value="Dynamic MMR: Changes based on games played",
+        value="Dynamic MMR: Changes based on games played and win/loss streaks",
         inline=False
     )
 

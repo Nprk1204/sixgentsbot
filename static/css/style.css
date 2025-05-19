@@ -2184,3 +2184,225 @@ img {
         font-size: 0.9rem;
     }
 }
+
+/* Streak display styles */
+.streak-badge {
+    padding: 0.35em 0.65em;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.streak-win {
+    background-color: rgba(67, 181, 129, 0.2);
+    color: var(--success);
+    border: 1px solid rgba(67, 181, 129, 0.3);
+}
+
+.streak-loss {
+    background-color: rgba(240, 71, 71, 0.2);
+    color: var(--danger);
+    border: 1px solid rgba(240, 71, 71, 0.3);
+}
+
+.streak-neutral {
+    background-color: rgba(160, 168, 177, 0.1);
+    color: var(--text-muted);
+    border: 1px solid rgba(160, 168, 177, 0.2);
+}
+
+/* Enhanced player row with streak highlight */
+.player-row {
+    position: relative;
+    transition: all 0.3s ease;
+    border-left: 3px solid transparent;
+}
+
+.player-row.win-streak-3 {
+    border-left-color: var(--success);
+    background-color: rgba(67, 181, 129, 0.05);
+}
+
+.player-row.win-streak-5 {
+    border-left-color: var(--success);
+    background-color: rgba(67, 181, 129, 0.1);
+    box-shadow: 0 0 8px rgba(67, 181, 129, 0.3);
+}
+
+.player-row.lose-streak-3 {
+    border-left-color: var(--danger);
+    background-color: rgba(240, 71, 71, 0.05);
+}
+
+.player-row.lose-streak-5 {
+    border-left-color: var(--danger);
+    background-color: rgba(240, 71, 71, 0.1);
+    box-shadow: 0 0 8px rgba(240, 71, 71, 0.3);
+}
+
+/* Streak column with hover tooltip */
+.streak-column {
+    position: relative;
+}
+
+.streak-tooltip {
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: var(--dark);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 10px;
+    font-size: 0.8rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    z-index: 10;
+    width: 180px;
+    text-align: center;
+}
+
+.streak-column:hover .streak-tooltip {
+    opacity: 1;
+}
+
+/* Additional styles for sorting headers */
+.sort-header {
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.sort-header:hover {
+    color: var(--primary);
+}
+
+.sort-header::after {
+    content: '↕';
+    position: absolute;
+    margin-left: 5px;
+    font-size: 0.8em;
+    opacity: 0.5;
+}
+
+.sort-header.sort-asc::after {
+    content: '↑';
+    opacity: 1;
+}
+
+.sort-header.sort-desc::after {
+    content: '↓';
+    opacity: 1;
+}
+
+/* Stats display in player modal */
+.player-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+}
+
+.streak-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--dark-medium);
+    border-radius: 8px;
+    padding: 12px;
+    transition: all 0.2s ease;
+}
+
+.streak-stat:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.streak-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 5px;
+}
+
+.streak-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+}
+
+.streak-value.win i {
+    color: var(--success);
+}
+
+.streak-value.loss i {
+    color: var(--danger);
+}
+
+/* Special highlight for big winning/losing streaks in modal */
+.streak-highlight {
+    position: relative;
+    overflow: hidden;
+}
+
+.streak-highlight::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-radius: 0 0 2px 2px;
+}
+
+.streak-highlight.win::before {
+    background: linear-gradient(90deg, var(--success), transparent);
+}
+
+.streak-highlight.loss::before {
+    background: linear-gradient(90deg, var(--danger), transparent);
+}
+
+/* Sortable column headers in leaderboard */
+.leaderboard-header {
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.leaderboard-header div {
+    position: relative;
+}
+
+.sortable {
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.sortable:hover {
+    color: var(--text);
+}
+
+.sortable::after {
+    content: '⇅';
+    position: absolute;
+    right: 0;
+    font-size: 0.8em;
+    opacity: 0.5;
+}
+
+.sortable.active {
+    color: var(--primary);
+}
+
+.sortable.active.asc::after {
+    content: '↑';
+    opacity: 1;
+}
+
+.sortable.active.desc::after {
+    content: '↓';
+    opacity: 1;
+}

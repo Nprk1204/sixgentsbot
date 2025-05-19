@@ -257,6 +257,8 @@ def get_leaderboard_by_type(board_type):
     """API endpoint to get leaderboard data with pagination for specific type"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 25, type=int)
+    sort_by = request.args.get('sort', 'mmr', type=str)  # Default sort by MMR
+    direction = request.args.get('direction', 'desc', type=str)  # Default descending
 
     # Limit per_page to reasonable values
     if per_page > 100:
@@ -264,14 +266,30 @@ def get_leaderboard_by_type(board_type):
 
     # Define query and sort field based on board type
     query = {}
-    sort_field = "mmr"
     mmr_field = "mmr"
+    streak_field = "streak"
+
+    # Determine sort field and direction based on sort_by parameter
+    sort_field = "mmr"  # Default
+    sort_direction = -1 if direction == 'desc' else 1  # Convert direction to MongoDB format
+
+    if sort_by == "streak":
+        sort_field = "streak"
+    elif sort_by == "win_rate":
+        # We'll calculate win rate later, but we'll keep this for future
+        sort_field = "mmr"  # Default to MMR for now
 
     if board_type == "global":
         # For global leaderboard, filter players with global matches
         query = {"global_matches": {"$gt": 0}}
-        sort_field = "global_mmr"
         mmr_field = "global_mmr"
+        streak_field = "global_streak"
+
+        # Adjust sort field for global board
+        if sort_by == "mmr":
+            sort_field = "global_mmr"
+        elif sort_by == "streak":
+            sort_field = "global_streak"
     elif board_type == "rank-a":
         # For Rank A, filter players with MMR >= 1600
         query = {"mmr": {"$gte": 1600}, "matches": {"$gt": 0}}
@@ -291,7 +309,7 @@ def get_leaderboard_by_type(board_type):
     # Calculate skip value for pagination
     skip = (page - 1) * per_page
 
-    # Get players with pagination
+    # Get players with pagination - now including streak fields
     projection = {
         "_id": 0,
         "id": 1,
@@ -304,11 +322,13 @@ def get_leaderboard_by_type(board_type):
         "global_losses": 1,
         "matches": 1,
         "global_matches": 1,
+        "streak": 1,
+        "global_streak": 1,
         "last_updated": 1
     }
 
     top_players = list(players_collection.find(query, projection)
-                       .sort(sort_field, -1)
+                       .sort(sort_field, sort_direction)
                        .skip(skip).limit(per_page))
 
     # Calculate additional stats
@@ -316,15 +336,26 @@ def get_leaderboard_by_type(board_type):
         if board_type == "global":
             matches = player.get("global_matches", 0)
             wins = player.get("global_wins", 0)
+            streak = player.get("global_streak", 0)
             # Add this field to standardize what's displayed
             player["mmr_display"] = player.get(mmr_field, 0)
         else:
             matches = player.get("matches", 0)
             wins = player.get("wins", 0)
+            streak = player.get("streak", 0)
             player["mmr_display"] = player.get(mmr_field, 0)
 
         # Calculate win rate
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
+
+        # Add streak to player data
+        player["streak_display"] = streak
+
+        # Format streak with a + sign for positive values
+        if streak > 0:
+            player["streak_formatted"] = f"+{streak}"
+        else:
+            player["streak_formatted"] = f"{streak}"
 
         # Format the last_updated date
         if "last_updated" in player and player["last_updated"]:
@@ -375,22 +406,42 @@ def get_player(player_id):
         if '_id' in player:
             del player['_id']
 
-        # Ensure player has global MMR fields
+        # Ensure player has global MMR and streak fields
         if "global_mmr" not in player:
             player["global_mmr"] = 300
             player["global_wins"] = 0
             player["global_losses"] = 0
             player["global_matches"] = 0
+            player["global_streak"] = 0
+
+        # Ensure player has streak field for both regular and global
+        if "streak" not in player:
+            player["streak"] = 0
+
+        if "global_streak" not in player:
+            player["global_streak"] = 0
 
         # Calculate additional stats for ranked
         matches = player.get("matches", 0)
         wins = player.get("wins", 0)
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
 
+        # Format streak with + sign for positive values
+        if player["streak"] > 0:
+            player["streak_formatted"] = f"+{player['streak']}"
+        else:
+            player["streak_formatted"] = f"{player['streak']}"
+
         # Calculate global win rate
         global_matches = player.get("global_matches", 0)
         global_wins = player.get("global_wins", 0)
         player["global_win_rate"] = round((global_wins / global_matches) * 100, 2) if global_matches > 0 else 0
+
+        # Format global streak with + sign for positive values
+        if player["global_streak"] > 0:
+            player["global_streak_formatted"] = f"+{player['global_streak']}"
+        else:
+            player["global_streak_formatted"] = f"{player['global_streak']}"
 
         # Get recent matches for this player - handle potential errors
         try:
