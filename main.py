@@ -2384,6 +2384,69 @@ async def debug_slash(interaction: discord.Interaction, player: discord.Member =
 
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
+
+@bot.tree.command(name="fixall", description="Admin command to fix all system issues")
+async def fixall_slash(interaction: discord.Interaction):
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Step 1: Cancel all active votings
+    vote_system.active_votes.clear()
+    vote_system.cancel_voting()
+
+    # Step 2: Cancel all active captain selections
+    captains_system.active_selections.clear()
+    captains_system.cancel_selection()
+
+    # Step 3: Mark all voting/selection matches as cancelled
+    result1 = match_system.matches.update_many(
+        {"status": {"$in": ["voting", "selection"]}},
+        {"$set": {"status": "cancelled"}}
+    )
+
+    # Step 4: Clear all queues
+    result2 = queue_handler.queue_collection.delete_many({})
+
+    # Step 5: Delete any test players from the players collection
+    result3 = match_system.players.delete_many({"id": {"$regex": "^9000"}})
+
+    # Step 6: Force update all matches with team1 and team2 to in_progress
+    result4 = match_system.matches.update_many(
+        {
+            "team1": {"$exists": True, "$ne": []},
+            "team2": {"$exists": True, "$ne": []},
+            "status": {"$nin": ["in_progress", "completed", "cancelled"]}
+        },
+        {"$set": {"status": "in_progress"}}
+    )
+
+    message = f"""
+System Reset Complete:
+- Cancelled {result1.modified_count} active selections
+- Cleared {result2.deleted_count} queue entries
+- Removed {result3.deleted_count} test players
+- Fixed {result4.modified_count} match statuses
+
+All systems should now be functioning normally. Players can join queues again.
+"""
+
+    await interaction.followup.send(message, ephemeral=True)
+
+    # Send a global announcement to all relevant channels
+    for channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
+        for channel in interaction.guild.text_channels:
+            if channel.name.lower() == channel_name:
+                try:
+                    await channel.send(
+                        "⚠️ **SYSTEM RESET**: The queue system has been reset. All active selections have been cancelled. You can now join queues again.")
+                except Exception as e:
+                    print(f"Error sending announcement to {channel.name}: {e}")
+
 @bot.tree.command(name="help", description="Shows command information")
 @app_commands.describe(command_name="Get details about a specific command")
 async def help_slash(interaction: discord.Interaction, command_name: str = None):
