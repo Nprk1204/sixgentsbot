@@ -410,7 +410,8 @@ class VoteSystem:
                             # Fallback to random teams
                             await channel.send(
                                 f"Match {match_id}: Unable to start captains selection. Falling back to random teams...")
-                            await self.create_balanced_random_teams(channel, players, channel_id, match_id)
+                            # Pass match_id as a named parameter
+                            await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
                     except Exception as e:
                         import traceback
                         print(f"Error in captains selection for match {match_id}: {e}")
@@ -418,12 +419,14 @@ class VoteSystem:
                         # Fallback to random teams
                         await channel.send(
                             f"Match {match_id}: Error in captains selection: {str(e)}. Falling back to random teams...")
-                        await self.create_balanced_random_teams(channel, players, channel_id, match_id)
+                        # Pass match_id as a named parameter
+                        await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
                 else:
                     # Fallback to random teams
                     await channel.send(
                         f"Match {match_id}: Captains system not available. Falling back to random teams...")
-                    await self.create_balanced_random_teams(channel, players, channel_id, match_id)
+                    # Pass match_id as a named parameter
+                    await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
             else:
                 # Random teams won - update match status to playing
                 self.queue.matches_collection.update_one(
@@ -435,7 +438,8 @@ class VoteSystem:
                 self.cancel_voting(match_id=match_id)
 
                 # Create balanced random teams
-                await self.create_balanced_random_teams(channel, players, channel_id, match_id)
+                # Pass match_id as a named parameter
+                await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
         except Exception as e:
             # Log the error and try to recover
             import traceback
@@ -459,11 +463,11 @@ class VoteSystem:
                 print(f"Error in error handling during finalize_vote for match {match_id}: {e2}")
 
     # New method to create balanced random teams
-    async def create_balanced_random_teams(self, channel, players, channel_id):
+    async def create_balanced_random_teams(self, channel, players, channel_id, match_id=None):
         """Create balanced random teams instead of completely random"""
         # Check if this is a global match by examining the channel name
         is_global = channel.name.lower() == "global"
-        print(f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}")
+        print(f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}, match_id: {match_id}")
 
         # Get MMR for each player (real or dummy)
         player_mmrs = []
