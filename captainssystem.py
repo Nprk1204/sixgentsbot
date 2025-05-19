@@ -559,6 +559,21 @@ class CaptainsSystem:
 
         # Create match record with explicit is_global flag
         try:
+            # CRITICAL: Cancel any existing match for these players
+            for player in all_players:
+                player_id = player["id"]
+                if not player_id.startswith('9000'):  # Skip dummy players
+                    self.match_system.matches.update_many(
+                        {
+                            "players.id": player_id,
+                            "status": {"$in": ["voting", "selection"]}
+                        },
+                        {
+                            "$set": {"status": "cancelled"}
+                        }
+                    )
+
+            # Now create the new match
             match_id = self.match_system.create_match(
                 str(uuid.uuid4()),
                 team1,
@@ -567,21 +582,18 @@ class CaptainsSystem:
                 is_global=is_global
             )
             print(f"Fallback: Created match with ID {match_id}")
+
+            # Double-check the status is set to in_progress
+            self.match_system.matches.update_one(
+                {"match_id": match_id},
+                {"$set": {"status": "in_progress"}}
+            )
         except Exception as e:
             print(f"Error creating match in fallback: {str(e)}")
             # Even if match creation fails, still try to send a message to the channel
             await channel.send(f"❌ Error creating match: {str(e)}")
             self.cancel_selection(channel_id)
             return
-
-            # Ensure the match status is explicitly set to "in_progress"
-        self.match_system.matches.update_one(
-            {"match_id": match_id},
-            {"$set": {"status": "in_progress"}}
-        )
-
-        # Debug print to confirm the status
-        print(f"DEBUG: Match {match_id} status set to 'in_progress'")
 
         # Create an embed for team announcement
         embed = discord.Embed(
@@ -612,9 +624,7 @@ class CaptainsSystem:
 
         # Clean up
         try:
-            print(f"Fallback: Removing {len(all_players)} players from queue")
-            self.queue.remove_players_from_queue(all_players)
-            print(f"Fallback: Canceling selection for channel {channel_id}")
+            print(f"Fallback: Cancelling selection for channel {channel_id}")
             self.cancel_selection(channel_id)
         except Exception as e:
             print(f"Error in cleanup during fallback: {str(e)}")

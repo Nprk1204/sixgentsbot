@@ -2262,6 +2262,128 @@ async def ping_slash(interaction: discord.Interaction):
 
         await interaction.response.send_message("Pong! Bot is connected to Discord.")
 
+
+@bot.tree.command(name="debug", description="Debug command to check player status")
+@app_commands.describe(
+    player="The player to check (defaults to you)"
+)
+async def debug_slash(interaction: discord.Interaction, player: discord.Member = None):
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    target_player = player or interaction.user
+    player_id = str(target_player.id)
+
+    await interaction.response.defer(ephemeral=True)
+
+    # Check queue status
+    queues = list(queue_handler.queue_collection.find({"id": player_id}))
+
+    # Check match status
+    matches = list(match_system.matches.find({"players.id": player_id}))
+
+    # Format the response
+    embed = discord.Embed(
+        title=f"Debug Info for {target_player.display_name}",
+        color=0x3498db
+    )
+
+    # Queue info
+    if queues:
+        queue_info = []
+        for q in queues:
+            channel_id = q.get("channel_id", "unknown")
+            channel_name = "unknown"
+            if channel_id and channel_id.isdigit():
+                channel = interaction.guild.get_channel(int(channel_id))
+                if channel:
+                    channel_name = channel.name
+            queue_info.append(f"• Channel: {channel_name} (ID: {channel_id})")
+
+        embed.add_field(
+            name=f"Queue Status ({len(queues)} queues)",
+            value="\n".join(queue_info) if queue_info else "No queue data",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="Queue Status",
+            value="Not in any queue",
+            inline=False
+        )
+
+    # Match info
+    if matches:
+        match_info = []
+        for m in matches:
+            match_id = m.get("match_id", "unknown")
+            status = m.get("status", "unknown")
+            channel_id = m.get("channel_id", "unknown")
+            channel_name = "unknown"
+            if channel_id and channel_id.isdigit():
+                channel = interaction.guild.get_channel(int(channel_id))
+                if channel:
+                    channel_name = channel.name
+
+            # Find which team this player is on
+            team = "unknown"
+            team1 = m.get("team1", [])
+            team2 = m.get("team2", [])
+
+            for p in team1:
+                if p.get("id") == player_id:
+                    team = "Team 1"
+                    break
+
+            for p in team2:
+                if p.get("id") == player_id:
+                    team = "Team 2"
+                    break
+
+            match_info.append(f"• Match ID: {match_id}\n  Status: {status}\n  Channel: {channel_name}\n  Team: {team}")
+
+        embed.add_field(
+            name=f"Match Status ({len(matches)} matches)",
+            value="\n".join(match_info) if match_info else "No match data",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="Match Status",
+            value="Not in any match",
+            inline=False
+        )
+
+    # Add a fix button
+    class FixButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(label="Fix Player Status", style=discord.ButtonStyle.danger)
+
+        async def callback(self, interaction):
+            # Remove from all queues
+            queue_handler.queue_collection.delete_many({"id": player_id})
+
+            # Reset all match statuses
+            for match in matches:
+                match_id = match.get("match_id")
+                status = match.get("status")
+
+                if status in ["voting", "selection"]:
+                    match_system.matches.update_one(
+                        {"match_id": match_id},
+                        {"$set": {"status": "cancelled"}}
+                    )
+
+            await interaction.response.send_message(f"Fixed status for {target_player.mention}!", ephemeral=True)
+
+    view = discord.ui.View()
+    view.add_item(FixButton())
+
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+
 @bot.tree.command(name="help", description="Shows command information")
 @app_commands.describe(command_name="Get details about a specific command")
 async def help_slash(interaction: discord.Interaction, command_name: str = None):

@@ -37,69 +37,59 @@ class QueueHandler:
         player_name = player.display_name
         channel_id = str(channel_id)
 
-        print(f"Attempting to add player {player_name} (ID: {player_id}) to queue in channel {channel_id}")
+        print(f"=== ADD PLAYER: {player_name} (ID: {player_id}) to channel {channel_id} ===")
 
-        # EMERGENCY FIX: Clear any stale voting/selection statuses for this player
-        # This ensures they're never stuck in a ghost state
-        self.matches_collection.update_many(
-            {
-                "players.id": player_id,
-                "status": {"$in": ["voting", "selection"]}
-            },
-            {
-                "$set": {"status": "cancelled"}
-            }
-        )
-
-        # Get all active matches the player is in to check current status
-        active_matches = list(self.matches_collection.find({
+        # STEP 1: First, check if player is in ACTIVE team selection in ANY channel
+        active_selection = self.matches_collection.find_one({
             "players.id": player_id,
-            "status": {"$in": ["voting", "selection", "in_progress"]}
-        }))
+            "status": {"$in": ["voting", "selection"]}
+        })
 
-        # Log all active matches for debugging
-        print(f"Found {len(active_matches)} active matches for player {player_name}:")
-        for match in active_matches:
-            print(
-                f"  Match ID: {match.get('match_id')}, Status: {match.get('status')}, Channel: {match.get('channel_id')}")
+        if active_selection:
+            selection_channel_id = active_selection.get("channel_id")
 
-        # Now ONLY check for matches in voting or selection states
-        active_team_selection = None
-        for match in active_matches:
-            if match.get("status") in ["voting", "selection"]:
-                active_team_selection = match
-                break
+            # Get channel name for better messaging
+            selection_channel = None
+            if self.bot and selection_channel_id and selection_channel_id.isdigit():
+                selection_channel = self.bot.get_channel(int(selection_channel_id))
 
-        if active_team_selection:
-            other_channel_id = active_team_selection.get("channel_id")
-            channel_name = "another channel"
+            channel_identifier = f"<#{selection_channel_id}>" if selection_channel_id else "another channel"
+            if selection_channel:
+                channel_identifier = f"#{selection_channel.name}"
 
-            if self.bot and other_channel_id and other_channel_id.isdigit():
-                channel = self.bot.get_channel(int(other_channel_id))
-                if channel:
-                    channel_name = f"#{channel.name}"
+            return f"{player_mention} cannot join the queue while team selection is in progress in {channel_identifier}!"
 
-            return f"{player_mention} cannot join the queue while team selection is in progress in {channel_name}!"
-
-        # Check if player is already in this channel's queue
-        if self.queue_collection.find_one({"id": player_id, "channel_id": channel_id}):
+        # STEP 2: Check if already in this channel's queue
+        existing_queue = self.queue_collection.find_one({"id": player_id, "channel_id": channel_id})
+        if existing_queue:
             return f"{player_mention} is already in this queue!"
 
-        # Check if player is in any other queue
+        # STEP 3: Check if in another queue
         other_queue = self.queue_collection.find_one({"id": player_id, "channel_id": {"$ne": channel_id}})
         if other_queue:
             other_channel_id = other_queue.get("channel_id")
-            if other_channel_id and other_channel_id.isdigit():
-                channel_mention = f"<#{other_channel_id}>"
-                return f"{player_mention} is already in a queue in {channel_mention}. Please leave that queue first."
-            else:
-                return f"{player_mention} is already in another queue. Please leave that queue first."
+            channel_identifier = "another channel"
 
-        # Determine if this is a global queue
+            if other_channel_id and other_channel_id.isdigit():
+                channel_identifier = f"<#{other_channel_id}>"
+
+            return f"{player_mention} is already in a queue in {channel_identifier}. Please leave that queue first."
+
+        # STEP 4: Check for an active vote in this channel before adding player
+        # This ensures we don't add a player if a vote is already in progress
+        active_vote = self.matches_collection.find_one({
+            "channel_id": channel_id,
+            "status": {"$in": ["voting", "selection"]}
+        })
+
+        if active_vote:
+            return f"{player_mention} cannot join the queue while team selection is in progress in this channel!"
+
+        # STEP 5: Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
         is_global = channel and channel.name.lower() == "global"
 
-        # Add player to queue
+        # STEP 6: Add player to queue
         self.queue_collection.insert_one({
             "id": player_id,
             "name": player_name,
@@ -109,50 +99,48 @@ class QueueHandler:
             "joined_at": datetime.datetime.utcnow()
         })
 
-        # Count players in the queue
+        # STEP 7: Count players in the queue
         queue_count = self.queue_collection.count_documents({"channel_id": channel_id})
 
-        # If queue reached 6 players, create active match and start voting
+        # STEP 8: If queue is full, check again if another process has started a vote
         if queue_count >= 6:
-            return self.create_active_match(channel_id, player_mention)
+            # Double-check that no vote has started in this channel since we checked last
+            active_vote = self.matches_collection.find_one({
+                "channel_id": channel_id,
+                "status": {"$in": ["voting", "selection"]}
+            })
+
+            if active_vote:
+                # A vote has started since we checked last - remove this player
+                self.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
+                return f"{player_mention} cannot join because team selection has already started!"
+
+            # No active vote - get 6 players and create a match
+            players = list(self.queue_collection.find({"channel_id": channel_id}).limit(6))
+
+            # Generate a unique match ID for the active match
+            match_id = str(uuid.uuid4())[:8]
+
+            # Create active match entry
+            active_match = {
+                "match_id": match_id,
+                "channel_id": channel_id,
+                "players": players,
+                "created_at": datetime.datetime.utcnow(),
+                "is_global": is_global,
+                "status": "voting"  # Initial status is voting
+            }
+
+            # Remove these players from the queue before inserting the match
+            for player in players:
+                self.queue_collection.delete_one({"_id": player["_id"]})
+
+            # Insert into active matches collection
+            self.matches_collection.insert_one(active_match)
+
+            return f"{player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
         else:
             return f"{player_mention} has joined the queue! There are {queue_count}/6 players"
-
-    def create_active_match(self, channel_id, trigger_player_mention):
-        """Create an active match from the first 6 players in queue"""
-        # Get the first 6 players
-        queue_players = list(self.queue_collection.find({"channel_id": channel_id}).limit(6))
-
-        if len(queue_players) < 6:
-            return f"Not enough players to start match (need 6, have {len(queue_players)})"
-
-        # Generate a unique match ID
-        match_id = str(uuid.uuid4())[:8]
-
-        # Determine if this is a global match
-        is_global = False
-        if queue_players and "is_global" in queue_players[0]:
-            is_global = queue_players[0]["is_global"]
-
-        # Create active match
-        active_match = {
-            "match_id": match_id,
-            "channel_id": channel_id,
-            "players": queue_players,
-            "created_at": datetime.datetime.utcnow(),
-            "is_global": is_global,
-            "status": "voting"  # Initial status is voting
-        }
-
-        # Insert into active matches collection
-        self.matches_collection.insert_one(active_match)
-
-        # Remove these players from the queue
-        for player in queue_players:
-            self.queue_collection.delete_one({"_id": player["_id"]})
-
-        # Return message
-        return f"{trigger_player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
 
     def remove_player(self, player, channel_id):
         """Remove a player from a channel's queue or active match"""

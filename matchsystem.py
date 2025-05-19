@@ -29,6 +29,27 @@ class MatchSystem:
         # Generate a shorter match ID that's easier for users to type
         short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
 
+        print(f"Creating match with ID: {short_id}, channel: {channel_id}, is_global: {is_global}")
+
+        # CRITICAL: Before creating a new match, find and cancel any active selection
+        # with these players to prevent overlap issues
+        all_players = team1 + team2
+        for player in all_players:
+            player_id = player["id"]
+            # Skip dummy players
+            if not player_id.startswith('9000'):
+                print(f"Checking if player {player['name']} (ID: {player_id}) is in any active selections")
+                # Update any voting/selection matches containing this player to be cancelled
+                self.matches.update_many(
+                    {
+                        "players.id": player_id,
+                        "status": {"$in": ["voting", "selection"]}
+                    },
+                    {
+                        "$set": {"status": "cancelled"}
+                    }
+                )
+
         # Add better debugging for channel detection, but ONLY if is_global wasn't explicitly provided
         if not is_global:  # Only try to detect if is_global wasn't explicitly True
             try:
@@ -53,7 +74,7 @@ class MatchSystem:
             "match_id": short_id,  # Use the shorter ID
             "team1": team1,
             "team2": team2,
-            "status": "in_progress",  # CRITICAL: Always set to in_progress
+            "status": "in_progress",  # CRITICAL: Ensure default status is "in_progress"
             "winner": None,
             "score": {"team1": 0, "team2": 0},
             "channel_id": channel_id,
@@ -62,15 +83,6 @@ class MatchSystem:
             "reported_by": None,
             "is_global": is_global
         }
-
-        # CRITICAL ADDITION: Clear status for all players involved
-        # This ensures no player remains in a "ghost" selection state
-        all_players = team1 + team2
-        for player in all_players:
-            player_id = player["id"]
-            # Skip dummy players (non-real players)
-            if not player_id.startswith('9000'):
-                self.clear_player_match_status(player_id, short_id)
 
         # Store in database
         self.matches.insert_one(match_data)
