@@ -188,6 +188,18 @@ async def on_ready():
     captains_system.set_bot(bot)
     queue_handler.set_bot(bot)
 
+    # NEW: Clean up any stale matches that might be stuck in voting or selection status
+    stale_matches = list(queue_handler.matches_collection.find(
+        {"status": {"$in": ["voting", "selection"]}}
+    ))
+
+    if stale_matches:
+        print(f"Found {len(stale_matches)} stale matches. Cleaning up...")
+        queue_handler.matches_collection.update_many(
+            {"status": {"$in": ["voting", "selection"]}},
+            {"$set": {"status": "cancelled"}}
+        )
+
     # Get all queue channels and initialize systems
     for guild in bot.guilds:
         for channel in guild.text_channels:
@@ -1826,10 +1838,16 @@ async def forcestart_slash(interaction: discord.Interaction):
     # Get current players in queue and active match
     channel_id = str(interaction.channel.id)
 
-    # Check if there's already an active match
-    active_match = queue_handler.matches_collection.find_one({"channel_id": channel_id})
+    # IMPORTANT FIX: Check if there's already an active match, but also provide
+    # an option to override/cancel it
+    active_match = queue_handler.matches_collection.find_one({"channel_id": channel_id, "status": "in_progress"})
     if active_match:
-        await interaction.response.send_message("An active match is already in progress in this channel!")
+        # Ask if the admin wants to force cancel the existing match
+        await interaction.response.send_message(
+            "⚠️ An active match is already in progress in this channel. Do you want to cancel it and start a new one?",
+            ephemeral=True,
+            view=ForceStartConfirmView(interaction, active_match, channel_id)
+        )
         return
 
     # Get players from the queue
@@ -1882,6 +1900,9 @@ async def forcestart_slash(interaction: discord.Interaction):
 
             # Add dummy player to queue
             queue_handler.queue_collection.insert_one(dummy_player)
+    else:
+        # If we have enough players, just acknowledge the command
+        await interaction.response.send_message("Force starting team selection with existing players...")
 
     # Create active match
     match_id = str(uuid.uuid4())[:8]
@@ -1909,6 +1930,38 @@ async def forcestart_slash(interaction: discord.Interaction):
     # Force start the vote
     await interaction.channel.send("**Force starting team selection!**")
     await vote_system.start_vote(interaction.channel)
+
+# Add this class to handle the confirmation dialog
+class ForceStartConfirmView(discord.ui.View):
+    def __init__(self, interaction, active_match, channel_id):
+        super().__init__(timeout=60)
+        self.interaction = interaction
+        self.active_match = active_match
+        self.channel_id = channel_id
+
+    @discord.ui.button(label="Yes, Cancel Existing Match", style=discord.ButtonStyle.danger)
+    async def confirm(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+        if button_interaction.user.id != self.interaction.user.id:
+            await button_interaction.response.send_message("You're not authorized to use this button.", ephemeral=True)
+            return
+
+        # Cancel the existing match
+        queue_handler.matches_collection.update_one(
+            {"_id": self.active_match["_id"]},
+            {"$set": {"status": "cancelled"}}
+        )
+
+        await button_interaction.response.send_message("Existing match cancelled. You can now use `/forcestart` again to create a new match.", ephemeral=True)
+        self.stop()
+
+    @discord.ui.button(label="No, Keep Existing Match", style=discord.ButtonStyle.secondary)
+    async def cancel(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+        if button_interaction.user.id != self.interaction.user.id:
+            await button_interaction.response.send_message("You're not authorized to use this button.", ephemeral=True)
+            return
+
+        await button_interaction.response.send_message("Operation cancelled. The existing match will not be affected.", ephemeral=True)
+        self.stop()
 
 @bot.tree.command(name="forcestop",
                       description="Force stop any active votes or selections and clear the queue (Admin only)")
