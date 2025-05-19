@@ -119,7 +119,6 @@ class VoteSystem:
         return True  # Vote started successfully
 
     async def handle_button_vote(self, interaction, vote_type):
-        """Handle button presses for voting"""
         # Get the channel_id from the interaction
         channel_id = str(interaction.channel.id)
         user_id = interaction.user.id
@@ -130,6 +129,31 @@ class VoteSystem:
             return
 
         vote_state = self.active_votes[channel_id]
+
+        # NEW: Get the active match directly from database to ensure latest data
+        active_match = self.queue.matches_collection.find_one({
+            "channel_id": channel_id,
+            "status": "voting"
+        })
+
+        if not active_match:
+            await interaction.response.send_message("This vote is no longer active.", ephemeral=True)
+            # Clean up the vote state since the database shows no active vote
+            self.cancel_voting(channel_id)
+            return
+
+        # Check if player is in the active match
+        player_id = str(user_id)
+        player_in_match = False
+
+        for player in active_match.get("players", []):
+            if player.get("id") == player_id:
+                player_in_match = True
+                break
+
+        if not player_in_match:
+            await interaction.response.send_message("Only players in this match can vote!", ephemeral=True)
+            return
 
         # Check if player is in the active match
         player_id = str(user_id)
@@ -212,6 +236,16 @@ class VoteSystem:
         # Check if voting is still active for this channel
         if channel_id not in self.active_votes:
             return  # Vote was already completed or canceled
+
+            # NEW: Explicitly update database to prevent state mismatch
+            try:
+                self.queue.matches_collection.update_many(
+                    {"channel_id": channel_id, "status": "voting"},
+                    {"$set": {"status": "cancelled"}}
+                )
+                print(f"Updated match status to cancelled due to vote timeout in channel {channel_id}")
+            except Exception as e:
+                print(f"Error updating match status on timeout: {e}")
 
         vote_state = self.active_votes[channel_id]
 
@@ -333,6 +367,15 @@ class VoteSystem:
                     {"$set": {"status": "selection"}}
                 )
 
+                # NEW: Clear the queue for this channel after starting a match
+                try:
+                    self.queue.queue_collection.delete_many({"channel_id": channel_id})
+                    print(f"Cleared all queued players in channel {channel_id} after starting match")
+                except Exception as e:
+                    print(f"Error clearing queue after starting match: {e}")
+
+                await self.create_balanced_random_teams(channel, players, channel_id)
+
                 # Use the captains_system reference
                 if self.captains_system:
                     captains_result = self.captains_system.start_captains_selection(players, channel_id)
@@ -353,6 +396,15 @@ class VoteSystem:
                     {"_id": db_match["_id"]},
                     {"$set": {"status": "playing"}}
                 )
+
+                # NEW: Clear the queue for this channel after starting a match
+                try:
+                    self.queue.queue_collection.delete_many({"channel_id": channel_id})
+                    print(f"Cleared all queued players in channel {channel_id} after starting match")
+                except Exception as e:
+                    print(f"Error clearing queue after starting match: {e}")
+
+                await self.create_balanced_random_teams(channel, players, channel_id)
 
                 await self.create_balanced_random_teams(channel, players, channel_id)
         except Exception as e:
@@ -501,6 +553,13 @@ class VoteSystem:
 
         # Send team announcement as embed
         await channel.send(embed=embed)
+
+        # NEW: After creating a match, explicitly clear the queue for this channel
+        try:
+            self.queue.queue_collection.delete_many({"channel_id": channel_id})
+            print(f"Cleared all queued players in channel {channel_id} after match creation")
+        except Exception as e:
+            print(f"Error clearing queue after match creation: {e}")
 
         # Cancel this vote
         self.cancel_voting(channel_id)

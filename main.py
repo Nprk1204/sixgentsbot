@@ -383,13 +383,19 @@ async def leave_slash(interaction: discord.Interaction):
             )
         return
 
-    # Check if voting is active in this channel
-    if vote_system.is_voting_active(channel_id):
-        await interaction.response.send_message(
-            f"{player_mention} cannot leave the queue while voting is in progress!",
-            ephemeral=True
-        )
-        return
+        # NEW: Check if player is in an active match in voting/selection in this channel
+        active_match = queue_handler.matches_collection.find_one({
+            "channel_id": channel_id,
+            "status": {"$in": ["voting", "selection"]},
+            "players.id": player_id
+        })
+
+        if active_match:
+            await interaction.response.send_message(
+                f"{player_mention} cannot leave while team selection is in progress!",
+                ephemeral=True
+            )
+            return
 
     # Delete the player from THIS channel's queue
     result = queue_handler.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})

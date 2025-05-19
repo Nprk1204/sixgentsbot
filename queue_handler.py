@@ -67,32 +67,18 @@ class QueueHandler:
 
             return f"{player_mention} is already in a queue in {channel_identifier}. Please leave that queue first."
 
-        # Check for an active vote in this channel before adding player
-        active_vote = self.matches_collection.find_one({
+        # NEW: Check if player is in an active match in THIS channel
+        active_match = self.matches_collection.find_one({
             "channel_id": channel_id,
-            "status": {"$in": ["voting", "selection"]}
+            "status": {"$in": ["voting", "selection"]},
+            "players.id": player_id
         })
 
-        if active_vote:
-            # IMPORTANT: Force cancel if the active vote contains test players (which may be stuck)
-            has_test_players = False
-            for p in active_vote.get("players", []):
-                if p.get("id", "").startswith("9000"):
-                    has_test_players = True
-                    break
+        if active_match:
+            # Player is in active match in this channel, reject queue join
+            return f"{player_mention} cannot join the queue while team selection is in progress in this channel!"
 
-            if has_test_players:
-                # This is likely a stuck vote with test players - force cancel it
-                self.matches_collection.update_one(
-                    {"_id": active_vote["_id"]},
-                    {"$set": {"status": "cancelled"}}
-                )
-                # Continue with adding the player rather than rejecting
-            else:
-                # This is a legitimate active vote - reject the join
-                return f"{player_mention} cannot join the queue while team selection is in progress in this channel!"
-
-        # Determine if this is a global queue
+        # Determine if this is a global queue - PRESERVED FROM ORIGINAL CODE
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
         is_global = channel and channel.name.lower() == "global"
 
@@ -102,7 +88,7 @@ class QueueHandler:
             "name": player_name,
             "mention": player_mention,
             "channel_id": channel_id,
-            "is_global": is_global,
+            "is_global": is_global,  # Preserve the is_global flag
             "joined_at": datetime.datetime.utcnow()
         })
 
@@ -138,7 +124,7 @@ class QueueHandler:
                 "channel_id": channel_id,
                 "players": players,
                 "created_at": datetime.datetime.utcnow(),
-                "is_global": is_global,
+                "is_global": is_global,  # Preserve the is_global flag
                 "status": "voting"  # Initial status is voting
             }
 
@@ -356,3 +342,13 @@ class QueueHandler:
 
             except Exception as e:
                 print(f"Error in remove_inactive_players task: {e}")
+
+    def is_player_in_active_match(self, player_id, channel_id=None):
+        """Check if a player is in an active match, optionally in a specific channel"""
+        query = {"players.id": player_id, "status": {"$in": ["voting", "selection", "in_progress"]}}
+
+        if channel_id:
+            query["channel_id"] = str(channel_id)
+
+        match = self.matches_collection.find_one(query)
+        return match is not None

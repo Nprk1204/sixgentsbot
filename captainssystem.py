@@ -95,6 +95,21 @@ class CaptainsSystem:
         # Get the selection state for this channel
         selection_state = self.active_selections[channel_id]
 
+        # NEW: Verify active match exists and still in selection state
+        active_match = self.match_system.matches.find_one({
+            "channel_id": channel_id,
+            "status": "selection"
+        })
+
+        if not active_match:
+            print(f"No active match in selection state found for channel {channel_id}")
+            await channel.send("⚠️ Error: The captain selection process has been cancelled.")
+            self.cancel_selection(channel_id)
+            return
+
+        # Use player list from the active match for consistency
+        selection_state['match_players'] = active_match.get("players", [])
+
         # Set announcement channel
         selection_state['announcement_channel'] = channel
 
