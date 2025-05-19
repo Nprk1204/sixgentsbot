@@ -293,9 +293,12 @@ async def queue_slash(interaction: discord.Interaction):
     response = queue_handler.add_player(player, channel_id)
     await interaction.response.send_message(response)
 
-    # Check if queue is full and start voting
+    # Check if queue is full (has at least 6 real players) and start voting
+    # Fix: Count only real players, not dummy test players (IDs starting with 9000)
     players = queue_handler.get_players_for_match(channel_id)
-    if len(players) >= 6:
+    real_players = [p for p in players if not str(p.get("id", "")).startswith('9000')]
+
+    if len(real_players) >= 6:  # Only trigger voting if we have 6+ real players
         # Check if voting is already active for this channel
         if not vote_system.is_voting_active(channel_id):
             await vote_system.start_vote(interaction.channel)
