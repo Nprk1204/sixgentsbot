@@ -601,38 +601,120 @@ class CaptainsSystem:
             self.cancel_selection(channel_id)
             return
 
-        # Create random teams
-        random.shuffle(all_players)
-        team1 = all_players[:3]
-        team2 = all_players[3:6]
-
-        # Format team mentions
-        team1_mentions = [player['mention'] for player in team1]
-        team2_mentions = [player['mention'] for player in team2]
-
-        # Calculate team average MMRs
-        team1_mmr = self.calculate_team_mmr(team1)
-        team2_mmr = self.calculate_team_mmr(team2)
+        # Send a clear message that we're falling back to random teams
+        await channel.send("Captain selection failed. Creating balanced random teams instead...")
 
         # Determine if this is a global match
         is_global = channel.name.lower() == "global"
         print(f"Fallback: Channel {channel.name}, is_global: {is_global}")
 
+        # Create balanced random teams based on MMR
+        # First get MMR for each player
+        player_mmrs = []
+        for player in all_players:
+            player_id = player["id"]
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and "dummy_mmr" in player:
+                mmr = player["dummy_mmr"]
+                player_mmrs.append((player, mmr))
+                continue
+
+            # Skip dummy players without MMR
+            if player_id.startswith('9000') and "dummy_mmr" not in player:
+                # Generate a random MMR based on channel
+                channel_name = channel.name.lower()
+                if channel_name == "rank-a":
+                    mmr = random.randint(1600, 2100)
+                elif channel_name == "rank-b":
+                    mmr = random.randint(1100, 1599)
+                else:  # rank-c or global
+                    mmr = random.randint(600, 1099)
+                player_mmrs.append((player, mmr))
+                continue
+
+            # Get player data for real players
+            player_data = self.match_system.players.find_one({"id": player_id})
+            if player_data:
+                # Use global or ranked MMR based on match type
+                if is_global:
+                    mmr = player_data.get("global_mmr", 300)
+                else:
+                    mmr = player_data.get("mmr", 600)
+                player_mmrs.append((player, mmr))
+            else:
+                # For new players, check rank record
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                if rank_record:
+                    if is_global:
+                        mmr = rank_record.get("global_mmr", 300)
+                    else:
+                        tier = rank_record.get("tier", "Rank C")
+                        mmr = self.match_system.TIER_MMR.get(tier, 600)
+                    player_mmrs.append((player, mmr))
+                else:
+                    # Use default MMR
+                    if is_global:
+                        player_mmrs.append((player, 300))
+                    else:
+                        player_mmrs.append((player, 600))
+
+        # Sort players by MMR (highest to lowest)
+        player_mmrs.sort(key=lambda x: x[1], reverse=True)
+
+        # Initialize teams
+        team1 = []
+        team2 = []
+        team1_mmr = 0
+        team2_mmr = 0
+
+        # Assign players to teams for balance (alternating with highest and lowest)
+        while player_mmrs:
+            # Get highest MMR player
+            if player_mmrs:
+                if team1_mmr <= team2_mmr:
+                    player, mmr = player_mmrs.pop(0)  # Take from front (highest MMR)
+                    team1.append(player)
+                    team1_mmr += mmr
+                else:
+                    player, mmr = player_mmrs.pop(0)  # Take from front (highest MMR)
+                    team2.append(player)
+                    team2_mmr += mmr
+
+            # Get lowest MMR player
+            if player_mmrs:
+                if team1_mmr <= team2_mmr:
+                    player, mmr = player_mmrs.pop(-1)  # Take from end (lowest MMR)
+                    team1.append(player)
+                    team1_mmr += mmr
+                else:
+                    player, mmr = player_mmrs.pop(-1)  # Take from end (lowest MMR)
+                    team2.append(player)
+                    team2_mmr += mmr
+
+        # Format team mentions
+        team1_mentions = [player['mention'] for player in team1]
+        team2_mentions = [player['mention'] for player in team2]
+
+        # Calculate average MMR per team for display
+        team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
+        team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
+
         # Create match record with explicit is_global flag
         try:
             # CRITICAL: Cancel any existing match for these players
-            for player in all_players:
-                player_id = player["id"]
-                if not player_id.startswith('9000'):  # Skip dummy players
-                    self.match_system.matches.update_many(
-                        {
-                            "players.id": player_id,
-                            "status": {"$in": ["voting", "selection"]}
-                        },
-                        {
-                            "$set": {"status": "cancelled"}
-                        }
-                    )
+            active_match = self.match_system.matches.find_one({
+                "channel_id": channel_id,
+                "status": {"$in": ["voting", "selection"]}
+            })
+
+            if active_match:
+                # Update the status of the active match to cancelled
+                self.match_system.matches.update_one(
+                    {"_id": active_match["_id"]},
+                    {"$set": {"status": "cancelled"}}
+                )
+                print(f"Cancelled existing match with ID {active_match.get('match_id', 'unknown')}")
 
             # Cancel our own active selection first to avoid race conditions
             self.cancel_selection(channel_id)
@@ -652,6 +734,14 @@ class CaptainsSystem:
                 {"match_id": match_id},
                 {"$set": {"status": "in_progress"}}
             )
+
+            # Make sure players are removed from the queue
+            try:
+                self.queue.remove_players_from_queue(all_players, channel_id)
+                print(f"Removed {len(all_players)} players from queue in channel {channel_id}")
+            except Exception as e:
+                print(f"Error removing players from queue: {e}")
+
         except Exception as e:
             print(f"Error creating match in fallback: {str(e)}")
             # Even if match creation fails, still try to send a message to the channel
@@ -666,8 +756,8 @@ class CaptainsSystem:
         )
 
         embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
-        embed.add_field(name=f"Team 1 - Avg MMR: {team1_mmr}", value=", ".join(team1_mentions), inline=False)
-        embed.add_field(name=f"Team 2 - Avg MMR: {team2_mmr}", value=", ".join(team2_mentions), inline=False)
+        embed.add_field(name=f"Team 1 - Avg MMR: {team1_avg_mmr}", value=", ".join(team1_mentions), inline=False)
+        embed.add_field(name=f"Team 2 - Avg MMR: {team2_avg_mmr}", value=", ".join(team2_mentions), inline=False)
         embed.add_field(
             name="Report Results",
             value=f"Play your match and report the result using `/report {match_id} win` or `/report {match_id} loss`",
@@ -683,8 +773,8 @@ class CaptainsSystem:
             # Try sending a plain text message if embed fails
             try:
                 await channel.send(f"Teams have been randomly assigned. Match ID: {match_id}")
-            except:
-                pass
+            except Exception as e2:
+                print(f"Could not send even a plain text message: {e2}")
 
         # Clean up
         try:
