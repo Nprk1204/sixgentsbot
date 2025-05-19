@@ -90,6 +90,7 @@ class CaptainsSystem:
 
         # Check if selection is active for this channel
         if not self.is_selection_active(channel_id):
+            print(f"No active selection found for channel {channel_id}")
             return
 
         # Get the selection state for this channel
@@ -587,6 +588,9 @@ class CaptainsSystem:
                             "$set": {"status": "cancelled"}
                         }
                     )
+
+            # Cancel our own active selection first to avoid race conditions
+            self.cancel_selection(channel_id)
 
             # Now create the new match
             match_id = self.match_system.create_match(

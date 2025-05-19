@@ -235,34 +235,10 @@ class VoteSystem:
 
         # Check if voting is still active for this channel
         if channel_id not in self.active_votes:
+            print(f"Vote timeout handler: No active vote found for channel {channel_id}")
             return  # Vote was already completed or canceled
 
-            # NEW: Explicitly update database to prevent state mismatch
-            try:
-                self.queue.matches_collection.update_many(
-                    {"channel_id": channel_id, "status": "voting"},
-                    {"$set": {"status": "cancelled"}}
-                )
-                print(f"Updated match status to cancelled due to vote timeout in channel {channel_id}")
-            except Exception as e:
-                print(f"Error updating match status on timeout: {e}")
-
-        vote_state = self.active_votes[channel_id]
-
-        # Check if voting is complete
-        if len(vote_state['voters']) >= 6:
-            return  # Voting already complete
-
-        # CRITICAL FIX: Wait a short time to prevent double-timeouts
-        # This addresses the issue where we see "The vote has timed out!" message twice
         print(f"Vote timeout triggered for channel {channel_id}")
-
-        # Get the channel object
-        channel = vote_state.get('channel')
-        if not channel:
-            # Can't proceed without a channel
-            self.cancel_voting(channel_id)
-            return
 
         # Get the current active vote to make sure it hasn't changed
         active_vote = None
@@ -280,7 +256,22 @@ class VoteSystem:
             self.cancel_voting(channel_id)
             return
 
-        # If not, announce timeout and create teams based on current votes
+        vote_state = self.active_votes[channel_id]
+
+        # Check if voting is complete
+        if len(vote_state['voters']) >= 6:
+            print(f"Vote timeout handler: All 6 players have already voted in channel {channel_id}")
+            return  # Voting already complete
+
+        # Get the channel object
+        channel = vote_state.get('channel')
+        if not channel:
+            # Can't proceed without a channel
+            print(f"Vote timeout handler: No channel object found for channel {channel_id}")
+            self.cancel_voting(channel_id)
+            return
+
+        # Announce timeout and create teams based on current votes
         try:
             await channel.send("⏱️ The vote has timed out! Creating teams based on current votes...")
         except Exception as e:
@@ -297,11 +288,25 @@ class VoteSystem:
             try:
                 if vote_state.get('message'):
                     await vote_state['message'].edit(view=vote_state['view'])
+                    print(f"Vote timeout handler: Disabled vote buttons in channel {channel_id}")
             except Exception as e:
                 print(f"Error disabling buttons: {e}")
 
-        # Finalize vote regardless of vote count
-        await self.finalize_vote(channel_id, force=True)
+        # Create a lock to prevent race conditions during timeout
+        if not hasattr(self, '_timeout_locks'):
+            self._timeout_locks = {}
+
+        if channel_id not in self._timeout_locks:
+            self._timeout_locks[channel_id] = asyncio.Lock()
+
+        async with self._timeout_locks[channel_id]:
+            # Check again if vote is still active after acquiring the lock
+            if channel_id not in self.active_votes:
+                print(f"Vote timeout handler: Vote is no longer active after lock for channel {channel_id}")
+                return
+
+            # Finalize vote regardless of vote count
+            await self.finalize_vote(channel_id, force=True)
 
     async def finalize_vote(self, channel_id, force=False):
         """Finalize the vote and create teams for a specific channel"""
@@ -354,9 +359,6 @@ class VoteSystem:
 
             # Determine winner (default to random if tied or no votes)
             if vote_state['captains_votes'] > vote_state['random_votes']:
-                # Cancel this vote
-                self.cancel_voting(channel_id)
-
                 # Update match status to "selection"
                 if hasattr(self.queue, 'update_match_status'):
                     self.queue.update_match_status(channel_id, "selection")
@@ -374,7 +376,8 @@ class VoteSystem:
                 except Exception as e:
                     print(f"Error clearing queue after starting match: {e}")
 
-                await self.create_balanced_random_teams(channel, players, channel_id)
+                # Cancel this vote - MOVED HERE to ensure we cancel the vote before starting captain selection
+                self.cancel_voting(channel_id)
 
                 # Use the captains_system reference
                 if self.captains_system:
@@ -386,8 +389,7 @@ class VoteSystem:
                     await channel.send("Captains system not available. Falling back to random teams...")
                     await self.create_balanced_random_teams(channel, players, channel_id)
             else:
-                # Create balanced random teams
-                # Update match status to "playing"
+                # Random teams won - update match status
                 if hasattr(self.queue, 'update_match_status'):
                     self.queue.update_match_status(channel_id, "playing")
 
@@ -404,8 +406,10 @@ class VoteSystem:
                 except Exception as e:
                     print(f"Error clearing queue after starting match: {e}")
 
-                await self.create_balanced_random_teams(channel, players, channel_id)
+                # Cancel this vote - MOVED HERE to ensure we cancel the vote before creating teams
+                self.cancel_voting(channel_id)
 
+                # Create balanced random teams - only call once!
                 await self.create_balanced_random_teams(channel, players, channel_id)
         except Exception as e:
             # Log the error and try to recover
