@@ -55,10 +55,29 @@ class QueueHandler:
 
             return f"{player_mention} is already in a queue in {channel_identifier}. Please leave that queue first."
 
-        # IMPROVED: Enhanced check for player in ANY active match with better reporting
+        # IMPROVED: Forcefully clear all player matches before checking for active matches
+        # This ensures any lingering active matches are properly cleaned up
+        try:
+            # Check if match_system is available for cleanup
+            if hasattr(self, 'match_system') and self.match_system:
+                # Get reference to the matches collection directly
+                matches_collection = self.match_system.matches
+
+                # Force all active matches for this player to be marked as completed
+                cleanup_result = matches_collection.update_many(
+                    {"players.id": player_id, "status": {"$in": ["voting", "selection", "in_progress"]}},
+                    {"$set": {"status": "completed"}}
+                )
+
+                print(
+                    f"Forcefully cleared {cleanup_result.modified_count} active matches for {player_id} before queue check")
+        except Exception as e:
+            print(f"Error attempting to force-clear player matches: {e}")
+
+        # NOW check for active matches after the cleanup
         active_matches = list(self.matches_collection.find({
-            "status": {"$in": ["voting", "selection", "in_progress"]},
-            "players.id": player_id
+            "players.id": player_id,
+            "status": {"$in": ["voting", "selection", "in_progress"]}
         }))
 
         if active_matches:
@@ -87,8 +106,19 @@ class QueueHandler:
                         # Use the short ID for the message
                         match_id = short_id
 
-                print(f"Active match found: {match_id} with status: {match_status}")
-                return f"{player_mention} cannot join the queue while you have an active match in progress! (Match ID: {match_id}, Status: {match_status})"
+                # CRITICAL: Force this match to be completed, since we've detected it after cleanup
+                self.matches_collection.update_one(
+                    {"_id": active_match["_id"]},
+                    {"$set": {"status": "completed"}}
+                )
+                print(f"FORCED completion of match {match_id} with status: {match_status}")
+
+                # Verify it's actually completed now
+                updated_match = self.matches_collection.find_one({"_id": active_match["_id"]})
+                if updated_match:
+                    print(f"Updated match status: {updated_match.get('status', 'unknown')}")
+
+                return f"{player_mention} had an active match that was force-completed. Please try joining the queue again."
 
         # Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
