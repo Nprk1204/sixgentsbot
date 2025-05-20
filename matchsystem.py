@@ -251,9 +251,14 @@ class MatchSystem:
             team1_score = 0
             team2_score = 1
 
-        # Update match data with a timestamp to ensure it's updated correctly
+        # First, get the current status for debugging
+        current_match = self.matches.find_one({"match_id": match_id})
+        current_status = current_match.get("status", "unknown") if current_match else "not found"
+        print(f"Before update - match {match_id} current status: {current_status}")
+
+        # Update match data - remove the status condition to ensure it updates
         result = self.matches.update_one(
-            {"match_id": match_id, "status": "in_progress"},  # Only update if still in progress
+            {"match_id": match_id},  # Update by match_id without status condition
             {"$set": {
                 "status": "completed",
                 "winner": winner,
@@ -263,8 +268,33 @@ class MatchSystem:
             }}
         )
 
-        # ADD debugging output right after this:
+        # Debugging output
         print(f"Match report update for match {match_id} - modified: {result.modified_count}")
+
+        # Verify the status was actually updated
+        updated_match = self.matches.find_one({"match_id": match_id})
+        updated_status = updated_match.get("status", "unknown") if updated_match else "not found"
+        print(f"After update - match {match_id} current status: {updated_status}")
+
+        # If update failed, try using _id as a fallback
+        if result.modified_count == 0 and current_match:
+            print(f"WARNING: Failed to update match {match_id} by match_id, trying by _id")
+            result = self.matches.update_one(
+                {"_id": current_match["_id"]},
+                {"$set": {
+                    "status": "completed",
+                    "winner": winner,
+                    "score": {"team1": team1_score, "team2": team2_score},
+                    "completed_at": datetime.datetime.utcnow(),
+                    "reported_by": reporter_id
+                }}
+            )
+            print(f"Fallback update result: {result.modified_count} documents modified")
+
+            # Verify the fallback status update
+            updated_match = self.matches.find_one({"_id": current_match["_id"]})
+            updated_status = updated_match.get("status", "unknown") if updated_match else "not found"
+            print(f"After fallback update - match {match_id} current status: {updated_status}")
 
         # Check if the update was successful
         if result.modified_count == 0:
