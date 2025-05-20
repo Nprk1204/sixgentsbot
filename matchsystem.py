@@ -985,7 +985,6 @@ class MatchSystem:
                 )
 
     async def clear_player_active_matches(self, player_id):
-        """Clear any active matches for a player after reporting"""
         print(f"Clearing active matches for player: {player_id}")
 
         # Find all active matches for this player
@@ -996,13 +995,28 @@ class MatchSystem:
 
         for match in active_matches:
             match_id = match.get("match_id", "unknown")
-            print(f"Found active match {match_id} for player {player_id}, setting to completed")
+            status = match.get("status", "unknown")
+            print(f"Found active match {match_id} (status: {status}) for player {player_id}, setting to completed")
 
-            # Update match status to completed
-            self.matches.update_one(
-                {"_id": match["_id"]},
+            # Update match status to completed - use match_id for consistent updating
+            result = self.matches.update_one(
+                {"match_id": match_id},
                 {"$set": {"status": "completed"}}
             )
+
+            if result.modified_count == 0:
+                print(f"WARNING: Failed to update match {match_id} by match_id, trying by _id")
+                # Try again with _id
+                self.matches.update_one(
+                    {"_id": match["_id"]},
+                    {"$set": {"status": "completed"}}
+                )
+
+            # Verify the match is now completed
+            updated_match = self.matches.find_one({"match_id": match_id})
+            if updated_match and updated_match.get("status") != "completed":
+                print(
+                    f"ERROR: Match {match_id} still has status '{updated_match.get('status')}' after attempted update")
 
         return len(active_matches)
 
