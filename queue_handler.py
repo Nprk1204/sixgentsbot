@@ -304,3 +304,15 @@ class QueueHandler:
 
             except Exception as e:
                 print(f"Error in remove_inactive_players task: {e}")
+
+    def remove_players_from_queue(self, players, channel_id=None):
+        """Remove a list of players from the queue"""
+        for player in players:
+            player_id = player["id"]
+
+            # If channel_id is provided, only remove from that channel
+            if channel_id:
+                self.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
+            else:
+                # Otherwise remove from any channel
+                self.queue_collection.delete_one({"id": player_id})
