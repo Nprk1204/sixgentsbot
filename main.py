@@ -160,6 +160,7 @@ except Exception as e:
 db = Database(MONGO_URI)
 queue_handler = QueueHandler(db)
 match_system = MatchSystem(db)
+match_system.set_queue_handler(queue_handler)
 
 # Create channel-specific vote and captain systems
 channel_names = ["rank-a", "rank-b", "rank-c", "global"]

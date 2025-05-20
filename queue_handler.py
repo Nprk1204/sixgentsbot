@@ -20,6 +20,10 @@ class QueueHandler:
         if bot:
             bot.loop.create_task(self.remove_inactive_players())
 
+    def set_queue_handler(self, queue_handler):
+        """Set the queue handler reference"""
+        self.queue = queue_handler
+
     def set_vote_system(self, channel_id, vote_system):
         """Set the vote system reference for a specific channel"""
         self.vote_systems[channel_id] = vote_system
