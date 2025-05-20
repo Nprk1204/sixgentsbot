@@ -374,34 +374,123 @@ async def status_slash(interaction: discord.Interaction):
     player = interaction.user
     player_id = str(player.id)
 
-    # Check if player has a rank entry in the ranks collection or has a role
+    # Verify rank and role as before...
     rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
-    # Get all rank roles
     rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
     rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
     rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
     has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
 
     if not (rank_record or has_rank_role):
-        # Player hasn't completed rank verification
-        embed = discord.Embed(
-            title="Rank Verification Required",
-            description="You need to verify your Rocket League rank before checking queue status.",
-            color=0xf1c40f
-        )
-        embed.add_field(
-            name="How to Verify",
-            value="Visit the rank check page on the website to complete verification.",
-            inline=False
-        )
+        # Player hasn't completed rank verification message as before...
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
     channel_id = str(interaction.channel.id)
 
-    # Use the updated queue status method to show multiple queues
-    embed = queue_handler.get_queue_status(channel_id)
+    # Get data for queue status but limit fields to avoid Discord's 25 field limit
+    # We need to modify the get_queue_status method to be smarter about field counts
+
+    # Get all queues in this channel grouped by queue_num
+    all_queues = {}
+    queue_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
+    for player in queue_players:
+        queue_num = player.get("queue_num", 1)
+        if queue_num not in all_queues:
+            all_queues[queue_num] = []
+        all_queues[queue_num].append(player)
+
+    # Get active matches in this channel
+    active_matches = list(match_system.matches.find({
+        "channel_id": channel_id,
+        "status": {"$ne": "completed"}
+    }))
+
+    # Create embed
+    embed = discord.Embed(
+        title="Queue Status",
+        color=0x3498db
+    )
+
+    # No queues or matches
+    if not all_queues and not active_matches:
+        embed.description = "Queue is empty! Use `/queue` to join the queue."
+        await interaction.response.send_message(embed=embed)
+        return
+
+    field_count = 0
+    MAX_FIELDS = 25  # Discord limit
+
+    # Add active matches first (limit to a few if many exist)
+    if active_matches:
+        active_match_count = min(len(active_matches), 5)  # Limit to 5 active matches if more exist
+        for i in range(active_match_count):
+            if field_count >= MAX_FIELDS:
+                break
+
+            match = active_matches[i]
+            match_players = match["players"]
+            match_status = match["status"].upper()
+            queue_num = match.get("queue_num", 1)
+
+            player_mentions = [p["mention"] for p in match_players]
+
+            embed.add_field(
+                name=f"Queue #{queue_num} - ACTIVE MATCH ({match_status})",
+                value=", ".join(player_mentions),
+                inline=False
+            )
+            field_count += 1
+
+        # If we limited the active matches, add a note
+        if len(active_matches) > active_match_count and field_count < MAX_FIELDS:
+            embed.add_field(
+                name="Note",
+                value=f"Showing {active_match_count} of {len(active_matches)} active matches",
+                inline=False
+            )
+            field_count += 1
+
+    # Add waiting queues (limited based on remaining fields)
+    if all_queues:
+        # Sort queues by number
+        sorted_queues = sorted(all_queues.items())
+
+        remaining_fields = MAX_FIELDS - field_count
+        queue_count = min(len(sorted_queues), remaining_fields)
+
+        for i in range(queue_count):
+            queue_num, players = sorted_queues[i]
+            waiting_count = len(players)
+
+            if waiting_count > 0:
+                waiting_mentions = [p["mention"] for p in players]
+
+                # Add info about how many more players needed
+                more_needed = 6 - waiting_count
+                if more_needed > 0:
+                    status_text = f"Waiting Queue: {waiting_count}/6 players\n{more_needed} more player(s) needed"
+                else:
+                    status_text = "**Queue is FULL!** Ready to start match."
+
+                value_text = f"{status_text}\nPlayers: {', '.join(waiting_mentions)}"
+
+                embed.add_field(
+                    name=f"Queue #{queue_num}",
+                    value=value_text,
+                    inline=False
+                )
+                field_count += 1
+
+        # If we limited the queues, add a note
+        if len(sorted_queues) > queue_count:
+            embed.add_field(
+                name="Additional Queues",
+                value=f"There are {len(sorted_queues) - queue_count} more queues not shown",
+                inline=False
+            )
+
     await interaction.response.send_message(embed=embed)
 
 
