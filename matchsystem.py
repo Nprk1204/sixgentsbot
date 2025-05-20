@@ -12,7 +12,6 @@ class MatchSystem:
         self.players = db.get_collection('players')
         self.active_matches = {}  # Store active matches in memory
         self.bot = None
-        self.queue = None
 
         # Simplified - keep just the three tier-based MMR values
         self.TIER_MMR = {
@@ -25,163 +24,57 @@ class MatchSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def set_queue_handler(self, queue_handler):
-        """Set the queue handler reference"""
-        self.queue = queue_handler
-
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
-        """
-        Create a new match entry or update an existing one
+        print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
+        """Create a new match entry"""
+        # Generate a shorter match ID that's easier for users to type
+        short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
 
-        Args:
-            match_id: The ID to use for this match. Either an existing ID or a new one.
-            team1: List of player data for team 1
-            team2: List of player data for team 2
-            channel_id: The channel ID where the match is happening
-            is_global: Whether this is a global match
-
-        Returns:
-            The match ID used (might be the same as input or a new one if none provided)
-        """
-        # Always ensure 6-character match IDs
-        if not match_id or match_id.lower() == "none":
-            # Generate a new 6-character ID
-            short_id = str(uuid.uuid4().hex)[:6]
-            print(f"No match ID provided. Creating match with new ID: {short_id}")
-        else:
-            # Check if the provided ID is the correct format
-            if len(match_id) != 6:
-                # Not a 6-character ID, generate a new one
-                original_id = match_id
-                short_id = str(uuid.uuid4().hex)[:6]
-                print(f"WARNING: Non-standard match ID format: {original_id}. Using new ID: {short_id}")
-            else:
-                # Use the provided 6-character match_id
-                short_id = match_id
-                print(f"Using provided match ID: {short_id}")
-
-        print(f"Creating/updating match with ID: {short_id}, channel: {channel_id}, is_global: {is_global}")
-
-        # CRITICAL: Before creating a new match, find and cancel any active selection
-        # with these players to prevent overlap issues
-        all_players = team1 + team2
-        for player in all_players:
-            player_id = player["id"]
-            # Skip dummy players
-            if not player_id.startswith('9000'):
-                print(f"Checking if player {player['name']} (ID: {player_id}) is in any active selections")
-                # Update any voting/selection matches containing this player to be cancelled
-                self.matches.update_many(
-                    {
-                        "players.id": player_id,
-                        "status": {"$in": ["voting", "selection"]},
-                        "match_id": {"$ne": short_id}  # Don't cancel the current match
-                    },
-                    {
-                        "$set": {"status": "cancelled"}
-                    }
-                )
-
-        # Add better debugging for channel detection, but ONLY if is_global wasn't explicitly provided
-        if not is_global:  # Only try to detect if is_global wasn't explicitly True
-            try:
-                if self.bot:
-                    channel = self.bot.get_channel(int(channel_id))
-                    print(f"Channel lookup result: {channel}")
-                    if channel:
-                        channel_name = channel.name.lower()
-                        print(f"Channel name: {channel_name}")
-                        is_global = channel_name == "global"
-                    else:
-                        print(f"Failed to find channel with ID: {channel_id}")
+        # Add better debugging for channel detection
+        channel = None
+        is_global = False
+        try:
+            if self.bot:
+                channel = self.bot.get_channel(int(channel_id))
+                print(f"Channel lookup result: {channel}")
+                if channel:
+                    channel_name = channel.name.lower()
+                    print(f"Channel name: {channel_name}")
+                    is_global = channel_name == "global"
                 else:
-                    print("Bot reference is None during match creation")
-            except Exception as e:
-                print(f"Error in channel detection: {e}")
-        else:
-            print(f"Using provided is_global={is_global} without re-detection")
+                    print(f"Failed to find channel with ID: {channel_id}")
+            else:
+                print("Bot reference is None during match creation")
+        except Exception as e:
+            print(f"Error in channel detection: {e}")
 
-        # Check if the match already exists
-        existing_match = self.matches.find_one({"match_id": short_id})
+        # Clear debug print
+        print(f"Created match with ID: {short_id}, status: in_progress, is_global: {is_global}")
 
-        if existing_match:
-            # Update the existing match with the new teams and status
-            print(f"Updating existing match with ID: {short_id}")
-            self.matches.update_one(
-                {"match_id": short_id},
-                {"$set": {
-                    "team1": team1,
-                    "team2": team2,
-                    "status": "in_progress",
-                    "winner": None,
-                    "score": {"team1": 0, "team2": 0},
-                    "is_global": is_global
-                }}
-            )
-        else:
-            # Create match data with explicit in_progress status
-            match_data = {
-                "match_id": short_id,
-                "team1": team1,
-                "team2": team2,
-                "status": "in_progress",  # CRITICAL: Ensure default status is "in_progress"
-                "winner": None,
-                "score": {"team1": 0, "team2": 0},
-                "channel_id": channel_id,
-                "created_at": datetime.datetime.utcnow(),
-                "completed_at": None,
-                "reported_by": None,
-                "is_global": is_global
-            }
-
-            # Store in database
-            self.matches.insert_one(match_data)
-
-        # Store in memory for quick access
-        self.active_matches[short_id] = {
-            "match_id": short_id,
+        match_data = {
+            "match_id": short_id,  # Use the shorter ID
             "team1": team1,
             "team2": team2,
-            "status": "in_progress",
+            "status": "in_progress",  # Make sure this is set correctly
+            "winner": None,
+            "score": {"team1": 0, "team2": 0},
             "channel_id": channel_id,
-            "is_global": is_global
+            "created_at": datetime.datetime.utcnow(),
+            "completed_at": None,
+            "reported_by": None,
+            "is_global": is_global  # Add this line to track global matches
         }
 
+        # Store in database
+        self.matches.insert_one(match_data)
+
+        # Store in memory for quick access
+        self.active_matches[short_id] = match_data
+
         # Debug print to confirm match creation
-        print(f"Created/updated match with ID: {short_id}, status: in_progress, is_global: {is_global}")
+        print(f"Created match with ID: {short_id}, status: {match_data['status']}, is_global: {is_global}")
 
-        return short_id
-
-    def get_match_by_id_or_channel(self, match_id=None, channel_id=None, status=None):
-        """
-        Get a match by its ID or channel ID, prioritizing match_id.
-
-        Args:
-            match_id: The match ID to search for
-            channel_id: The channel ID to search for (fallback)
-            status: Optional status filter (e.g., "in_progress")
-
-        Returns:
-            The match document or None if not found
-        """
-        query = {}
-
-        # Build query based on provided parameters
-        if match_id:
-            query["match_id"] = match_id
-        elif channel_id:
-            query["channel_id"] = str(channel_id)
-        else:
-            return None
-
-        if status:
-            if isinstance(status, list):
-                query["status"] = {"$in": status}
-            else:
-                query["status"] = status
-
-        # Execute the query
-        return self.matches.find_one(query)
+        return short_id  # Return the short ID
 
     def get_active_match_by_channel(self, channel_id):
         """Get active match by channel ID"""
@@ -191,32 +84,6 @@ class MatchSystem:
     async def report_match_by_id(self, match_id, reporter_id, result, ctx=None):
         """Report a match result by match ID and win/loss"""
         # Find the match by ID
-        match = self.matches.find_one({"match_id": match_id})
-
-        # ADDED: Also search by match ID in voting or selection status with the same reporter
-        if not match:
-            # Try to find any match in voting or selection with this player
-            active_matches = list(self.matches.find({
-                "status": {"$in": ["voting", "selection", "in_progress"]},
-                "players.id": reporter_id
-            }))
-
-            if active_matches:
-                # Update the log for debugging
-                print(f"Found {len(active_matches)} active matches for reporter {reporter_id}")
-                for active_match in active_matches:
-                    print(f"Active match: {active_match.get('match_id')} with status {active_match.get('status')}")
-
-                    # Cancel these matches as they're stale
-                    self.matches.update_one(
-                        {"_id": active_match["_id"]},
-                        {"$set": {"status": "cancelled"}}
-                    )
-
-                # Log that we're cancelling stale matches
-                print(f"Cancelled stale matches for reporter {reporter_id}")
-
-        # Try again with the original ID - original match lookup
         match = self.matches.find_one({"match_id": match_id})
 
         if not match:
@@ -256,14 +123,9 @@ class MatchSystem:
             team1_score = 0
             team2_score = 1
 
-        # First, get the current status for debugging
-        current_match = self.matches.find_one({"match_id": match_id})
-        current_status = current_match.get("status", "unknown") if current_match else "not found"
-        print(f"Before update - match {match_id} current status: {current_status}")
-
-        # Update match data - remove the status condition to ensure it updates
+        # Update match data with a timestamp to ensure it's updated correctly
         result = self.matches.update_one(
-            {"match_id": match_id},  # Update by match_id without status condition
+            {"match_id": match_id, "status": "in_progress"},  # Only update if still in progress
             {"$set": {
                 "status": "completed",
                 "winner": winner,
@@ -273,47 +135,15 @@ class MatchSystem:
             }}
         )
 
-        # Debugging output
-        print(f"Match report update for match {match_id} - modified: {result.modified_count}")
-
-        # Verify the status was actually updated
-        updated_match = self.matches.find_one({"match_id": match_id})
-        updated_status = updated_match.get("status", "unknown") if updated_match else "not found"
-        print(f"After update - match {match_id} current status: {updated_status}")
-
-        # If update failed, try using _id as a fallback
-        if result.modified_count == 0 and current_match:
-            print(f"WARNING: Failed to update match {match_id} by match_id, trying by _id")
-            result = self.matches.update_one(
-                {"_id": current_match["_id"]},
-                {"$set": {
-                    "status": "completed",
-                    "winner": winner,
-                    "score": {"team1": team1_score, "team2": team2_score},
-                    "completed_at": datetime.datetime.utcnow(),
-                    "reported_by": reporter_id
-                }}
-            )
-            print(f"Fallback update result: {result.modified_count} documents modified")
-
-            # Verify the fallback status update
-            updated_match = self.matches.find_one({"_id": current_match["_id"]})
-            updated_status = updated_match.get("status", "unknown") if updated_match else "not found"
-            print(f"After fallback update - match {match_id} current status: {updated_status}")
-
         # Check if the update was successful
         if result.modified_count == 0:
             # This means the match wasn't updated - either doesn't exist or already reported
             # Double check if it exists but is already completed
-            completed_match = self.matches.find_one({"match_id": match_id})
-
-            if completed_match and completed_match.get("status") == "completed":
+            completed_match = self.matches.find_one({"match_id": match_id, "status": "completed"})
+            if completed_match:
                 return None, "This match has already been reported."
-            elif completed_match and completed_match.get("status") == "selection":
-                # The match is still in selection phase
-                return None, "This match is still in team selection phase and cannot be reported yet."
             else:
-                return None, f"Failed to update match {match_id}. Please check the match ID."
+                return None, "Failed to update match. Please check the match ID."
 
         # Now get the updated match document
         updated_match = self.matches.find_one({"match_id": match_id})
@@ -323,44 +153,17 @@ class MatchSystem:
         channel_id = updated_match.get("channel_id")
         print(f"Match type: {'Global' if is_global_match else 'Ranked'}, Channel ID: {channel_id}")
 
-        # IMPROVED: Clear player status for ALL players in the match
-        all_players = team1_ids + team2_ids
-
-        # Clear matches for all players in the match to ensure complete cleanup
-        for player_id in all_players:
-            # Skip dummy players
-            if player_id.startswith('9000'):
-                continue
-
-            # Cancel ALL potential matches for this player (voting, selection, in_progress)
-            self.matches.update_many(
-                {
-                    "players.id": player_id,
-                    "status": {"$in": ["voting", "selection", "in_progress"]},
-                    "match_id": {"$ne": match_id}  # Don't modify the current match
-                },
-                {"$set": {"status": "cancelled"}}
-            )
-
-            # IMPORTANT FIX: Also remove players from queue collection
-            if hasattr(self, 'queue') and self.queue and hasattr(self.queue, 'queue_collection'):
-                try:
-                    result = self.queue.queue_collection.delete_many({"id": player_id})
-                    print(f"Removed player {player_id} from queue: {result.deleted_count} entries deleted")
-                except Exception as e:
-                    print(f"Error removing player {player_id} from queue: {e}")
-
-        # Calculate team average MMRs
-        team1_mmrs = []
-        team2_mmrs = []
-
-        # IMPORTANT: Define winning_team and losing_team variables BEFORE using them
+        # Update MMR for all players with the new algorithm
         if winner == 1:
             winning_team = match["team1"]
             losing_team = match["team2"]
         else:
             winning_team = match["team2"]
             losing_team = match["team1"]
+
+        # Calculate team average MMRs
+        team1_mmrs = []
+        team2_mmrs = []
 
         # Get MMRs for team 1
         for player in match["team1"]:
@@ -474,25 +277,17 @@ class MatchSystem:
                     global_wins = player_data.get("global_wins", 0) + 1
                     old_mmr = player_data.get("global_mmr", 300)
 
-                    # Update streak
-                    current_streak = player_data.get("global_streak", 0)
-                    # If current streak is negative (losing streak), reset it to 1
-                    # Otherwise increment the streak
-                    new_streak = 1 if current_streak <= 0 else current_streak + 1
-
-                    # Calculate MMR gain with new algorithm including streak
+                    # Calculate MMR gain with new algorithm
                     mmr_gain = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
                         opponent_avg,
                         global_matches,
-                        is_win=True,
-                        streak=new_streak
+                        is_win=True
                     )
 
                     new_mmr = old_mmr + mmr_gain
-                    print(
-                        f"Player {player['name']} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr} (Streak: {new_streak})")
+                    print(f"Player {player['name']} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -500,7 +295,6 @@ class MatchSystem:
                             "global_mmr": new_mmr,
                             "global_wins": global_wins,
                             "global_matches": global_matches,
-                            "global_streak": new_streak,
                             "last_updated": datetime.datetime.utcnow()
                         }}
                     )
@@ -511,7 +305,6 @@ class MatchSystem:
                         "old_mmr": old_mmr,
                         "new_mmr": new_mmr,
                         "mmr_change": mmr_gain,
-                        "streak": new_streak,
                         "is_win": True,
                         "is_global": True
                     })
@@ -521,25 +314,17 @@ class MatchSystem:
                     wins = player_data.get("wins", 0) + 1
                     old_mmr = player_data.get("mmr", 600)
 
-                    # Update streak
-                    current_streak = player_data.get("streak", 0)
-                    # If current streak is negative (losing streak), reset it to 1
-                    # Otherwise increment the streak
-                    new_streak = 1 if current_streak <= 0 else current_streak + 1
-
-                    # Calculate MMR gain with new algorithm including streak
+                    # Calculate MMR gain with new algorithm
                     mmr_gain = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
                         opponent_avg,
                         matches_played,
-                        is_win=True,
-                        streak=new_streak
+                        is_win=True
                     )
 
                     new_mmr = old_mmr + mmr_gain
-                    print(
-                        f"Player {player['name']} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr} (Streak: {new_streak})")
+                    print(f"Player {player['name']} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -547,7 +332,6 @@ class MatchSystem:
                             "mmr": new_mmr,
                             "wins": wins,
                             "matches": matches_played,
-                            "streak": new_streak,
                             "last_updated": datetime.datetime.utcnow()
                         }}
                     )
@@ -558,7 +342,6 @@ class MatchSystem:
                         "old_mmr": old_mmr,
                         "new_mmr": new_mmr,
                         "mmr_change": mmr_gain,
-                        "streak": new_streak,
                         "is_win": True,
                         "is_global": False
                     })
@@ -579,13 +362,12 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         1,  # First match
-                        is_win=True,
-                        streak=1  # First win, streak of 1
+                        is_win=True
                     )
 
                     new_global_mmr = starting_global_mmr + mmr_gain
                     print(
-                        f"NEW PLAYER {player['name']} FIRST GLOBAL WIN: {starting_global_mmr} + {mmr_gain} = {new_global_mmr} (Streak: 1)")
+                        f"NEW PLAYER {player['name']} FIRST GLOBAL WIN: {starting_global_mmr} + {mmr_gain} = {new_global_mmr}")
 
                     # Get default ranked MMR from rank verification if available
                     starting_ranked_mmr = 600  # Default ranked MMR
@@ -604,8 +386,6 @@ class MatchSystem:
                         "global_losses": 0,
                         "matches": 0,
                         "global_matches": 1,
-                        "streak": 0,  # No streak for ranked yet
-                        "global_streak": 1,  # First win, streak of 1
                         "created_at": datetime.datetime.utcnow(),
                         "last_updated": datetime.datetime.utcnow()
                     })
@@ -616,7 +396,6 @@ class MatchSystem:
                         "old_mmr": starting_global_mmr,
                         "new_mmr": new_global_mmr,
                         "mmr_change": mmr_gain,
-                        "streak": 1,
                         "is_win": True,
                         "is_global": True
                     })
@@ -636,13 +415,11 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         1,  # First match
-                        is_win=True,
-                        streak=1  # First win, streak of 1
+                        is_win=True
                     )
 
                     new_mmr = starting_mmr + mmr_gain
-                    print(
-                        f"NEW PLAYER {player['name']} FIRST RANKED WIN: {starting_mmr} + {mmr_gain} = {new_mmr} (Streak: 1)")
+                    print(f"NEW PLAYER {player['name']} FIRST RANKED WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
 
                     self.players.insert_one({
                         "id": player_id,
@@ -655,8 +432,6 @@ class MatchSystem:
                         "global_losses": 0,
                         "matches": 1,
                         "global_matches": 0,
-                        "streak": 1,  # First win, streak of 1
-                        "global_streak": 0,  # No global streak yet
                         "created_at": datetime.datetime.utcnow(),
                         "last_updated": datetime.datetime.utcnow()
                     })
@@ -667,7 +442,6 @@ class MatchSystem:
                         "old_mmr": starting_mmr,
                         "new_mmr": new_mmr,
                         "mmr_change": mmr_gain,
-                        "streak": 1,
                         "is_win": True,
                         "is_global": False
                     })
@@ -696,25 +470,17 @@ class MatchSystem:
                     global_losses = player_data.get("global_losses", 0) + 1
                     old_mmr = player_data.get("global_mmr", 300)
 
-                    # Update streak
-                    current_streak = player_data.get("global_streak", 0)
-                    # If current streak is positive (winning streak), reset it to -1
-                    # Otherwise decrement the streak (making it more negative)
-                    new_streak = -1 if current_streak >= 0 else current_streak - 1
-
-                    # Calculate MMR loss with new algorithm including streak
+                    # Calculate MMR loss with new algorithm
                     mmr_loss = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
                         opponent_avg,
                         global_matches,
-                        is_win=False,
-                        streak=new_streak
+                        is_win=False
                     )
 
                     new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                    print(
-                        f"Player {player['name']} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr} (Streak: {new_streak})")
+                    print(f"Player {player['name']} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -722,7 +488,6 @@ class MatchSystem:
                             "global_mmr": new_mmr,
                             "global_losses": global_losses,
                             "global_matches": global_matches,
-                            "global_streak": new_streak,
                             "last_updated": datetime.datetime.utcnow()
                         }}
                     )
@@ -733,7 +498,6 @@ class MatchSystem:
                         "old_mmr": old_mmr,
                         "new_mmr": new_mmr,
                         "mmr_change": -mmr_loss,  # Negative for loss
-                        "streak": new_streak,
                         "is_win": False,
                         "is_global": True
                     })
@@ -743,25 +507,17 @@ class MatchSystem:
                     losses = player_data.get("losses", 0) + 1
                     old_mmr = player_data.get("mmr", 600)
 
-                    # Update streak
-                    current_streak = player_data.get("streak", 0)
-                    # If current streak is positive (winning streak), reset it to -1
-                    # Otherwise decrement the streak (making it more negative)
-                    new_streak = -1 if current_streak >= 0 else current_streak - 1
-
-                    # Calculate MMR loss with new algorithm including streak
+                    # Calculate MMR loss with new algorithm
                     mmr_loss = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
                         opponent_avg,
                         matches_played,
-                        is_win=False,
-                        streak=new_streak
+                        is_win=False
                     )
 
                     new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                    print(
-                        f"Player {player['name']} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr} (Streak: {new_streak})")
+                    print(f"Player {player['name']} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -769,7 +525,6 @@ class MatchSystem:
                             "mmr": new_mmr,
                             "losses": losses,
                             "matches": matches_played,
-                            "streak": new_streak,
                             "last_updated": datetime.datetime.utcnow()
                         }}
                     )
@@ -780,7 +535,6 @@ class MatchSystem:
                         "old_mmr": old_mmr,
                         "new_mmr": new_mmr,
                         "mmr_change": -mmr_loss,  # Negative for loss
-                        "streak": new_streak,
                         "is_win": False,
                         "is_global": False
                     })
@@ -801,13 +555,12 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         1,  # First match
-                        is_win=False,
-                        streak=-1  # First loss, streak of -1
+                        is_win=False
                     )
 
                     new_global_mmr = max(0, starting_global_mmr - mmr_loss)  # Don't go below 0
                     print(
-                        f"NEW PLAYER {player['name']} FIRST GLOBAL LOSS: {starting_global_mmr} - {mmr_loss} = {new_global_mmr} (Streak: -1)")
+                        f"NEW PLAYER {player['name']} FIRST GLOBAL LOSS: {starting_global_mmr} - {mmr_loss} = {new_global_mmr}")
 
                     # Get default ranked MMR from rank verification if available
                     starting_ranked_mmr = 600  # Default ranked MMR
@@ -826,8 +579,6 @@ class MatchSystem:
                         "global_losses": 1,
                         "matches": 0,
                         "global_matches": 1,
-                        "streak": 0,  # No ranked streak yet
-                        "global_streak": -1,  # First loss, streak of -1
                         "created_at": datetime.datetime.utcnow(),
                         "last_updated": datetime.datetime.utcnow()
                     })
@@ -838,7 +589,6 @@ class MatchSystem:
                         "old_mmr": starting_global_mmr,
                         "new_mmr": new_global_mmr,
                         "mmr_change": -mmr_loss,  # Negative for loss
-                        "streak": -1,
                         "is_win": False,
                         "is_global": True
                     })
@@ -858,13 +608,11 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         1,  # First match
-                        is_win=False,
-                        streak=-1  # First loss, streak of -1
+                        is_win=False
                     )
 
                     new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
-                    print(
-                        f"NEW PLAYER {player['name']} FIRST RANKED LOSS: {starting_mmr} - {mmr_loss} = {new_mmr} (Streak: -1)")
+                    print(f"NEW PLAYER {player['name']} FIRST RANKED LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
 
                     self.players.insert_one({
                         "id": player_id,
@@ -877,8 +625,6 @@ class MatchSystem:
                         "global_losses": 0,
                         "matches": 1,
                         "global_matches": 0,
-                        "streak": -1,  # First loss, streak of -1
-                        "global_streak": 0,  # No global streak yet
                         "created_at": datetime.datetime.utcnow(),
                         "last_updated": datetime.datetime.utcnow()
                     })
@@ -889,7 +635,6 @@ class MatchSystem:
                         "old_mmr": starting_mmr,
                         "new_mmr": new_mmr,
                         "mmr_change": -mmr_loss,  # Negative for loss
-                        "streak": -1,
                         "is_win": False,
                         "is_global": False
                     })
@@ -903,44 +648,6 @@ class MatchSystem:
                 "team2_avg_mmr": team2_avg_mmr
             }}
         )
-
-        # IMPROVED: Explicitly remove all players from the queue
-        # First method - using queue collection directly (if queue handler not set)
-        if hasattr(self, 'queue') and hasattr(self.queue, 'queue_collection'):
-            try:
-                # Remove all players from the queue for all teams
-                for player in winning_team + losing_team:
-                    player_id = player.get("id", "")
-                    if player_id and not player_id.startswith('9000'):
-                        result = self.queue.queue_collection.delete_many({"id": player_id})
-                        print(f"Removed player {player_id} from queue: {result.deleted_count} entries deleted")
-
-                print(f"Successfully removed all players from the queue after match {match_id} completion")
-            except Exception as e:
-                print(f"Error clearing queue after match completion: {e}")
-        else:
-            print("WARNING: Cannot clear queue - no queue handler reference available")
-            # Try to obtain queue handler from external references if available
-            if hasattr(self, 'bot') and hasattr(self.bot, 'queue_handler'):
-                print("Found queue handler via bot reference, using it to clear players")
-                try:
-                    for player in winning_team + losing_team:
-                        player_id = player.get("id", "")
-                        if player_id and not player_id.startswith('9000'):
-                            result = self.bot.queue_handler.queue_collection.delete_many({"id": player_id})
-                            print(
-                                f"Alternative removal: player {player_id} from queue: {result.deleted_count} entries deleted")
-                except Exception as e:
-                    print(f"Error in alternative queue clearing: {e}")
-
-        # Clear any other active matches for this player
-        await self.clear_player_active_matches(reporter_id)
-
-        # Also clear for all other players in the match
-        for player in winning_team + losing_team:
-            player_id = player.get("id", "")
-            if player_id and player_id != reporter_id and not player_id.startswith('9000'):
-                await self.clear_player_active_matches(player_id)
 
         # After updating MMR for winners and losers:
         if ctx:
@@ -978,235 +685,7 @@ class MatchSystem:
         if match["match_id"] in self.active_matches:
             del self.active_matches[match["match_id"]]
 
-        # ADDED: Make sure to check and cancel any active votes or selections related to the match
-        if hasattr(self, 'bot') and self.bot:
-            # Check if vote_system and captains_system exist directly on the bot object
-            if hasattr(self.bot, 'vote_system') and self.bot.vote_system:
-                self.bot.vote_system.cancel_voting(channel_id=channel_id)
-
-            if hasattr(self.bot, 'captains_system') and self.bot.captains_system:
-                self.bot.captains_system.cancel_selection(channel_id=channel_id)
-
-            # Also check for guild-level vote/captain coordinators
-            for guild in self.bot.guilds:
-                for channel in guild.channels:
-                    if str(channel.id) == channel_id:
-                        try:
-                            # Find and use the vote system coordinator
-                            if hasattr(self.bot, 'vote_system_coordinator'):
-                                self.bot.vote_system_coordinator.cancel_voting(channel_id=channel_id)
-                                print(
-                                    f"Cancelled votes via coordinator in channel {channel_id} after match completion")
-
-                            # Find and use the captains system coordinator
-                            if hasattr(self.bot, 'captains_system_coordinator'):
-                                self.bot.captains_system_coordinator.cancel_selection(channel_id=channel_id)
-                                print(
-                                    f"Cancelled selections via coordinator in channel {channel_id} after match completion")
-                        except Exception as e:
-                            print(f"Error clearing votes/selections via coordinators: {e}")
-                        break
-
-        # Remove from active matches
-        if match["match_id"] in self.active_matches:
-            del self.active_matches[match["match_id"]]
-            print(f"Removed match {match_id} from active_matches dictionary")
-
-        print("===== RUNNING FINAL CLEANUP TO ENSURE NO ACTIVE MATCHES REMAIN =====")
-
-        # Force update ALL matches with this match_id to completed status
-        force_cleanup = self.matches.update_many(
-            {"match_id": match_id},  # Update ALL matches with this match_id
-            {"$set": {"status": "completed"}}
-        )
-        print(f"Force cleanup: Updated {force_cleanup.modified_count} documents with match_id {match_id}")
-
-        # Force cleanup for all players in the match
-        all_player_ids = []
-        for player in winning_team + losing_team:
-            player_id = player.get("id", "")
-            if player_id and not player_id.startswith('9000'):
-                all_player_ids.append(player_id)
-
-        print(f"Force cleaning all active matches for {len(all_player_ids)} players")
-
-        # For each player, find and update ALL matches they're in
-        for player_id in all_player_ids:
-            # First get a list of all potentially problematic matches
-            player_matches = list(self.matches.find({
-                "players.id": player_id,
-                "status": {"$in": ["voting", "selection", "in_progress"]}
-            }))
-
-            if player_matches:
-                print(f"Found {len(player_matches)} active matches for player {player_id}")
-
-                # For each match, force update to completed
-                for match in player_matches:
-                    problem_match_id = match.get("match_id", "unknown")
-                    problem_match_status = match.get("status", "unknown")
-
-                    print(f"Force completing problematic match: {problem_match_id} (status: {problem_match_status})")
-
-                    # Update by match_id
-                    result = self.matches.update_many(
-                        {"match_id": problem_match_id},
-                        {"$set": {"status": "completed"}}
-                    )
-                    print(f"Forced update result: {result.modified_count} matches completed")
-
-                    # Also try by _id as fallback
-                    if result.modified_count == 0:
-                        self.matches.update_one(
-                            {"_id": match["_id"]},
-                            {"$set": {"status": "completed"}}
-                        )
-            else:
-                print(f"No problematic matches found for player {player_id}")
-
-        # FINAL CHECK: See if we still have any active matches with this ID
-        final_check = list(self.matches.find({"match_id": match_id}))
-        print(f"Final check: Found {len(final_check)} total matches with ID {match_id}")
-
-        for i, check_match in enumerate(final_check):
-            check_status = check_match.get("status", "unknown")
-            check_id = check_match.get("_id")
-            print(f"Match {i + 1}/{len(final_check)}: _id={check_id}, status={check_status}")
-
-        # Check if any player is still in an active match
-        for player_id in all_player_ids:
-            still_active = list(self.matches.find({
-                "players.id": player_id,
-                "status": {"$in": ["voting", "selection", "in_progress"]}
-            }))
-
-            if still_active:
-                print(
-                    f"WARNING: Player {player_id} STILL has {len(still_active)} active matches after all cleanup attempts!")
-                for active_match in still_active:
-                    act_match_id = active_match.get("match_id", "unknown")
-                    act_status = active_match.get("status", "unknown")
-                    act_id = active_match.get("_id")
-                    print(f"  Problematic match: _id={act_id}, match_id={act_match_id}, status={act_status}")
-
-                    # Last resort: Delete the problematic match entirely
-                    self.matches.delete_one({"_id": act_id})
-                    print(f"  DELETED problematic match with _id={act_id}")
-            else:
-                print(f"SUCCESS: Player {player_id} has no remaining active matches")
-
-        # FINAL QUEUE CHECK: Ensure all players are removed from the queue
-        print("===== FINAL QUEUE CLEANUP =====")
-        queue_cleanup_success = True
-
-        # Method 1: Check players if we have queue reference
-        if hasattr(self, 'queue') and hasattr(self.queue, 'queue_collection'):
-            for player_id in all_player_ids:
-                # Skip dummy players
-                if player_id.startswith('9000'):
-                    continue
-
-                # Check if player is still in queue
-                queue_entries = list(self.queue.queue_collection.find({"id": player_id}))
-                if queue_entries:
-                    print(f"WARNING: Player {player_id} still has {len(queue_entries)} queue entries after cleanup")
-                    # Force remove them
-                    delete_result = self.queue.queue_collection.delete_many({"id": player_id})
-                    print(f"Deleted {delete_result.deleted_count} remaining queue entries")
-                    queue_cleanup_success = False
-
-        # Alternative method: Try to get queue handler from bot
-        elif hasattr(self, 'bot') and hasattr(self.bot, 'queue_handler'):
-            queue_handler = self.bot.queue_handler
-            if hasattr(queue_handler, 'queue_collection'):
-                for player_id in all_player_ids:
-                    # Skip dummy players
-                    if player_id.startswith('9000'):
-                        continue
-
-                    # Check if player is still in queue
-                    queue_entries = list(queue_handler.queue_collection.find({"id": player_id}))
-                    if queue_entries:
-                        print(f"WARNING: Player {player_id} still has {len(queue_entries)} queue entries after cleanup")
-                        # Force remove them
-                        delete_result = queue_handler.queue_collection.delete_many({"id": player_id})
-                        print(f"Deleted {delete_result.deleted_count} remaining queue entries")
-                        queue_cleanup_success = False
-        else:
-            print("WARNING: Cannot perform final queue check - no queue handler reference available")
-
-        # Final success status
-        if queue_cleanup_success:
-            print("SUCCESS: All players confirmed removed from queue")
-
-        print("===== FINAL CLEANUP COMPLETE =====")
-
-        # Return the updated match
         return updated_match, None
-
-    def clear_player_match_status(self, player_id, new_match_id=None):
-        """
-        Clear a player's status in all matches except for a specific new match.
-        This ensures no "ghost" statuses remain when a player joins a new match.
-        """
-        print(f"Clearing match status for player {player_id}")
-
-        # Find all matches the player is in
-        matches = list(self.matches.find({"players.id": player_id}))
-
-        for match in matches:
-            match_id = match.get("match_id")
-
-            # Skip the new match we're creating (if provided)
-            if new_match_id and match_id == new_match_id:
-                continue
-
-            match_status = match.get("status")
-            print(f"Found match {match_id} with status {match_status}")
-
-            # For matches in voting or selection, mark them as cancelled
-            if match_status in ["voting", "selection"]:
-                print(f"Cancelling match {match_id} for player {player_id}")
-                self.matches.update_one(
-                    {"match_id": match_id},
-                    {"$set": {"status": "cancelled"}}
-                )
-
-    async def clear_player_active_matches(self, player_id):
-        print(f"Clearing active matches for player: {player_id}")
-
-        # Find all active matches for this player
-        active_matches = list(self.matches.find({
-            "players.id": player_id,
-            "status": {"$in": ["voting", "selection", "in_progress"]}
-        }))
-
-        for match in active_matches:
-            match_id = match.get("match_id", "unknown")
-            status = match.get("status", "unknown")
-            print(f"Found active match {match_id} (status: {status}) for player {player_id}, setting to completed")
-
-            # Update match status to completed - use match_id for consistent updating
-            result = self.matches.update_one(
-                {"match_id": match_id},
-                {"$set": {"status": "completed"}}
-            )
-
-            if result.modified_count == 0:
-                print(f"WARNING: Failed to update match {match_id} by match_id, trying by _id")
-                # Try again with _id
-                self.matches.update_one(
-                    {"_id": match["_id"]},
-                    {"$set": {"status": "completed"}}
-                )
-
-            # Verify the match is now completed
-            updated_match = self.matches.find_one({"match_id": match_id})
-            if updated_match and updated_match.get("status") != "completed":
-                print(
-                    f"ERROR: Match {match_id} still has status '{updated_match.get('status')}' after attempted update")
-
-        return len(active_matches)
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
         """Update a player's Discord role based on their new MMR"""
@@ -1553,12 +1032,11 @@ class MatchSystem:
 
             print(f"Stored MMR changes and team averages for match {match_id}")
 
-    def calculate_dynamic_mmr(self, player_mmr, team_avg_mmr, opponent_avg_mmr, matches_played, is_win=True, streak=0):
+    def calculate_dynamic_mmr(self, player_mmr, team_avg_mmr, opponent_avg_mmr, matches_played, is_win=True):
         """
         Calculate dynamic MMR change based on:
         1. MMR difference between teams
         2. Number of matches played (for decay)
-        3. Player's current win/loss streak
 
         Parameters:
         - player_mmr: Current MMR of the player
@@ -1566,7 +1044,6 @@ class MatchSystem:
         - opponent_avg_mmr: Average MMR of the opposing team
         - matches_played: Number of matches the player has played (including the current one)
         - is_win: True if calculating for a win, False for a loss
-        - streak: Current win/loss streak of the player (positive for wins, negative for losses)
 
         Returns:
         - MMR change amount
@@ -1592,18 +1069,6 @@ class MatchSystem:
         # A difference of 200 MMR is considered significant
         difference_factor = 1 + (mmr_difference / 600)  # 300 MMR difference = 0.5 factor change
         difference_factor = max(0.7, min(1.3, difference_factor))  # Clamp between 0.7 and 1.3
-
-        # Calculate streak factor (clamped between 0.8 and 1.5)
-        # For wins: positive streak increases MMR gain (1.0 to 1.5)
-        # For losses: negative streak increases MMR loss (1.0 to 1.5)
-        streak_abs = abs(streak)
-        streak_factor = 1.0
-
-        if streak_abs > 0:
-            # Cap the streak effect at 5 games
-            capped_streak = min(streak_abs, 5)
-            # Each win/loss in a streak increases the factor by 10% (up to 50% more)
-            streak_factor = 1.0 + (capped_streak * 0.1)
 
         # For the first few games, use much higher base values
         if matches_played <= 5:
@@ -1643,8 +1108,8 @@ class MatchSystem:
             # Adjusted to start from match 6 (matches_played - 5)
             decay_multiplier = 1.0 * math.exp(-DECAY_RATE * (matches_played - 5))
 
-        # Apply streak factor after all other calculations
-        mmr_change = base_change * decay_multiplier * streak_factor
+        # Calculate final MMR change
+        mmr_change = base_change * decay_multiplier
 
         # Ensure the change is within bounds - MIN is applied AFTER decay
         mmr_change = max(MIN_MMR_CHANGE, min(MAX_MMR_CHANGE, mmr_change))
