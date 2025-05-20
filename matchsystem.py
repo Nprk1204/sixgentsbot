@@ -263,15 +263,22 @@ class MatchSystem:
             }}
         )
 
+        # ADD debugging output right after this:
+        print(f"Match report update for match {match_id} - modified: {result.modified_count}")
+
         # Check if the update was successful
         if result.modified_count == 0:
             # This means the match wasn't updated - either doesn't exist or already reported
             # Double check if it exists but is already completed
-            completed_match = self.matches.find_one({"match_id": match_id, "status": "completed"})
-            if completed_match:
+            completed_match = self.matches.find_one({"match_id": match_id})
+
+            if completed_match and completed_match.get("status") == "completed":
                 return None, "This match has already been reported."
+            elif completed_match and completed_match.get("status") == "selection":
+                # The match is still in selection phase
+                return None, "This match is still in team selection phase and cannot be reported yet."
             else:
-                return None, "Failed to update match. Please check the match ID."
+                return None, f"Failed to update match {match_id}. Please check the match ID."
 
         # Now get the updated match document
         updated_match = self.matches.find_one({"match_id": match_id})
@@ -940,6 +947,11 @@ class MatchSystem:
                             except Exception as e:
                                 print(f"Error clearing votes/selections via coordinators: {e}")
                             break
+
+        # Remove from active matches
+        if match["match_id"] in self.active_matches:
+            del self.active_matches[match["match_id"]]
+            print(f"Removed match {match_id} from active_matches dictionary")
 
         # Return the updated match
         return updated_match, None

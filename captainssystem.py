@@ -872,6 +872,12 @@ class CaptainsSystem:
             )
             print(f"Set match {match_id} to status 'in_progress'")
 
+            match_check = self.match_system.matches.find_one({"match_id": match_id})
+            if match_check:
+                print(f"Match {match_id} status after update: {match_check.get('status', 'unknown')}")
+            else:
+                print(f"WARNING: Could not find match {match_id} in database after creation!")
+
             # Make sure players are removed from the queue
             try:
                 self.queue.remove_players_from_queue(players, channel_id)
