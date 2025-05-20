@@ -92,7 +92,8 @@ class CaptainsSystem:
         captain2 = players[1]
         remaining_players = players[2:]
 
-        # Determine key for storing active selection
+        # IMPORTANT FIX: Store selection state with BOTH match_id AND channel_id as keys
+        # This ensures it can be found by either method
         selection_key = match_id if match_id else channel_id
 
         # Initialize selection state for this match
@@ -107,6 +108,11 @@ class CaptainsSystem:
             'channel_id': channel_id,  # Also store channel ID for cross-referencing
             'announcement_channel': None
         }
+
+        # CRITICAL FIX: ALSO store the selection state with channel_id as key
+        # This creates a second reference to the same selection state
+        if match_id and channel_id != match_id:
+            self.active_selections[channel_id] = self.active_selections[selection_key]
 
         # Format remaining players for display
         remaining_mentions = [p['mention'] for p in remaining_players]
@@ -125,31 +131,27 @@ class CaptainsSystem:
         return embed
 
     async def execute_captain_selection(self, channel, match_id=None):
-        # Then use match_id in your lookups if provided
-        if match_id:
-            active_match = self.match_system.matches.find_one({
-                "match_id": match_id,
-                "status": "selection"
-            })
-        # fall back to channel_id lookup only if needed
-
         """Execute captain selection for a specific channel"""
         channel_id = str(channel.id)
         is_global = channel.name.lower() == "global"
 
         print(f"Captain selection for channel: {channel.name}, is_global: {is_global}")
 
-        # Check if selection is active for this channel
-        if not self.is_selection_active(channel_id):
-            print(f"No active selection found for channel {channel_id}")
+        # First check if we have a match_id and if there's an active selection for it
+        if match_id and match_id in self.active_selections:
+            selection_state = self.active_selections[match_id]
+            print(f"Found selection state using match_id: {match_id}")
+        # If not, try to find by channel_id
+        elif channel_id in self.active_selections:
+            selection_state = self.active_selections[channel_id]
+            print(f"Found selection state using channel_id: {channel_id}")
+            # Get match_id from selection state if it exists
+            match_id = selection_state.get('match_id')
+            print(f"Retrieved match_id from selection state: {match_id}")
+        else:
+            # No active selection found by either match_id or channel_id
+            print(f"No active selection found for channel {channel_id} or match_id {match_id}")
             return
-
-        # Get the selection state for this channel
-        selection_state = self.active_selections[channel_id]
-
-        # Get the match_id from the selection state if it exists
-        match_id = selection_state.get('match_id')
-        print(f"Selection state has match_id: {match_id}")
 
         # Look up the active match in the database - first try by match_id if available
         active_match = None
@@ -177,7 +179,7 @@ class CaptainsSystem:
                 selection_state['match_id'] = match_id
 
         if not active_match:
-            print(f"No active match in selection state found for channel {channel_id}")
+            print(f"No active match found for channel {channel_id} or match_id {match_id}")
             await channel.send("⚠️ Error: The captain selection process has been cancelled.")
             # IMPORTANT: Make sure to call fallback_to_random here
             await self.fallback_to_random(channel_id, match_id=match_id)
