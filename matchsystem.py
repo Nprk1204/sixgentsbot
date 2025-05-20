@@ -25,6 +25,10 @@ class MatchSystem:
         """Set the bot instance"""
         self.bot = bot
 
+    def set_queue_handler(self, queue_handler):
+        """Set the queue handler reference"""
+        self.queue = queue_handler
+
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
         """
         Create a new match entry or update an existing one
