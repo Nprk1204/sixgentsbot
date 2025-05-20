@@ -105,6 +105,32 @@ class MatchSystem:
         # Find the match by ID
         match = self.matches.find_one({"match_id": match_id})
 
+        # ADDED: Also search by match ID in voting or selection status with the same reporter
+        if not match:
+            # Try to find any match in voting or selection with this player
+            active_matches = list(self.matches.find({
+                "status": {"$in": ["voting", "selection", "in_progress"]},
+                "players.id": reporter_id
+            }))
+
+            if active_matches:
+                # Update the log for debugging
+                print(f"Found {len(active_matches)} active matches for reporter {reporter_id}")
+                for active_match in active_matches:
+                    print(f"Active match: {active_match.get('match_id')} with status {active_match.get('status')}")
+
+                    # Cancel these matches as they're stale
+                    self.matches.update_one(
+                        {"_id": active_match["_id"]},
+                        {"$set": {"status": "cancelled"}}
+                    )
+
+                # Log that we're cancelling stale matches
+                print(f"Cancelled stale matches for reporter {reporter_id}")
+
+        # Try again with the original ID - original match lookup
+        match = self.matches.find_one({"match_id": match_id})
+
         if not match:
             return None, "No match found with that ID."
 
@@ -172,17 +198,36 @@ class MatchSystem:
         channel_id = updated_match.get("channel_id")
         print(f"Match type: {'Global' if is_global_match else 'Ranked'}, Channel ID: {channel_id}")
 
-        # Update MMR for all players with the new algorithm
+        # IMPROVED: Clear player status for ALL players in the match
+        all_players = team1_ids + team2_ids
+
+        # Clear matches for all players in the match to ensure complete cleanup
+        for player_id in all_players:
+            # Skip dummy players
+            if player_id.startswith('9000'):
+                continue
+
+            # Cancel ALL potential matches for this player (voting, selection, in_progress)
+            self.matches.update_many(
+                {
+                    "players.id": player_id,
+                    "status": {"$in": ["voting", "selection", "in_progress"]},
+                    "match_id": {"$ne": match_id}  # Don't modify the current match
+                },
+                {"$set": {"status": "cancelled"}}
+            )
+
+        # Calculate team average MMRs
+        team1_mmrs = []
+        team2_mmrs = []
+
+        # IMPORTANT: Define winning_team and losing_team variables BEFORE using them
         if winner == 1:
             winning_team = match["team1"]
             losing_team = match["team2"]
         else:
             winning_team = match["team2"]
             losing_team = match["team1"]
-
-        # Calculate team average MMRs
-        team1_mmrs = []
-        team2_mmrs = []
 
         # Get MMRs for team 1
         for player in match["team1"]:
@@ -726,6 +771,19 @@ class MatchSystem:
             }}
         )
 
+        # IMPROVED: Explicitly remove all players from the queue
+        if hasattr(self, 'queue') and hasattr(self.queue, 'queue_collection'):
+            try:
+                # Remove all players from the queue for all teams
+                for player in winning_team + losing_team:
+                    player_id = player.get("id", "")
+                    if player_id and not player_id.startswith('9000'):
+                        self.queue.queue_collection.delete_many({"id": player_id})
+
+                print(f"Successfully removed all players from the queue after match {match_id} completion")
+            except Exception as e:
+                print(f"Error clearing queue after match completion: {e}")
+
         # Clear any other active matches for this player
         await self.clear_player_active_matches(reporter_id)
 
@@ -771,6 +829,36 @@ class MatchSystem:
         if match["match_id"] in self.active_matches:
             del self.active_matches[match["match_id"]]
 
+        # ADDED: Make sure to check and cancel any active votes or selections related to the match
+        if hasattr(self, 'bot') and self.bot:
+            # Check if vote_system and captains_system exist directly on the bot object
+                if hasattr(self.bot, 'vote_system') and self.bot.vote_system:
+                    self.bot.vote_system.cancel_voting(channel_id=channel_id)
+
+                if hasattr(self.bot, 'captains_system') and self.bot.captains_system:
+                    self.bot.captains_system.cancel_selection(channel_id=channel_id)
+
+                # Also check for guild-level vote/captain coordinators
+                for guild in self.bot.guilds:
+                    for channel in guild.channels:
+                        if str(channel.id) == channel_id:
+                            try:
+                                # Find and use the vote system coordinator
+                                if hasattr(self.bot, 'vote_system_coordinator'):
+                                    self.bot.vote_system_coordinator.cancel_voting(channel_id=channel_id)
+                                    print(
+                                        f"Cancelled votes via coordinator in channel {channel_id} after match completion")
+
+                                # Find and use the captains system coordinator
+                                if hasattr(self.bot, 'captains_system_coordinator'):
+                                    self.bot.captains_system_coordinator.cancel_selection(channel_id=channel_id)
+                                    print(
+                                        f"Cancelled selections via coordinator in channel {channel_id} after match completion")
+                            except Exception as e:
+                                print(f"Error clearing votes/selections via coordinators: {e}")
+                            break
+
+        # Return the updated match
         return updated_match, None
 
     def clear_player_match_status(self, player_id, new_match_id=None):
