@@ -38,16 +38,22 @@ class MatchSystem:
         Returns:
             The match ID used (might be the same as input or a new one if none provided)
         """
-        # If a valid match_id is provided, use it - don't generate a new one
-        # This ensures consistent IDs throughout the queue, voting, and team creation process
+        # Always ensure 6-character match IDs
         if not match_id or match_id.lower() == "none":
-            # Only generate a new ID if none was provided
-            short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
+            # Generate a new 6-character ID
+            short_id = str(uuid.uuid4().hex)[:6]
             print(f"No match ID provided. Creating match with new ID: {short_id}")
         else:
-            # Use the provided match_id
-            short_id = match_id
-            print(f"Using provided match ID: {short_id}")
+            # Check if the provided ID is the correct format
+            if len(match_id) != 6:
+                # Not a 6-character ID, generate a new one
+                original_id = match_id
+                short_id = str(uuid.uuid4().hex)[:6]
+                print(f"WARNING: Non-standard match ID format: {original_id}. Using new ID: {short_id}")
+            else:
+                # Use the provided 6-character match_id
+                short_id = match_id
+                print(f"Using provided match ID: {short_id}")
 
         print(f"Creating/updating match with ID: {short_id}, channel: {channel_id}, is_global: {is_global}")
 

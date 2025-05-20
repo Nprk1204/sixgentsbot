@@ -75,7 +75,30 @@ class VoteSystem:
             await channel.send("No active match found for voting!")
             return False
 
+        # Ensure the match_id is 6 characters
         match_id = active_match["match_id"]
+        if len(match_id) != 6:
+            # If it's a long UUID with dashes, fix it
+            if '-' in match_id:
+                new_match_id = str(uuid.uuid4().hex)[:6]  # Generate clean 6-character ID
+                print(f"Converting non-standard match ID {match_id} to standard format: {new_match_id}")
+                # Update the database with the new ID
+                self.queue.matches_collection.update_one(
+                    {"_id": active_match["_id"]},
+                    {"$set": {"match_id": new_match_id}}
+                )
+                match_id = new_match_id
+            # Otherwise just take the first 6 characters
+            else:
+                new_match_id = match_id[:6]
+                print(f"Shortening match ID {match_id} to standard format: {new_match_id}")
+                # Update the database with the shortened ID
+                self.queue.matches_collection.update_one(
+                    {"_id": active_match["_id"]},
+                    {"$set": {"match_id": new_match_id}}
+                )
+                match_id = new_match_id
+
         print(f"Starting vote for match {match_id} in channel {channel_id}")
 
         # CRITICAL: Don't cancel existing votes for other matches in the same channel!

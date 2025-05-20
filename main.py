@@ -515,6 +515,19 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         )
         return
 
+    # Check if match ID is in the correct format
+    if len(match_id) != 6:
+        print(f"WARNING: User {interaction.user.id} attempting to report with non-standard match ID: {match_id}")
+
+        # If it's a long UUID with dashes, it may be from a bugged match
+        if len(match_id) > 6 and '-' in match_id:
+            short_id = match_id[:6]
+            await interaction.response.send_message(
+                f"⚠️ Detected a non-standard match ID format. Trying to use shortened ID: {short_id}",
+                ephemeral=True
+            )
+            match_id = short_id
+
     reporter_id = str(interaction.user.id)
 
     # Validate result argument
@@ -705,14 +718,14 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
             inline=True
         )
 
-    # Spacer field if needed to ensure proper alignment (for 3-column layout)
+        # Spacer field if needed to ensure proper alignment (for 3-column layout)
     if len(losing_team) % 3 == 1:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
     elif len(losing_team) % 3 == 2:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-    # MMR System explanation
+        # MMR System explanation
     embed.add_field(
         name="📊 MMR System",
         value="Dynamic MMR: Changes based on games played and win/loss streaks",

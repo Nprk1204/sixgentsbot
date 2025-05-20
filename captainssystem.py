@@ -83,6 +83,21 @@ class CaptainsSystem:
             if active_match:
                 match_id = active_match.get("match_id")
 
+        # If we found a match_id, validate its format
+        if match_id and len(match_id) != 6:
+            print(f"WARNING: Non-standard match ID format in start_captains_selection: {match_id}")
+            original_id = match_id
+            match_id = str(uuid.uuid4().hex)[:6]  # Generate new 6-character ID
+            print(f"Generated new standard match ID: {match_id} (was: {original_id})")
+
+            # Update the match record if it exists
+            if active_match:
+                self.match_system.matches.update_one(
+                    {"_id": active_match["_id"]},
+                    {"$set": {"match_id": match_id}}
+                )
+                print(f"Updated match ID in database: {original_id} -> {match_id}")
+
         if len(players) < 6:
             return "Not enough players to start captain selection!"
 
@@ -93,7 +108,7 @@ class CaptainsSystem:
         remaining_players = players[2:]
 
         # IMPORTANT FIX: Store selection state with BOTH match_id AND channel_id as keys
-        # This ensures it can be found by either method
+        # Determine primary selection key (prioritize match_id if available)
         selection_key = match_id if match_id else channel_id
 
         # Initialize selection state for this match
@@ -109,10 +124,11 @@ class CaptainsSystem:
             'announcement_channel': None
         }
 
-        # CRITICAL FIX: ALSO store the selection state with channel_id as key
+        # CRITICAL FIX: ALSO store the selection state with channel_id as key if match_id exists
         # This creates a second reference to the same selection state
         if match_id and channel_id != match_id:
             self.active_selections[channel_id] = self.active_selections[selection_key]
+            print(f"Stored captain selection state with both keys: match_id={match_id} and channel_id={channel_id}")
 
         # Format remaining players for display
         remaining_mentions = [p['mention'] for p in remaining_players]
@@ -209,7 +225,7 @@ class CaptainsSystem:
             if captain1['id'].startswith('9000') or captain2['id'].startswith('9000'):
                 await channel.send(
                     "One or both captains are dummy players for testing. Falling back to random team selection.")
-                await self.fallback_to_random(channel_id)
+                await self.fallback_to_random(channel_id, match_id=match_id)
                 return
 
             # Get discord users from IDs
@@ -218,7 +234,7 @@ class CaptainsSystem:
                 captain2_user = await self.bot.fetch_user(int(captain2['id']))
             except (ValueError, discord.NotFound, discord.HTTPException) as e:
                 await channel.send(f"Error fetching captain users: {str(e)}. Falling back to random team selection.")
-                await self.fallback_to_random(channel_id)
+                await self.fallback_to_random(channel_id, match_id=match_id)
                 return
 
             # Initial message to players
@@ -287,7 +303,7 @@ class CaptainsSystem:
             else:
                 # No match_id available, create a new one (should rarely happen)
                 match_id = self.match_system.create_match(
-                    str(uuid.uuid4())[:6],  # Generate a short ID
+                    str(uuid.uuid4().hex)[:6],  # Generate a 6-character ID
                     captain1_team,
                     captain2_team,
                     channel_id,
@@ -312,6 +328,8 @@ class CaptainsSystem:
             # Clean up
             self.queue.remove_players_from_queue(selection_state['match_players'])
             self.cancel_selection(channel_id)
+            if match_id:
+                self.cancel_selection(match_id=match_id)
 
         except Exception as e:
             import traceback
@@ -320,7 +338,7 @@ class CaptainsSystem:
             # Something went wrong
             await channel.send(
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
-            await self.fallback_to_random(channel_id)
+            await self.fallback_to_random(channel_id, match_id=match_id)
 
     async def get_player_mmrs(self, players, channel=None):
         """
@@ -629,17 +647,11 @@ class CaptainsSystem:
             return None
 
     async def fallback_to_random(self, channel_id, match_id=None):
-        # Then use match_id in your lookups if provided
-        if match_id:
-            active_match = self.match_system.matches.find_one({
-                "match_id": match_id,
-                "status": "selection"
-            })
-        # fall back to channel_id lookup only if needed
-
         """Fall back to random team selection if captain selection fails"""
         channel_id = str(channel_id)
-        print(f"Starting fallback_to_random for channel_id: {channel_id}")
+        print(f"===== STARTING FALLBACK TO RANDOM =====")
+        print(f"Channel ID: {channel_id}")
+        print(f"Match ID: {match_id}")
 
         # Get the channel object directly from the bot
         channel = None
@@ -654,6 +666,10 @@ class CaptainsSystem:
             print(f"Cannot proceed with fallback: No channel found for ID {channel_id}")
             return
 
+        # Determine if this is a global match
+        is_global = channel.name.lower() == "global"
+        print(f"Fallback: Channel {channel.name}, is_global: {is_global}")
+
         # Get players from active selections or via direct database query
         players = []
         active_match = None
@@ -664,17 +680,36 @@ class CaptainsSystem:
             if 'match_players' in selection_state:
                 players = selection_state['match_players']
                 print(f"Found {len(players)} players in active selection state")
+                # Also get the match_id from selection_state if not provided
+                if not match_id and 'match_id' in selection_state:
+                    match_id = selection_state['match_id']
+                    print(f"Using match_id {match_id} from selection state")
 
-        # If no players found in selection state, try from database
-        if not players:
-            active_match = self.match_system.matches.find_one({
-                "channel_id": channel_id,
-                "status": {"$in": ["voting", "selection", "in_progress"]}  # Include in_progress as well
-            })
+        # If no players found in selection state or no match_id yet, try from database
+        if not players or not match_id:
+            # IMPORTANT: First try looking for match by match_id if we have one
+            if match_id:
+                active_match = self.match_system.matches.find_one({
+                    "match_id": match_id,
+                    "status": {"$in": ["voting", "selection", "in_progress"]}
+                })
+                if active_match:
+                    players = active_match.get("players", [])
+                    print(f"Found {len(players)} players in database match with ID: {match_id}")
 
-            if active_match:
-                players = active_match.get("players", [])
-                print(f"Found {len(players)} players in database match (ID: {active_match.get('match_id', 'unknown')})")
+            # If still no match or players, try by channel_id
+            if not active_match:
+                active_match = self.match_system.matches.find_one({
+                    "channel_id": channel_id,
+                    "status": {"$in": ["voting", "selection", "in_progress"]}
+                })
+
+                if active_match:
+                    players = active_match.get("players", [])
+                    # If we found a match but no match_id was provided, get it from the match
+                    if not match_id:
+                        match_id = active_match.get("match_id")
+                        print(f"Found active match by channel, using match_id: {match_id}")
 
         # If still no players, try checking the queue
         if not players and hasattr(self.queue, 'get_players_for_match'):
@@ -700,11 +735,7 @@ class CaptainsSystem:
         # Tell users what's happening
         await channel.send("Captain selection failed. Creating balanced random teams instead...")
 
-        # Determine if this is a global match
-        is_global = channel.name.lower() == "global"
-        print(f"Fallback: Channel {channel.name}, is_global: {is_global}")
-
-        # Create balanced random teams based on MMR
+        # Calculate team average MMRs
         player_mmrs = []
         for player in players:
             player_id = player["id"]
@@ -715,7 +746,7 @@ class CaptainsSystem:
                 player_mmrs.append((player, mmr))
                 continue
 
-            # Dummy players without MMR
+            # Skip dummy players without MMR
             if player_id.startswith('9000'):
                 # Generate a random MMR based on channel
                 channel_name = channel.name.lower()
@@ -797,46 +828,49 @@ class CaptainsSystem:
 
         # Create match record with explicit is_global flag
         try:
-            # Cancel any existing matches
-            if active_match:
+            # If we have a match_id already, update that match
+            if match_id:
+                print(f"Using existing match_id: {match_id}")
+                # Check if match_id is the correct format
+                if len(match_id) != 6:
+                    original_id = match_id
+                    match_id = str(uuid.uuid4().hex)[:6]  # Generate a new 6-character ID
+                    print(f"WARNING: Non-standard match ID format: {original_id}. Using new ID: {match_id}")
+
+                # Cancel any existing matches with this ID
                 self.match_system.matches.update_one(
-                    {"_id": active_match["_id"]},
+                    {"match_id": match_id},
                     {"$set": {"status": "cancelled"}}
                 )
-                print(f"Cancelled existing match with ID {active_match.get('match_id', 'unknown')}")
+                print(f"Cancelled any existing matches with ID {match_id}")
+
+                # Create a new match with this ID
+                self.match_system.create_match(
+                    match_id,  # Use the existing ID
+                    team1,
+                    team2,
+                    channel_id,
+                    is_global=is_global
+                )
             else:
-                # Try to find and cancel any active matches for these players
-                player_ids = [p["id"] for p in players if not p["id"].startswith('9000')]  # Skip dummy players
-                for player_id in player_ids:
-                    self.match_system.matches.update_many(
-                        {
-                            "players.id": player_id,
-                            "status": {"$in": ["voting", "selection"]}
-                        },
-                        {
-                            "$set": {"status": "cancelled"}
-                        }
-                    )
+                # No match ID provided, create a new match with a 6-character ID
+                match_id = str(uuid.uuid4().hex)[:6]  # Generate a 6-character ID
+                print(f"Creating new match with 6-character ID: {match_id}")
 
-            # Cancel our own active selection if it exists
-            if channel_id in self.active_selections:
-                self.cancel_selection(channel_id)
-
-            # Now create the new match
-            match_id = self.match_system.create_match(
-                str(uuid.uuid4()),
-                team1,
-                team2,
-                channel_id,
-                is_global=is_global
-            )
-            print(f"Fallback: Created match with ID {match_id}")
+                self.match_system.create_match(
+                    match_id,
+                    team1,
+                    team2,
+                    channel_id,
+                    is_global=is_global
+                )
 
             # Double-check the status is set to in_progress
             self.match_system.matches.update_one(
                 {"match_id": match_id},
                 {"$set": {"status": "in_progress"}}
             )
+            print(f"Set match {match_id} to status 'in_progress'")
 
             # Make sure players are removed from the queue
             try:
@@ -881,3 +915,5 @@ class CaptainsSystem:
         # Make sure to cancel selection again at the end, just to be safe
         if channel_id in self.active_selections:
             self.cancel_selection(channel_id)
+
+        print("===== FALLBACK TO RANDOM COMPLETED =====")

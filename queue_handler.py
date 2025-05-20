@@ -62,40 +62,33 @@ class QueueHandler:
         }))
 
         if active_matches:
-            if len(active_matches) > 0:
-                print(f"Found {len(active_matches)} active matches for player {player_id}")
+            print(f"Found {len(active_matches)} active matches for player {player_id}")
 
-                # Check if any of these matches are actually complete but status wasn't updated
-                stale_matches = []
-                for active_match in active_matches:
-                    match_id = active_match.get("match_id", "unknown")
-                    match_status = active_match.get("status", "active")
+            # Check and fix any non-standard match IDs
+            for active_match in active_matches:
+                match_id = active_match.get("match_id", "unknown")
+                match_status = active_match.get("status", "active")
 
-                    # Check for a completed match with the same ID
-                    completed_check = self.matches_collection.find_one({
-                        "match_id": match_id,
-                        "status": "completed"
-                    })
+                # Check if this is a non-standard match ID
+                if len(match_id) != 6:
+                    print(f"WARNING: Found non-standard match ID: {match_id} with status {match_status}")
 
-                    if completed_check:
-                        # This match is actually complete! Fix the status
+                    # If it's clearly a full UUID, we should fix it
+                    if '-' in match_id:
+                        short_id = match_id[:6]
+                        print(f"Attempting to fix by shortening to: {short_id}")
+
+                        # Update the database with the shortened ID
                         self.matches_collection.update_one(
                             {"_id": active_match["_id"]},
-                            {"$set": {"status": "completed"}}
+                            {"$set": {"match_id": short_id}}
                         )
-                        stale_matches.append(match_id)
-                        print(
-                            f"Fixed stale match {match_id} for player {player_id} - was marked {match_status} but is actually complete")
 
-                # If all matches were stale, continue with queue join
-                if len(stale_matches) == len(active_matches):
-                    print(f"All {len(stale_matches)} matches for player {player_id} were stale and have been fixed")
-                else:
-                    # There's still at least one active match
-                    active_match = active_matches[0]  # Use the first one for messaging
-                    match_id = active_match.get("match_id", "unknown")
-                    match_status = active_match.get("status", "active")
-                    return f"{player_mention} cannot join the queue while you have an active match in progress! (Match ID: {match_id}, Status: {match_status})"
+                        # Use the short ID for the message
+                        match_id = short_id
+
+                print(f"Active match found: {match_id} with status: {match_status}")
+                return f"{player_mention} cannot join the queue while you have an active match in progress! (Match ID: {match_id}, Status: {match_status})"
 
         # Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
@@ -129,8 +122,8 @@ class QueueHandler:
             # Get the 6 oldest players in the queue by joined_at timestamp
             players = list(self.queue_collection.find({"channel_id": channel_id}).sort("joined_at", 1).limit(6))
 
-            # Generate a unique short match ID for the active match
-            match_id = str(uuid.uuid4())[:6]  # SHORTER ID: Use just 6 chars for better usability
+            # Generate a unique 6-character match ID for the active match
+            match_id = str(uuid.uuid4().hex)[:6]  # Create 6-character match ID
 
             # Remove these specific 6 players from the queue BEFORE creating the match
             for match_player in players:
