@@ -983,6 +983,91 @@ class MatchSystem:
             del self.active_matches[match["match_id"]]
             print(f"Removed match {match_id} from active_matches dictionary")
 
+        print("===== RUNNING FINAL CLEANUP TO ENSURE NO ACTIVE MATCHES REMAIN =====")
+
+        # Force update ALL matches with this match_id to completed status
+        force_cleanup = self.matches.update_many(
+            {"match_id": match_id},  # Update ALL matches with this match_id
+            {"$set": {"status": "completed"}}
+        )
+        print(f"Force cleanup: Updated {force_cleanup.modified_count} documents with match_id {match_id}")
+
+        # Force cleanup for all players in the match
+        all_player_ids = []
+        for player in winning_team + losing_team:
+            player_id = player.get("id", "")
+            if player_id and not player_id.startswith('9000'):
+                all_player_ids.append(player_id)
+
+        print(f"Force cleaning all active matches for {len(all_player_ids)} players")
+
+        # For each player, find and update ALL matches they're in
+        for player_id in all_player_ids:
+            # First get a list of all potentially problematic matches
+            player_matches = list(self.matches.find({
+                "players.id": player_id,
+                "status": {"$in": ["voting", "selection", "in_progress"]}
+            }))
+
+            if player_matches:
+                print(f"Found {len(player_matches)} active matches for player {player_id}")
+
+                # For each match, force update to completed
+                for match in player_matches:
+                    problem_match_id = match.get("match_id", "unknown")
+                    problem_match_status = match.get("status", "unknown")
+
+                    print(f"Force completing problematic match: {problem_match_id} (status: {problem_match_status})")
+
+                    # Update by match_id
+                    result = self.matches.update_many(
+                        {"match_id": problem_match_id},
+                        {"$set": {"status": "completed"}}
+                    )
+                    print(f"Forced update result: {result.modified_count} matches completed")
+
+                    # Also try by _id as fallback
+                    if result.modified_count == 0:
+                        self.matches.update_one(
+                            {"_id": match["_id"]},
+                            {"$set": {"status": "completed"}}
+                        )
+            else:
+                print(f"No problematic matches found for player {player_id}")
+
+        # FINAL CHECK: See if we still have any active matches with this ID
+        final_check = list(self.matches.find({"match_id": match_id}))
+        print(f"Final check: Found {len(final_check)} total matches with ID {match_id}")
+
+        for i, check_match in enumerate(final_check):
+            check_status = check_match.get("status", "unknown")
+            check_id = check_match.get("_id")
+            print(f"Match {i + 1}/{len(final_check)}: _id={check_id}, status={check_status}")
+
+        # Check if any player is still in an active match
+        for player_id in all_player_ids:
+            still_active = list(self.matches.find({
+                "players.id": player_id,
+                "status": {"$in": ["voting", "selection", "in_progress"]}
+            }))
+
+            if still_active:
+                print(
+                    f"WARNING: Player {player_id} STILL has {len(still_active)} active matches after all cleanup attempts!")
+                for active_match in still_active:
+                    act_match_id = active_match.get("match_id", "unknown")
+                    act_status = active_match.get("status", "unknown")
+                    act_id = active_match.get("_id")
+                    print(f"  Problematic match: _id={act_id}, match_id={act_match_id}, status={act_status}")
+
+                    # Last resort: Delete the problematic match entirely
+                    self.matches.delete_one({"_id": act_id})
+                    print(f"  DELETED problematic match with _id={act_id}")
+            else:
+                print(f"SUCCESS: Player {player_id} has no remaining active matches")
+
+        print("===== FINAL CLEANUP COMPLETE =====")
+
         # Return the updated match
         return updated_match, None
 
