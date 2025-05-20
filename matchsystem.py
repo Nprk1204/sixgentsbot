@@ -24,6 +24,10 @@ class MatchSystem:
         """Set the bot instance"""
         self.bot = bot
 
+    def set_queue_handler(self, queue_handler):
+        """Set queue handler reference"""
+        self.queue_handler = queue_handler
+
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
         print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
         """Create a new match entry"""
@@ -649,6 +653,11 @@ class MatchSystem:
                 "team2_avg_mmr": team2_avg_mmr
             }}
         )
+
+        # This is the key integration with the new queue handler
+        if self.queue_handler:
+            self.queue_handler.mark_match_completed(match_id)
+            print(f"Players from match {match_id} have been released and can now join new queues")
 
         # After updating MMR for winners and losers:
         if ctx:

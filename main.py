@@ -160,6 +160,7 @@ except Exception as e:
 db = Database(MONGO_URI)
 queue_handler = QueueHandler(db)
 match_system = MatchSystem(db)
+match_system.set_queue_handler(queue_handler)
 
 # Create channel-specific vote and captain systems
 channel_names = ["rank-a", "rank-b", "rank-c", "global"]
@@ -294,11 +295,19 @@ async def queue_slash(interaction: discord.Interaction):
     await interaction.response.send_message(response)
 
     # Check if queue is full and start voting
-    players = queue_handler.get_players_for_match(channel_id)
-    if len(players) >= 6:
-        # Check if voting is already active for this channel
-        if not vote_system.is_voting_active(channel_id):
-            await vote_system.start_vote(interaction.channel)
+    # Get the current queue number for the channel
+    channel_id_str = str(channel_id)
+    if channel_id_str in queue_handler.active_queues:
+        current_queue_num = len(queue_handler.active_queues[channel_id_str]) + 1
+        players = list(queue_handler.queue_collection.find({
+            "channel_id": channel_id_str,
+            "queue_num": current_queue_num
+        }))
+
+        if len(players) >= 6:
+            # Check if voting is already active for this channel
+            if not vote_system.is_voting_active(channel_id):
+                await vote_system.start_vote(interaction.channel)
 
 
 @bot.tree.command(name="leave", description="Leave the queue")
@@ -346,56 +355,9 @@ async def leave_slash(interaction: discord.Interaction):
     # DEBUG - Before leaving
     print(f"DEBUG - LEAVE ATTEMPT: {interaction.user.name} trying to leave queue in channel {channel_id}")
 
-    # Find if the player is in ANY queue first
-    any_queue = queue_handler.queue_collection.find_one({"id": player_id})
-    if not any_queue:
-        await interaction.response.send_message(f"{player_mention} is not in any queue!", ephemeral=True)
-        return
-
-    # Now check if the player is in THIS specific channel's queue
-    channel_queue = queue_handler.queue_collection.find_one({"id": player_id, "channel_id": channel_id})
-    if not channel_queue:
-        other_channel_id = any_queue.get("channel_id")
-        if other_channel_id and other_channel_id.isdigit():
-            await interaction.response.send_message(
-                f"{player_mention} is not in this channel's queue. You are in <#{other_channel_id}>'s queue.",
-                ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                f"{player_mention} is in another channel's queue, not this one.",
-                ephemeral=True
-            )
-        return
-
-    # Check if voting is active in this channel
-    if vote_system.is_voting_active(channel_id):
-        await interaction.response.send_message(
-            f"{player_mention} cannot leave the queue while voting is in progress!",
-            ephemeral=True
-        )
-        return
-
-    # Delete the player from THIS channel's queue
-    result = queue_handler.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
-
-    # Check if captain selection is active in this channel
-    if captains_system.is_selection_active(channel_id):
-        captains_system.cancel_selection(channel_id)
-
-    if result.deleted_count > 0:
-        await interaction.response.send_message(f"{player_mention} has left the queue!")
-    else:
-        await interaction.response.send_message(
-            f"Error removing {player_mention} from the queue. Please try again.",
-            ephemeral=True
-        )
-
-    # DEBUG - After leaving
-    print("DEBUG - AFTER LEAVE: Current queue state:")
-    all_queued = list(queue_handler.queue_collection.find())
-    for p in all_queued:
-        print(f"Player: {p.get('name')}, Channel: {p.get('channel_id')}")
+    # Use the updated queue_handler.remove_player function to properly handle leaving
+    response = queue_handler.remove_player(player, channel_id)
+    await interaction.response.send_message(response)
 
 
 @bot.tree.command(name="status", description="Shows the current queue status")
@@ -412,14 +374,20 @@ async def status_slash(interaction: discord.Interaction):
     player = interaction.user
     player_id = str(player.id)
 
-    # Check if player has a rank entry in the ranks collection
+    # Check if player has a rank entry in the ranks collection or has a role
     rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
-    if not rank_record:
+    # Get all rank roles
+    rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+    rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+    rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+    has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
+
+    if not (rank_record or has_rank_role):
         # Player hasn't completed rank verification
         embed = discord.Embed(
             title="Rank Verification Required",
-            description="You need to verify your Rocket League rank before joining the queue.",
+            description="You need to verify your Rocket League rank before checking queue status.",
             color=0xf1c40f
         )
         embed.add_field(
@@ -432,45 +400,9 @@ async def status_slash(interaction: discord.Interaction):
 
     channel_id = str(interaction.channel.id)
 
-    # Get all players in this channel's queue directly from the database
-    players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
-    count = len(players)
-
-    # Create an embed
-    embed = discord.Embed(
-        title="Queue Status",
-        description=f"**Current Queue: {count}/6 players**",
-        color=0x3498db
-    )
-
-    if count == 0:
-        embed.add_field(name="Status", value="Queue is empty! Use `/queue` to join the queue.", inline=False)
-        await interaction.response.send_message(embed=embed)
-        return
-
-    # Create a list of player mentions
-    player_mentions = [player['mention'] for player in players]
-
-    # Add player list to embed
-    embed.add_field(name="Players", value=", ".join(player_mentions), inline=False)
-
-    # Add info about how many more players are needed
-    if count < 6:
-        more_needed = 6 - count
-        embed.add_field(name="Info", value=f"{more_needed} more player(s) needed for a match.", inline=False)
-    else:
-        # Queue is full
-        embed.add_field(name="Status", value="**Queue is FULL!** Ready to start match.", inline=False)
-
+    # Use the updated queue status method to show multiple queues
+    embed = queue_handler.get_queue_status(channel_id)
     await interaction.response.send_message(embed=embed)
-
-    # If queue is full, check if we should start voting
-    if count >= 6:
-        channel_name = interaction.channel.name.lower()
-        if channel_name in ["rank-a", "rank-b", "rank-c", "global"]:
-            # Check if voting is already active for this channel
-            if not vote_system.is_voting_active(channel_id):
-                await vote_system.start_vote(interaction.channel)
 
 
 @bot.tree.command(name="report", description="Report match results")
@@ -725,6 +657,11 @@ async def adminreport_slash(interaction: discord.Interaction, team_number: int, 
 
     # Update MMR
     match_system.update_player_mmr(winning_team, losing_team)
+
+    # Release players from the match
+    if queue_handler:
+        queue_handler.mark_match_completed(match_id)
+        print(f"Players from match {match_id} have been released by admin report and can now join new queues")
 
     # Format team members - using display_name instead of mentions
     winning_members = []
