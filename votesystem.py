@@ -170,7 +170,7 @@ class VoteSystem:
 
         vote_state = self.active_votes[match_id]
 
-        # Get the active match from database to ensure latest data
+        # CHANGE: Use match_id as primary lookup key instead of channel_id
         active_match = self.queue.matches_collection.find_one({
             "match_id": match_id,
             "status": "voting"
@@ -407,7 +407,7 @@ class VoteSystem:
                             await channel.send(embed=captains_result)
                             # Add a small delay to ensure the embed is sent before starting selection
                             await asyncio.sleep(0.5)
-                            await self.captains_system.execute_captain_selection(channel)
+                            await self.captains_system.execute_captain_selection(channel, match_id=match_id)
                         else:
                             print(f"Failed to start captains selection for match {match_id}")
                             # Fallback to random teams

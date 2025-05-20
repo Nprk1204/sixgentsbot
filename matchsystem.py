@@ -141,6 +141,37 @@ class MatchSystem:
 
         return short_id
 
+    def get_match_by_id_or_channel(self, match_id=None, channel_id=None, status=None):
+        """
+        Get a match by its ID or channel ID, prioritizing match_id.
+
+        Args:
+            match_id: The match ID to search for
+            channel_id: The channel ID to search for (fallback)
+            status: Optional status filter (e.g., "in_progress")
+
+        Returns:
+            The match document or None if not found
+        """
+        query = {}
+
+        # Build query based on provided parameters
+        if match_id:
+            query["match_id"] = match_id
+        elif channel_id:
+            query["channel_id"] = str(channel_id)
+        else:
+            return None
+
+        if status:
+            if isinstance(status, list):
+                query["status"] = {"$in": status}
+            else:
+                query["status"] = status
+
+        # Execute the query
+        return self.matches.find_one(query)
+
     def get_active_match_by_channel(self, channel_id):
         """Get active match by channel ID"""
         match = self.matches.find_one({"channel_id": channel_id, "status": "in_progress"})

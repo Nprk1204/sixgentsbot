@@ -124,7 +124,15 @@ class CaptainsSystem:
 
         return embed
 
-    async def execute_captain_selection(self, channel):
+    async def execute_captain_selection(self, channel, match_id=None):
+        # Then use match_id in your lookups if provided
+        if match_id:
+            active_match = self.match_system.matches.find_one({
+                "match_id": match_id,
+                "status": "selection"
+            })
+        # fall back to channel_id lookup only if needed
+
         """Execute captain selection for a specific channel"""
         channel_id = str(channel.id)
         is_global = channel.name.lower() == "global"
@@ -172,7 +180,7 @@ class CaptainsSystem:
             print(f"No active match in selection state found for channel {channel_id}")
             await channel.send("⚠️ Error: The captain selection process has been cancelled.")
             # IMPORTANT: Make sure to call fallback_to_random here
-            await self.fallback_to_random(channel_id)
+            await self.fallback_to_random(channel_id, match_id=match_id)
             return
 
         # Use player list from the active match for consistency
@@ -618,7 +626,15 @@ class CaptainsSystem:
         except asyncio.TimeoutError:
             return None
 
-    async def fallback_to_random(self, channel_id):
+    async def fallback_to_random(self, channel_id, match_id=None):
+        # Then use match_id in your lookups if provided
+        if match_id:
+            active_match = self.match_system.matches.find_one({
+                "match_id": match_id,
+                "status": "selection"
+            })
+        # fall back to channel_id lookup only if needed
+
         """Fall back to random team selection if captain selection fails"""
         channel_id = str(channel_id)
         print(f"Starting fallback_to_random for channel_id: {channel_id}")
