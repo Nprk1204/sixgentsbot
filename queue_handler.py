@@ -44,12 +44,22 @@ class QueueHandler:
         if player_id in self.players_in_match:
             return f"{player_mention} is already in an active match! Please report your match results before joining a new queue."
 
+        # Determine which queue the player is trying to join
+        requested_queue_num = len(self.active_queues.get(channel_id, [])) + 1
+
         # Check if player is already in any queue
         existing_queue = self.queue_collection.find_one({"id": player_id})
         if existing_queue:
             queue_channel_id = existing_queue.get("channel_id")
-            if queue_channel_id == channel_id:
+            existing_queue_num = existing_queue.get("queue_num", 1)
+
+            if queue_channel_id == channel_id and existing_queue_num == requested_queue_num:
                 return f"{player_mention} is already in this queue!"
+            elif queue_channel_id == channel_id:
+                # Allow joining a different queue number in the same channel
+                # First remove from old queue
+                self.queue_collection.delete_one({"id": player_id})
+                # Continue with adding to new queue
             else:
                 channel_mention = f"<#{queue_channel_id}>"
                 return f"{player_mention} is already in a queue in {channel_mention}. Please leave that queue first."
@@ -57,6 +67,9 @@ class QueueHandler:
         # Initialize the active_queues structure for this channel if it doesn't exist
         if channel_id not in self.active_queues:
             self.active_queues[channel_id] = []
+
+        # Determine the queue number
+        queue_num = requested_queue_num
 
         # Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
@@ -70,20 +83,20 @@ class QueueHandler:
             "channel_id": channel_id,
             "is_global": is_global,
             "joined_at": datetime.datetime.utcnow(),
-            "queue_num": len(self.active_queues[channel_id]) + 1  # Assign queue number
+            "queue_num": queue_num  # Assign queue number
         })
 
         # Count players in the current queue
         queue_count = self.queue_collection.count_documents({
             "channel_id": channel_id,
-            "queue_num": len(self.active_queues[channel_id]) + 1
+            "queue_num": queue_num
         })
 
         # If queue reached 6 players, create active match
         if queue_count == 6:
             return self.create_active_match(channel_id, player_mention)
         else:
-            return f"{player_mention} has joined queue #{len(self.active_queues[channel_id]) + 1}! There are {queue_count}/6 players"
+            return f"{player_mention} has joined queue #{queue_num}! There are {queue_count}/6 players"
 
     def create_active_match(self, channel_id, trigger_player_mention):
         """Create an active match from the first 6 players in queue"""

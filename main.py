@@ -400,13 +400,13 @@ async def status_slash(interaction: discord.Interaction):
 
     channel_id = str(interaction.channel.id)
 
-    # Create an improved status embed
+    # Create status embed
     embed = discord.Embed(
         title="Queue Status",
         color=0x3498db
     )
 
-    # Get all queues in this channel grouped by queue_num
+    # Get only active queues (not matches) in this channel
     all_queues = {}
     queue_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
     for player in queue_players:
@@ -415,68 +415,41 @@ async def status_slash(interaction: discord.Interaction):
             all_queues[queue_num] = []
         all_queues[queue_num].append(player)
 
-    # Get active matches in this channel
-    active_matches = list(match_system.matches.find({
-        "channel_id": channel_id,
-        "status": {"$ne": "completed"}
-    }))
-
-    # No queues or matches
-    if not all_queues and not active_matches:
+    # No active queues
+    if not all_queues:
         embed.description = "Queue is empty! Use `/queue` to join the queue."
         await interaction.response.send_message(embed=embed)
         return
 
-    # Add waiting queues first to emphasize the pre-6 player queue
-    if all_queues:
-        for queue_num, players in sorted(all_queues.items()):
-            waiting_count = len(players)
-            if waiting_count > 0 and waiting_count < 6:
-                waiting_mentions = [p["mention"] for p in players]
+    # Display each queue
+    for queue_num, players in sorted(all_queues.items()):
+        waiting_count = len(players)
+        if waiting_count > 0:
+            waiting_mentions = [p["mention"] for p in players]
 
-                # Add info about how many more players needed with clear visuals
-                more_needed = 6 - waiting_count
+            # Add info about how many more players needed with clear visuals
+            more_needed = 6 - waiting_count
+
+            if more_needed > 0:
+                # Queue is still filling up
                 progress_bar = "▰" * waiting_count + "▱" * more_needed
 
                 embed.add_field(
-                    name=f"Queue #{queue_num} - Waiting for Players",
+                    name=f"Queue #{queue_num}",
                     value=f"{progress_bar} **{waiting_count}/6** players\n"
                           f"**{more_needed}** more player(s) needed\n"
                           f"**Players:** {', '.join(waiting_mentions)}",
                     inline=False
                 )
-            elif waiting_count >= 6:
-                waiting_mentions = [p["mention"] for p in players]
+            else:
+                # Queue is full
                 embed.add_field(
                     name=f"Queue #{queue_num} - FULL! ✅",
-                    value=f"**Players:** {', '.join(waiting_mentions)}\n"
+                    value=f"**6/6** players\n"
+                          f"**Players:** {', '.join(waiting_mentions)}\n"
                           f"Queue is full and ready for team selection!",
                     inline=False
                 )
-
-    # Add active matches
-    if active_matches:
-        for match in active_matches:
-            match_status = match["status"].upper()
-
-            # Get players from team1 and team2 instead of 'players' field
-            team1_players = match.get("team1", [])
-            team2_players = match.get("team2", [])
-
-            # Combine teams for display
-            team1_mentions = [p.get("mention", p.get("name", "Unknown")) for p in team1_players]
-            team2_mentions = [p.get("mention", p.get("name", "Unknown")) for p in team2_players]
-
-            queue_num = match.get("queue_num", 1)
-
-            match_field = f"**Team 1:** {', '.join(team1_mentions)}\n"
-            match_field += f"**Team 2:** {', '.join(team2_mentions)}"
-
-            embed.add_field(
-                name=f"Queue #{queue_num} - ACTIVE MATCH ({match_status})",
-                value=match_field,
-                inline=False
-            )
 
     # Add a footer with join instructions
     embed.set_footer(text="Use /queue to join the queue • Use /leave to leave the queue")
@@ -1937,9 +1910,10 @@ async def forcestop_slash(interaction: discord.Interaction):
 
     # Check if user has admin permissions
     if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True
-                                                )
+        await interaction.response.send_message(
+            "You need administrator permissions to use this command.",
+            ephemeral=True
+        )
         return
 
     channel_id = str(interaction.channel.id)
@@ -1956,7 +1930,7 @@ async def forcestop_slash(interaction: discord.Interaction):
     # Cancel any active selections
     selection_active = captains_system.is_selection_active(channel_id)
     if selection_active:
-        captains_system.cancel_selection()
+        captains_system.cancel_selection(channel_id)
 
     # Find any active matches in this channel
     active_matches = list(match_system.matches.find({
@@ -1968,15 +1942,29 @@ async def forcestop_slash(interaction: discord.Interaction):
     for match in active_matches:
         match_id = match["match_id"]
 
+        # Get all player IDs from this match (from both teams)
+        match_players = []
+        if "team1" in match:
+            match_players.extend([p["id"] for p in match["team1"]])
+        if "team2" in match:
+            match_players.extend([p["id"] for p in match["team2"]])
+
+        # Remove these players from players_in_match set
+        for player_id in match_players:
+            if player_id in queue_handler.players_in_match:
+                queue_handler.players_in_match.remove(player_id)
+
         # Update match status
         match_system.matches.update_one(
             {"match_id": match_id},
             {"$set": {"status": "cancelled"}}
         )
 
-        # Release players
-        if queue_handler:
-            queue_handler.mark_match_completed(match_id)
+    # Also directly clear players_in_match for any players in active queues
+    for player in all_players:
+        player_id = player["id"]
+        if player_id in queue_handler.players_in_match:
+            queue_handler.players_in_match.remove(player_id)
 
     # Clear the queue for this channel
     queue_handler.queue_collection.delete_many({"channel_id": channel_id})
