@@ -400,7 +400,7 @@ async def status_slash(interaction: discord.Interaction):
 
     channel_id = str(interaction.channel.id)
 
-    # Create embed
+    # Create an improved status embed
     embed = discord.Embed(
         title="Queue Status",
         color=0x3498db
@@ -427,17 +427,36 @@ async def status_slash(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed)
         return
 
-    field_count = 0
-    MAX_FIELDS = 25  # Discord limit
+    # Add waiting queues first to emphasize the pre-6 player queue
+    if all_queues:
+        for queue_num, players in sorted(all_queues.items()):
+            waiting_count = len(players)
+            if waiting_count > 0 and waiting_count < 6:
+                waiting_mentions = [p["mention"] for p in players]
 
-    # Add active matches first (limit to a few if many exist)
+                # Add info about how many more players needed with clear visuals
+                more_needed = 6 - waiting_count
+                progress_bar = "▰" * waiting_count + "▱" * more_needed
+
+                embed.add_field(
+                    name=f"Queue #{queue_num} - Waiting for Players",
+                    value=f"{progress_bar} **{waiting_count}/6** players\n"
+                          f"**{more_needed}** more player(s) needed\n"
+                          f"**Players:** {', '.join(waiting_mentions)}",
+                    inline=False
+                )
+            elif waiting_count >= 6:
+                waiting_mentions = [p["mention"] for p in players]
+                embed.add_field(
+                    name=f"Queue #{queue_num} - FULL! ✅",
+                    value=f"**Players:** {', '.join(waiting_mentions)}\n"
+                          f"Queue is full and ready for team selection!",
+                    inline=False
+                )
+
+    # Add active matches
     if active_matches:
-        active_match_count = min(len(active_matches), 5)  # Limit to 5 active matches if more exist
-        for i in range(active_match_count):
-            if field_count >= MAX_FIELDS:
-                break
-
-            match = active_matches[i]
+        for match in active_matches:
             match_status = match["status"].upper()
 
             # Get players from team1 and team2 instead of 'players' field
@@ -445,65 +464,22 @@ async def status_slash(interaction: discord.Interaction):
             team2_players = match.get("team2", [])
 
             # Combine teams for display
-            all_players = team1_players + team2_players
-            player_mentions = [p.get("mention", p.get("name", "Unknown")) for p in all_players]
+            team1_mentions = [p.get("mention", p.get("name", "Unknown")) for p in team1_players]
+            team2_mentions = [p.get("mention", p.get("name", "Unknown")) for p in team2_players]
 
             queue_num = match.get("queue_num", 1)
 
+            match_field = f"**Team 1:** {', '.join(team1_mentions)}\n"
+            match_field += f"**Team 2:** {', '.join(team2_mentions)}"
+
             embed.add_field(
                 name=f"Queue #{queue_num} - ACTIVE MATCH ({match_status})",
-                value=", ".join(player_mentions) if player_mentions else "No players found",
+                value=match_field,
                 inline=False
             )
-            field_count += 1
 
-        # If we limited the active matches, add a note
-        if len(active_matches) > active_match_count and field_count < MAX_FIELDS:
-            embed.add_field(
-                name="Note",
-                value=f"Showing {active_match_count} of {len(active_matches)} active matches",
-                inline=False
-            )
-            field_count += 1
-
-    # Add waiting queues (limited based on remaining fields)
-    if all_queues:
-        # Sort queues by number
-        sorted_queues = sorted(all_queues.items())
-
-        remaining_fields = MAX_FIELDS - field_count
-        queue_count = min(len(sorted_queues), remaining_fields)
-
-        for i in range(queue_count):
-            queue_num, players = sorted_queues[i]
-            waiting_count = len(players)
-
-            if waiting_count > 0:
-                waiting_mentions = [p.get("mention", p.get("name", "Unknown")) for p in players]
-
-                # Add info about how many more players needed
-                more_needed = 6 - waiting_count
-                if more_needed > 0:
-                    status_text = f"Waiting Queue: {waiting_count}/6 players\n{more_needed} more player(s) needed"
-                else:
-                    status_text = "**Queue is FULL!** Ready to start match."
-
-                value_text = f"{status_text}\nPlayers: {', '.join(waiting_mentions)}"
-
-                embed.add_field(
-                    name=f"Queue #{queue_num}",
-                    value=value_text,
-                    inline=False
-                )
-                field_count += 1
-
-        # If we limited the queues, add a note
-        if len(sorted_queues) > queue_count and field_count < MAX_FIELDS:
-            embed.add_field(
-                name="Additional Queues",
-                value=f"There are {len(sorted_queues) - queue_count} more queues not shown",
-                inline=False
-            )
+    # Add a footer with join instructions
+    embed.set_footer(text="Use /queue to join the queue • Use /leave to leave the queue")
 
     await interaction.response.send_message(embed=embed)
 
