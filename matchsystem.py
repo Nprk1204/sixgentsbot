@@ -12,6 +12,7 @@ class MatchSystem:
         self.players = db.get_collection('players')
         self.active_matches = {}  # Store active matches in memory
         self.bot = None
+        self.queue = None
 
         # Simplified - keep just the three tier-based MMR values
         self.TIER_MMR = {
@@ -336,6 +337,14 @@ class MatchSystem:
                 },
                 {"$set": {"status": "cancelled"}}
             )
+
+            # IMPORTANT FIX: Also remove players from queue collection
+            if hasattr(self, 'queue') and self.queue and hasattr(self.queue, 'queue_collection'):
+                try:
+                    result = self.queue.queue_collection.delete_many({"id": player_id})
+                    print(f"Removed player {player_id} from queue: {result.deleted_count} entries deleted")
+                except Exception as e:
+                    print(f"Error removing player {player_id} from queue: {e}")
 
         # Calculate team average MMRs
         team1_mmrs = []
@@ -892,17 +901,33 @@ class MatchSystem:
         )
 
         # IMPROVED: Explicitly remove all players from the queue
+        # First method - using queue collection directly (if queue handler not set)
         if hasattr(self, 'queue') and hasattr(self.queue, 'queue_collection'):
             try:
                 # Remove all players from the queue for all teams
                 for player in winning_team + losing_team:
                     player_id = player.get("id", "")
                     if player_id and not player_id.startswith('9000'):
-                        self.queue.queue_collection.delete_many({"id": player_id})
+                        result = self.queue.queue_collection.delete_many({"id": player_id})
+                        print(f"Removed player {player_id} from queue: {result.deleted_count} entries deleted")
 
                 print(f"Successfully removed all players from the queue after match {match_id} completion")
             except Exception as e:
                 print(f"Error clearing queue after match completion: {e}")
+        else:
+            print("WARNING: Cannot clear queue - no queue handler reference available")
+            # Try to obtain queue handler from external references if available
+            if hasattr(self, 'bot') and hasattr(self.bot, 'queue_handler'):
+                print("Found queue handler via bot reference, using it to clear players")
+                try:
+                    for player in winning_team + losing_team:
+                        player_id = player.get("id", "")
+                        if player_id and not player_id.startswith('9000'):
+                            result = self.bot.queue_handler.queue_collection.delete_many({"id": player_id})
+                            print(
+                                f"Alternative removal: player {player_id} from queue: {result.deleted_count} entries deleted")
+                except Exception as e:
+                    print(f"Error in alternative queue clearing: {e}")
 
         # Clear any other active matches for this player
         await self.clear_player_active_matches(reporter_id)
@@ -952,31 +977,31 @@ class MatchSystem:
         # ADDED: Make sure to check and cancel any active votes or selections related to the match
         if hasattr(self, 'bot') and self.bot:
             # Check if vote_system and captains_system exist directly on the bot object
-                if hasattr(self.bot, 'vote_system') and self.bot.vote_system:
-                    self.bot.vote_system.cancel_voting(channel_id=channel_id)
+            if hasattr(self.bot, 'vote_system') and self.bot.vote_system:
+                self.bot.vote_system.cancel_voting(channel_id=channel_id)
 
-                if hasattr(self.bot, 'captains_system') and self.bot.captains_system:
-                    self.bot.captains_system.cancel_selection(channel_id=channel_id)
+            if hasattr(self.bot, 'captains_system') and self.bot.captains_system:
+                self.bot.captains_system.cancel_selection(channel_id=channel_id)
 
-                # Also check for guild-level vote/captain coordinators
-                for guild in self.bot.guilds:
-                    for channel in guild.channels:
-                        if str(channel.id) == channel_id:
-                            try:
-                                # Find and use the vote system coordinator
-                                if hasattr(self.bot, 'vote_system_coordinator'):
-                                    self.bot.vote_system_coordinator.cancel_voting(channel_id=channel_id)
-                                    print(
-                                        f"Cancelled votes via coordinator in channel {channel_id} after match completion")
+            # Also check for guild-level vote/captain coordinators
+            for guild in self.bot.guilds:
+                for channel in guild.channels:
+                    if str(channel.id) == channel_id:
+                        try:
+                            # Find and use the vote system coordinator
+                            if hasattr(self.bot, 'vote_system_coordinator'):
+                                self.bot.vote_system_coordinator.cancel_voting(channel_id=channel_id)
+                                print(
+                                    f"Cancelled votes via coordinator in channel {channel_id} after match completion")
 
-                                # Find and use the captains system coordinator
-                                if hasattr(self.bot, 'captains_system_coordinator'):
-                                    self.bot.captains_system_coordinator.cancel_selection(channel_id=channel_id)
-                                    print(
-                                        f"Cancelled selections via coordinator in channel {channel_id} after match completion")
-                            except Exception as e:
-                                print(f"Error clearing votes/selections via coordinators: {e}")
-                            break
+                            # Find and use the captains system coordinator
+                            if hasattr(self.bot, 'captains_system_coordinator'):
+                                self.bot.captains_system_coordinator.cancel_selection(channel_id=channel_id)
+                                print(
+                                    f"Cancelled selections via coordinator in channel {channel_id} after match completion")
+                        except Exception as e:
+                            print(f"Error clearing votes/selections via coordinators: {e}")
+                        break
 
         # Remove from active matches
         if match["match_id"] in self.active_matches:
@@ -1065,6 +1090,50 @@ class MatchSystem:
                     print(f"  DELETED problematic match with _id={act_id}")
             else:
                 print(f"SUCCESS: Player {player_id} has no remaining active matches")
+
+        # FINAL QUEUE CHECK: Ensure all players are removed from the queue
+        print("===== FINAL QUEUE CLEANUP =====")
+        queue_cleanup_success = True
+
+        # Method 1: Check players if we have queue reference
+        if hasattr(self, 'queue') and hasattr(self.queue, 'queue_collection'):
+            for player_id in all_player_ids:
+                # Skip dummy players
+                if player_id.startswith('9000'):
+                    continue
+
+                # Check if player is still in queue
+                queue_entries = list(self.queue.queue_collection.find({"id": player_id}))
+                if queue_entries:
+                    print(f"WARNING: Player {player_id} still has {len(queue_entries)} queue entries after cleanup")
+                    # Force remove them
+                    delete_result = self.queue.queue_collection.delete_many({"id": player_id})
+                    print(f"Deleted {delete_result.deleted_count} remaining queue entries")
+                    queue_cleanup_success = False
+
+        # Alternative method: Try to get queue handler from bot
+        elif hasattr(self, 'bot') and hasattr(self.bot, 'queue_handler'):
+            queue_handler = self.bot.queue_handler
+            if hasattr(queue_handler, 'queue_collection'):
+                for player_id in all_player_ids:
+                    # Skip dummy players
+                    if player_id.startswith('9000'):
+                        continue
+
+                    # Check if player is still in queue
+                    queue_entries = list(queue_handler.queue_collection.find({"id": player_id}))
+                    if queue_entries:
+                        print(f"WARNING: Player {player_id} still has {len(queue_entries)} queue entries after cleanup")
+                        # Force remove them
+                        delete_result = queue_handler.queue_collection.delete_many({"id": player_id})
+                        print(f"Deleted {delete_result.deleted_count} remaining queue entries")
+                        queue_cleanup_success = False
+        else:
+            print("WARNING: Cannot perform final queue check - no queue handler reference available")
+
+        # Final success status
+        if queue_cleanup_success:
+            print("SUCCESS: All players confirmed removed from queue")
 
         print("===== FINAL CLEANUP COMPLETE =====")
 
