@@ -2306,6 +2306,120 @@ async def sub_slash(interaction: discord.Interaction, action: str, player1: disc
                 # Send the response
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
+
+@bot.tree.command(name="debug", description="Admin-only command to check the state of matches and queues")
+@app_commands.default_permissions(administrator=True)
+async def debug_slash(interaction: discord.Interaction):
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    # Defer the response to give us time to gather data
+    await interaction.response.defer(ephemeral=True)
+
+    channel_id = str(interaction.channel.id)
+
+    # Get active matches in this channel
+    active_matches = list(match_system.matches.find({
+        "channel_id": channel_id,
+        "status": {"$ne": "completed"}
+    }))
+
+    # Get players in queue for this channel
+    queued_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
+
+    # Build a detailed summary
+    embed = discord.Embed(
+        title="🔧 Debug Information",
+        description=f"Current state of matches and queues in this channel",
+        color=0x3498db
+    )
+
+    # Add active matches info
+    if active_matches:
+        match_info = []
+        for match in active_matches:
+            match_id = match.get("match_id", "Unknown")
+            status = match.get("status", "Unknown")
+            team1_count = len(match.get("team1", [])) if "team1" in match else 0
+            team2_count = len(match.get("team2", [])) if "team2" in match else 0
+            players_count = len(match.get("players", [])) if "players" in match else 0
+
+            match_info.append(
+                f"ID: `{match_id}` | Status: `{status}` | Teams: {team1_count}+{team2_count} | Players: {players_count}")
+
+        embed.add_field(
+            name=f"🎮 Active Matches ({len(active_matches)})",
+            value="\n".join(match_info) if match_info else "None",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="🎮 Active Matches",
+            value="No active matches found in this channel",
+            inline=False
+        )
+
+    # Add queue info
+    if queued_players:
+        # Group players by queue number
+        queues = {}
+        for player in queued_players:
+            queue_num = player.get("queue_num", 1)
+            if queue_num not in queues:
+                queues[queue_num] = []
+            queues[queue_num].append(player)
+
+        # Add each queue's info
+        for queue_num, players in sorted(queues.items()):
+            player_names = [p.get("name", "Unknown") for p in players]
+            embed.add_field(
+                name=f"📋 Queue #{queue_num} ({len(players)}/6)",
+                value=", ".join(player_names) if player_names else "Empty",
+                inline=False
+            )
+    else:
+        embed.add_field(
+            name="📋 Queues",
+            value="No players in any queue in this channel",
+            inline=False
+        )
+
+    # Add info about players_in_match set
+    embed.add_field(
+        name=f"👥 Players In Match Tracking ({len(queue_handler.players_in_match)})",
+        value=f"`{', '.join(list(queue_handler.players_in_match)[:20])}`" +
+              (f" and {len(queue_handler.players_in_match) - 20} more..." if len(
+                  queue_handler.players_in_match) > 20 else ""),
+        inline=False
+    )
+
+    # Add active system states
+    active_votes = vote_system.is_voting_active(channel_id)
+    active_selections = captains_system.is_selection_active(channel_id)
+
+    status_text = []
+    if active_votes:
+        status_text.append("✅ Active voting in progress")
+    else:
+        status_text.append("❌ No active voting")
+
+    if active_selections:
+        status_text.append("✅ Captain selection in progress")
+    else:
+        status_text.append("❌ No active captain selection")
+
+    embed.add_field(
+        name="⚙️ System Status",
+        value="\n".join(status_text),
+        inline=False
+    )
+
+    # Send the response
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
 async def swap_players(interaction, match, player1, player2):
         """Swap two players between teams"""
         player1_id = str(player1.id)
