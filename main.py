@@ -2032,59 +2032,131 @@ class ForceStartConfirmView(discord.ui.View):
         await button_interaction.response.send_message("Operation cancelled. The existing match will not be affected.", ephemeral=True)
         self.stop()
 
+
 @bot.tree.command(name="forcestop",
-                      description="Force stop any active votes or selections and clear the queue (Admin only)")
+                  description="Force stop any active votes or selections and clear the queue (Admin only)")
 async def forcestop_slash(interaction: discord.Interaction):
-        # Check if command is used in an allowed channel
-        if not is_command_channel(interaction.channel):
-            await interaction.response.send_message(
-                f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-                ephemeral=True
-            )
-            return
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
 
-        # Check if user has admin permissions
-        if not interaction.user.guild_permissions.administrator:
-            await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                    ephemeral=True)
-            return
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
 
-        # Get current players in queue
-        channel_id = str(interaction.channel.id)
-        players = queue_handler.get_players_for_match(channel_id)
-        count = len(players)
+    # Get current channel ID
+    channel_id = str(interaction.channel.id)
 
-        # Cancel any active votes
-        vote_active = vote_system.is_voting_active()
-        if vote_active:
-            vote_system.cancel_voting()
+    # Get count of players in the queue for this channel
+    queue_count = queue_handler.queue_collection.count_documents({"channel_id": channel_id})
 
-        # Cancel any active selections
-        selection_active = captains_system.is_selection_active()
-        if selection_active:
-            captains_system.cancel_selection()
+    # Find all active matches in this channel
+    active_matches = list(queue_handler.matches_collection.find({
+        "channel_id": channel_id,
+        "status": {"$in": ["voting", "selection", "in_progress"]}
+    }))
 
-        # Clear the queue collection
-        queue_handler.queue_collection.delete_many({})
+    # Track what was cancelled
+    votes_cancelled = 0
+    selections_cancelled = 0
+    matches_cancelled = 0
+    players_removed = 0
 
-        # Create a response message
-        embed = discord.Embed(
-            title="⚠️ Force Stop Executed",
-            color=0xff9900
+    # 1. Cancel any active votes in this channel by match ID
+    for match in active_matches:
+        match_id = match.get("match_id")
+        status = match.get("status")
+
+        if match_id:
+            if status == "voting" and vote_system.is_voting_active(match_id=match_id):
+                vote_system.cancel_voting(match_id=match_id)
+                votes_cancelled += 1
+                print(f"Cancelled voting for match {match_id}")
+
+            if status == "selection" and captains_system.is_selection_active(match_id=match_id):
+                captains_system.cancel_selection(match_id=match_id)
+                selections_cancelled += 1
+                print(f"Cancelled captain selection for match {match_id}")
+
+    # 2. Mark all active matches in this channel as cancelled in the database
+    update_result = queue_handler.matches_collection.update_many(
+        {
+            "channel_id": channel_id,
+            "status": {"$in": ["voting", "selection", "in_progress"]}
+        },
+        {"$set": {"status": "cancelled"}}
+    )
+
+    matches_cancelled = update_result.modified_count
+    print(f"Marked {matches_cancelled} matches as cancelled in channel {channel_id}")
+
+    # 3. Clear the queue for this channel
+    delete_result = queue_handler.queue_collection.delete_many({"channel_id": channel_id})
+    players_removed = delete_result.deleted_count
+    print(f"Removed {players_removed} players from queue in channel {channel_id}")
+
+    # 4. As a backup, also use the original methods to cancel votes and selections
+    if vote_system.is_voting_active(channel_id=channel_id):
+        vote_system.cancel_voting(channel_id=channel_id)
+        print(f"Backup: Cancelled votes in channel {channel_id}")
+
+    if captains_system.is_selection_active(channel_id=channel_id):
+        captains_system.cancel_selection(channel_id=channel_id)
+        print(f"Backup: Cancelled captain selection in channel {channel_id}")
+
+    # Create a detailed response
+    embed = discord.Embed(
+        title="⚠️ Force Stop Executed",
+        color=0xff9900,
+        description=f"All active votes, selections, and queues in this channel have been cleared."
+    )
+
+    # Add details about what was stopped
+    if votes_cancelled > 0:
+        embed.add_field(
+            name="Votes Cancelled",
+            value=f"{votes_cancelled} active vote(s) have been cancelled",
+            inline=False
         )
 
-        # Add appropriate fields based on what was stopped
-        if vote_active:
-            embed.add_field(name="Vote Canceled", value="Team selection voting has been canceled.", inline=False)
+    if selections_cancelled > 0:
+        embed.add_field(
+            name="Selections Cancelled",
+            value=f"{selections_cancelled} captain selection(s) have been cancelled",
+            inline=False
+        )
 
-        if selection_active:
-            embed.add_field(name="Team Selection Canceled", value="Captain selection process has been canceled.",
-                            inline=False)
+    if matches_cancelled > 0:
+        embed.add_field(
+            name="Matches Cancelled",
+            value=f"{matches_cancelled} active match(es) have been cancelled",
+            inline=False
+        )
 
-        embed.add_field(name="Queue Cleared", value=f"Removed {count} player(s) from the queue.", inline=False)
-        embed.set_footer(text=f"Executed by {interaction.user.display_name}")
+    if players_removed > 0:
+        embed.add_field(
+            name="Queue Cleared",
+            value=f"{players_removed} player(s) have been removed from the queue",
+            inline=False
+        )
 
-        await interaction.response.send_message(embed=embed)
+    if votes_cancelled == 0 and selections_cancelled == 0 and matches_cancelled == 0 and players_removed == 0:
+        embed.add_field(
+            name="No Changes",
+            value="No active votes, selections, or queued players were found in this channel.",
+            inline=False
+        )
+
+    embed.set_footer(text=f"Executed by {interaction.user.display_name}")
+
+    # Send the response
+    await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="sub", description="Substitute players in an active match")
 @app_commands.describe(
