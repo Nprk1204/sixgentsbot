@@ -76,11 +76,13 @@ class VoteSystem:
             return False
 
         match_id = active_match["match_id"]
+        print(f"Starting vote for match {match_id} in channel {channel_id}")
 
         # CRITICAL: Don't cancel existing votes for other matches in the same channel!
         # Only cancel a vote for THIS specific match if it already exists
         if match_id in self.active_votes:
             self.cancel_voting(match_id=match_id)
+            print(f"Cancelled existing vote for match {match_id}")
 
         # Get the match players
         players = active_match.get("players", [])
@@ -333,6 +335,7 @@ class VoteSystem:
                 print(f"Vote timeout handler: Vote is no longer active after lock for match {match_id}")
                 return
 
+            # Important: Pass the current match_id to finalize_vote to maintain consistency
             # Finalize vote regardless of vote count
             await self.finalize_vote(match_id, force=True)
 
@@ -389,7 +392,7 @@ class VoteSystem:
             if vote_state['captains_votes'] > vote_state['random_votes']:
                 # Update match status to "selection"
                 self.queue.matches_collection.update_one(
-                    {"_id": db_match["_id"]},
+                    {"match_id": match_id},  # Update by match_id, not by _id
                     {"$set": {"status": "selection"}}
                 )
 
@@ -399,7 +402,7 @@ class VoteSystem:
                 # Use the captains_system
                 if self.captains_system:
                     try:
-                        captains_result = self.captains_system.start_captains_selection(players, channel_id)
+                        captains_result = self.captains_system.start_captains_selection(players, channel_id, match_id)
                         if captains_result:
                             await channel.send(embed=captains_result)
                             # Add a small delay to ensure the embed is sent before starting selection
@@ -430,7 +433,7 @@ class VoteSystem:
             else:
                 # Random teams won - update match status to playing
                 self.queue.matches_collection.update_one(
-                    {"_id": db_match["_id"]},
+                    {"match_id": match_id},  # Update by match_id, not by _id
                     {"$set": {"status": "in_progress"}}
                 )
 
@@ -467,7 +470,8 @@ class VoteSystem:
         """Create balanced random teams instead of completely random"""
         # Check if this is a global match by examining the channel name
         is_global = channel.name.lower() == "global"
-        print(f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}, match_id: {match_id}")
+        print(
+            f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}, match_id: {match_id}")
 
         # Get MMR for each player (real or dummy)
         player_mmrs = []
@@ -565,29 +569,50 @@ class VoteSystem:
             # Log whether an update actually occurred
             print(f"Match update result: {match_update_result.modified_count} documents modified")
 
-            # If no documents were modified, the match may not exist
             if match_update_result.modified_count == 0:
-                print(f"WARNING: Match with ID {match_id} was not found or not updated. Creating a new match entry.")
-                self.match_system.create_match(
-                    match_id,  # Use the same ID that was passed in
+                print(f"WARNING: Match with ID {match_id} was not found or not updated.")
+                # Use the same ID when creating the match
+                match_id = self.match_system.create_match(
+                    match_id,  # Keep using the same ID
                     team1,
                     team2,
                     channel_id,
                     is_global
                 )
+            else:
+                print(f"Successfully updated match with ID: {match_id}")
         else:
-            # No match ID provided, create a new one
-            match_id = str(uuid.uuid4())[:8]
-            print(f"Creating new match with generated ID: {match_id}")
+            # No match ID provided, use one from any active match or generate a short one
+            active_match = self.queue.matches_collection.find_one({
+                "channel_id": channel_id,
+                "status": {"$in": ["voting", "selection"]}
+            })
 
-            # Create a new match entry
-            self.match_system.create_match(
-                match_id,
-                team1,
-                team2,
-                channel_id,
-                is_global
-            )
+            if active_match and "match_id" in active_match:
+                # Use the existing match ID
+                match_id = active_match["match_id"]
+                print(f"Using existing match ID: {match_id}")
+
+                # Update the match with new teams
+                self.match_system.matches.update_one(
+                    {"match_id": match_id},
+                    {"$set": {
+                        "team1": team1,
+                        "team2": team2,
+                        "status": "in_progress",
+                        "team1_avg_mmr": team1_avg_mmr,
+                        "team2_avg_mmr": team2_avg_mmr
+                    }}
+                )
+            else:
+                # Generate a shortened match ID only as a last resort
+                match_id = self.match_system.create_match(
+                    str(uuid.uuid4())[:6],  # Generate a short ID
+                    team1,
+                    team2,
+                    channel_id,
+                    is_global
+                )
 
         # Ensure the match status is explicitly set to "in_progress"
         self.match_system.matches.update_one(
@@ -600,7 +625,7 @@ class VoteSystem:
 
         # Create an embed for team announcement
         embed = discord.Embed(
-            title="Match Created! (Balanced Random Teams)",
+            title="Teams Assigned! (Balanced Random Teams)",
             color=0xe74c3c
         )
 
@@ -609,7 +634,7 @@ class VoteSystem:
         embed.add_field(name=f"Team 2 (Avg MMR: {team2_avg_mmr})", value=", ".join(team2_mentions), inline=False)
         embed.add_field(
             name="Report Results",
-            value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
+            value=f"Play your match and report the result using `/report {match_id} win` or `/report {match_id} loss`",
             inline=False
         )
 

@@ -25,11 +25,31 @@ class MatchSystem:
         self.bot = bot
 
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
-        """Create a new match entry"""
-        # Generate a shorter match ID that's easier for users to type
-        short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
+        """
+        Create a new match entry or update an existing one
 
-        print(f"Creating match with ID: {short_id}, channel: {channel_id}, is_global: {is_global}")
+        Args:
+            match_id: The ID to use for this match. Either an existing ID or a new one.
+            team1: List of player data for team 1
+            team2: List of player data for team 2
+            channel_id: The channel ID where the match is happening
+            is_global: Whether this is a global match
+
+        Returns:
+            The match ID used (might be the same as input or a new one if none provided)
+        """
+        # If a valid match_id is provided, use it - don't generate a new one
+        # This ensures consistent IDs throughout the queue, voting, and team creation process
+        if not match_id or match_id.lower() == "none":
+            # Only generate a new ID if none was provided
+            short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
+            print(f"No match ID provided. Creating match with new ID: {short_id}")
+        else:
+            # Use the provided match_id
+            short_id = match_id
+            print(f"Using provided match ID: {short_id}")
+
+        print(f"Creating/updating match with ID: {short_id}, channel: {channel_id}, is_global: {is_global}")
 
         # CRITICAL: Before creating a new match, find and cancel any active selection
         # with these players to prevent overlap issues
@@ -43,7 +63,8 @@ class MatchSystem:
                 self.matches.update_many(
                     {
                         "players.id": player_id,
-                        "status": {"$in": ["voting", "selection"]}
+                        "status": {"$in": ["voting", "selection"]},
+                        "match_id": {"$ne": short_id}  # Don't cancel the current match
                     },
                     {
                         "$set": {"status": "cancelled"}
@@ -69,29 +90,54 @@ class MatchSystem:
         else:
             print(f"Using provided is_global={is_global} without re-detection")
 
-        # Create match data with explicit in_progress status
-        match_data = {
-            "match_id": short_id,  # Use the shorter ID
+        # Check if the match already exists
+        existing_match = self.matches.find_one({"match_id": short_id})
+
+        if existing_match:
+            # Update the existing match with the new teams and status
+            print(f"Updating existing match with ID: {short_id}")
+            self.matches.update_one(
+                {"match_id": short_id},
+                {"$set": {
+                    "team1": team1,
+                    "team2": team2,
+                    "status": "in_progress",
+                    "winner": None,
+                    "score": {"team1": 0, "team2": 0},
+                    "is_global": is_global
+                }}
+            )
+        else:
+            # Create match data with explicit in_progress status
+            match_data = {
+                "match_id": short_id,
+                "team1": team1,
+                "team2": team2,
+                "status": "in_progress",  # CRITICAL: Ensure default status is "in_progress"
+                "winner": None,
+                "score": {"team1": 0, "team2": 0},
+                "channel_id": channel_id,
+                "created_at": datetime.datetime.utcnow(),
+                "completed_at": None,
+                "reported_by": None,
+                "is_global": is_global
+            }
+
+            # Store in database
+            self.matches.insert_one(match_data)
+
+        # Store in memory for quick access
+        self.active_matches[short_id] = {
+            "match_id": short_id,
             "team1": team1,
             "team2": team2,
-            "status": "in_progress",  # CRITICAL: Ensure default status is "in_progress"
-            "winner": None,
-            "score": {"team1": 0, "team2": 0},
+            "status": "in_progress",
             "channel_id": channel_id,
-            "created_at": datetime.datetime.utcnow(),
-            "completed_at": None,
-            "reported_by": None,
             "is_global": is_global
         }
 
-        # Store in database
-        self.matches.insert_one(match_data)
-
-        # Store in memory for quick access
-        self.active_matches[short_id] = match_data
-
         # Debug print to confirm match creation
-        print(f"Created match with ID: {short_id}, status: {match_data['status']}, is_global: {is_global}")
+        print(f"Created/updated match with ID: {short_id}, status: in_progress, is_global: {is_global}")
 
         return short_id
 

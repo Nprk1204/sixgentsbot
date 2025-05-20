@@ -14,8 +14,8 @@ class CaptainsSystem:
         self.bot = None
         self.db = db
 
-        # Track active selections by channel
-        self.active_selections = {}  # Map of channel_id to selection state
+        # Track active selections by channel or match_id
+        self.active_selections = {}  # Map of channel_id/match_id to selection state
 
     def set_match_system(self, match_system):
         """Set the match system reference"""
@@ -25,20 +25,47 @@ class CaptainsSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def is_selection_active(self, channel_id=None):
-        """Check if captain selection is active in a specific channel or any channel"""
-        if channel_id:
+    def is_selection_active(self, channel_id=None, match_id=None):
+        """
+        Check if captain selection is active
+
+        Args:
+            channel_id: Check for active selection in this channel
+            match_id: Check for active selection with this match ID
+
+        Returns:
+            bool: Whether selection is active
+        """
+        if match_id:
+            # Check if this match ID is in active selections
+            return match_id in self.active_selections
+        elif channel_id:
+            # Check if this channel ID is in active selections
             return str(channel_id) in self.active_selections
         else:
+            # Check if any selections are active
             return len(self.active_selections) > 0
 
-    def cancel_selection(self, channel_id=None):
-        """Cancel the current selection process for a specific channel or all channels"""
-        if channel_id:
+    def cancel_selection(self, channel_id=None, match_id=None):
+        """
+        Cancel the current selection process
+
+        Args:
+            channel_id: Cancel selection in this specific channel
+            match_id: Cancel selection for this specific match
+        """
+        if match_id:
+            # Cancel selection for this match ID if it exists
+            if match_id in self.active_selections:
+                print(f"Canceling captain selection for match_id: {match_id}")
+                del self.active_selections[match_id]
+        elif channel_id:
+            # Cancel selection for this channel ID if it exists
             if str(channel_id) in self.active_selections:
                 print(f"Canceling captain selection for channel_id: {channel_id}")
                 del self.active_selections[str(channel_id)]
         else:
+            # Cancel all selections
             print("Canceling all captain selections")
             self.active_selections.clear()
 
@@ -65,8 +92,11 @@ class CaptainsSystem:
         captain2 = players[1]
         remaining_players = players[2:]
 
+        # Determine key for storing active selection
+        selection_key = match_id if match_id else channel_id
+
         # Initialize selection state for this match
-        self.active_selections[match_id if match_id else channel_id] = {
+        self.active_selections[selection_key] = {
             'captain1': captain1,
             'captain2': captain2,
             'remaining_players': remaining_players,
@@ -74,6 +104,7 @@ class CaptainsSystem:
             'captain2_team': [captain2],
             'match_players': players,
             'match_id': match_id,  # Store the match ID
+            'channel_id': channel_id,  # Also store channel ID for cross-referencing
             'announcement_channel': None
         }
 
@@ -82,7 +113,7 @@ class CaptainsSystem:
 
         # Create an embed instead of plain text
         embed = discord.Embed(
-            title=f"Match Setup: Captains Mode! - Match {match_id}",
+            title=f"Match Setup: Captains Mode - Match {match_id}",
             color=0xf1c40f  # Warm yellow color
         )
 
@@ -94,6 +125,7 @@ class CaptainsSystem:
         return embed
 
     async def execute_captain_selection(self, channel):
+        """Execute captain selection for a specific channel"""
         channel_id = str(channel.id)
         is_global = channel.name.lower() == "global"
 
@@ -107,11 +139,34 @@ class CaptainsSystem:
         # Get the selection state for this channel
         selection_state = self.active_selections[channel_id]
 
-        # NEW: Verify active match exists and still in selection state
-        active_match = self.match_system.matches.find_one({
-            "channel_id": channel_id,
-            "status": "selection"
-        })
+        # Get the match_id from the selection state if it exists
+        match_id = selection_state.get('match_id')
+        print(f"Selection state has match_id: {match_id}")
+
+        # Look up the active match in the database - first try by match_id if available
+        active_match = None
+        if match_id:
+            active_match = self.match_system.matches.find_one({
+                "match_id": match_id,
+                "status": "selection"
+            })
+            print(f"Looking up match by match_id {match_id}: {'Found' if active_match else 'Not found'}")
+
+        # If not found by match_id, fall back to channel_id
+        if not active_match:
+            active_match = self.match_system.matches.find_one({
+                "channel_id": channel_id,
+                "status": "selection"
+            })
+            print(f"Looking up match by channel_id {channel_id}: {'Found' if active_match else 'Not found'}")
+
+            # If found by channel_id but we have a different match_id in selection state,
+            # update our selection state to use the database match_id for consistency
+            if active_match and match_id and active_match.get('match_id') != match_id:
+                old_match_id = match_id
+                match_id = active_match.get('match_id')
+                print(f"WARNING: Mismatched match IDs. Database: {match_id}, Selection state: {old_match_id}")
+                selection_state['match_id'] = match_id
 
         if not active_match:
             print(f"No active match in selection state found for channel {channel_id}")
@@ -122,6 +177,12 @@ class CaptainsSystem:
 
         # Use player list from the active match for consistency
         selection_state['match_players'] = active_match.get("players", [])
+
+        # Make sure match_id is stored in selection state
+        if active_match and 'match_id' in active_match and not match_id:
+            match_id = active_match.get('match_id')
+            selection_state['match_id'] = match_id
+            print(f"Updated selection state with match_id {match_id} from database")
 
         # Set announcement channel
         selection_state['announcement_channel'] = channel
@@ -203,14 +264,25 @@ class CaptainsSystem:
                 captain1_team.append(last_player)
                 await channel.send(f"🔄 Last player {last_player['name']} automatically assigned to Team 1")
 
-            # Create the match
-            match_id = self.match_system.create_match(
-                str(uuid.uuid4()),
-                captain1_team,
-                captain2_team,
-                channel_id,
-                is_global=is_global
-            )
+            # Create or update the match using the match_id from selection_state
+            # This ensures we use the SAME match_id throughout the process
+            if match_id:
+                match_id = self.match_system.create_match(
+                    match_id,  # Use the existing match_id
+                    captain1_team,
+                    captain2_team,
+                    channel_id,
+                    is_global=is_global
+                )
+            else:
+                # No match_id available, create a new one (should rarely happen)
+                match_id = self.match_system.create_match(
+                    str(uuid.uuid4())[:6],  # Generate a short ID
+                    captain1_team,
+                    captain2_team,
+                    channel_id,
+                    is_global=is_global
+                )
 
             # Ensure the match status is explicitly set to "in_progress"
             self.match_system.matches.update_one(
