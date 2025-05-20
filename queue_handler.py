@@ -153,6 +153,75 @@ class QueueHandler:
         # Return message
         return f"Queue #{current_queue_num} is now full with players: {', '.join(player_mentions)}\n\nStarting team selection vote... Other players can now join Queue #{current_queue_num + 1}!"
 
+    def mark_match_completed(self, match_id):
+        """Mark a match as completed and release players"""
+        print(f"[MATCH CLEANUP] Starting cleanup for match {match_id}")
+
+        # First get the match document to access all player IDs
+        match = self.matches_collection.find_one({"match_id": match_id})
+
+        if not match:
+            print(f"[MATCH CLEANUP] Warning: Match {match_id} not found in database.")
+            return False
+
+        # Get all player IDs from the match (check all possible locations)
+        player_ids = set()
+
+        # Check team1 and team2 arrays
+        if "team1" in match and isinstance(match["team1"], list):
+            for player in match["team1"]:
+                if "id" in player:
+                    player_ids.add(player["id"])
+
+        if "team2" in match and isinstance(match["team2"], list):
+            for player in match["team2"]:
+                if "id" in player:
+                    player_ids.add(player["id"])
+
+        # Also check the players array if it exists
+        if "players" in match and isinstance(match["players"], list):
+            for player in match["players"]:
+                if "id" in player:
+                    player_ids.add(player["id"])
+
+        # Log current state before cleanup
+        print(f"[MATCH CLEANUP] Found {len(player_ids)} players to clean up: {player_ids}")
+        print(f"[MATCH CLEANUP] Current players_in_match set (before): {self.players_in_match}")
+
+        # Remove players from players_in_match set
+        players_removed = 0
+        for player_id in player_ids:
+            if player_id in self.players_in_match:
+                self.players_in_match.remove(player_id)
+                players_removed += 1
+
+        print(f"[MATCH CLEANUP] Removed {players_removed} players from tracking")
+        print(f"[MATCH CLEANUP] Players_in_match set (after): {self.players_in_match}")
+
+        # Update match status
+        update_result = self.matches_collection.update_one(
+            {"match_id": match_id},
+            {"$set": {
+                "status": "completed",
+                "completed_at": datetime.datetime.utcnow()
+            }}
+        )
+
+        print(f"[MATCH CLEANUP] Updated match status, modified: {update_result.modified_count}")
+
+        # Update the queue in active_queues if it exists
+        channel_id = match.get("channel_id")
+        queue_num = match.get("queue_num", 1)
+
+        if channel_id in self.active_queues:
+            for i, queue in enumerate(self.active_queues[channel_id]):
+                if queue.get("queue_num") == queue_num:
+                    self.active_queues[channel_id][i]["status"] = "completed"
+                    print(f"[MATCH CLEANUP] Updated queue {queue_num} status to completed")
+                    break
+
+        return True
+
     def remove_player(self, player, channel_id):
         """Remove a player from a queue"""
         player_id = str(player.id)

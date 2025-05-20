@@ -1918,60 +1918,118 @@ async def forcestop_slash(interaction: discord.Interaction):
 
     channel_id = str(interaction.channel.id)
 
-    # Count all players in all queues for this channel
-    all_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
-    count = len(all_players)
+    # IMPROVED DEBUGGING: Log the state before cleanup
+    print(f"[FORCESTOP] Starting forcestop cleanup for channel {channel_id}")
+    print(
+        f"[FORCESTOP] Active matches before cleanup: {list(match_system.matches.find({'channel_id': channel_id, 'status': {'$ne': 'completed'}}))}")
+    print(f"[FORCESTOP] Players in active matches set: {queue_handler.players_in_match}")
 
-    # Cancel any active votes
-    vote_active = vote_system.is_voting_active(channel_id)
-    if vote_active:
-        vote_system.cancel_voting(channel_id)
+    # Get all players in queues for this channel
+    all_queued_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
+    queued_count = len(all_queued_players)
 
-    # Cancel any active selections
-    selection_active = captains_system.is_selection_active(channel_id)
-    if selection_active:
-        captains_system.cancel_selection(channel_id)
-
-    # Find any active matches in this channel
+    # Find all active matches in this channel (in progress, voting, or selection)
     active_matches = list(match_system.matches.find({
         "channel_id": channel_id,
         "status": {"$ne": "completed"}
     }))
 
-    # Release all players from active matches
+    print(f"[FORCESTOP] Found {len(active_matches)} active matches to cancel")
+
+    match_player_ids = set()  # Collect all player IDs from active matches
+
+    # First pass: Mark all matches as cancelled in the database
     for match in active_matches:
         match_id = match["match_id"]
 
-        # Get all player IDs from this match (from both teams)
-        match_players = []
-        if "team1" in match:
-            match_players.extend([p["id"] for p in match["team1"]])
-        if "team2" in match:
-            match_players.extend([p["id"] for p in match["team2"]])
+        # Explicitly gather ALL player IDs from the match
+        if "team1" in match and isinstance(match["team1"], list):
+            for player in match["team1"]:
+                if "id" in player:
+                    match_player_ids.add(player["id"])
 
-        # Remove these players from players_in_match set
-        for player_id in match_players:
-            if player_id in queue_handler.players_in_match:
-                queue_handler.players_in_match.remove(player_id)
+        if "team2" in match and isinstance(match["team2"], list):
+            for player in match["team2"]:
+                if "id" in player:
+                    match_player_ids.add(player["id"])
 
-        # Update match status
-        match_system.matches.update_one(
+        # Also check the players array if it exists
+        if "players" in match and isinstance(match["players"], list):
+            for player in match["players"]:
+                if "id" in player:
+                    match_player_ids.add(player["id"])
+
+        # Update match status in database to cancelled
+        update_result = match_system.matches.update_one(
             {"match_id": match_id},
-            {"$set": {"status": "cancelled"}}
+            {"$set": {
+                "status": "cancelled",
+                "cancelled_at": datetime.datetime.utcnow(),
+                "cancelled_by": str(interaction.user.id)
+            }}
         )
 
-    # Also directly clear players_in_match for any players in active queues
-    for player in all_players:
-        player_id = player["id"]
+        print(
+            f"[FORCESTOP] Cancelled match {match_id}, update result: {update_result.modified_count} documents modified")
+
+        # Also clear from match_system's active_matches if it exists there
+        if hasattr(match_system, 'active_matches') and match_id in match_system.active_matches:
+            del match_system.active_matches[match_id]
+            print(f"[FORCESTOP] Removed match {match_id} from match_system.active_matches")
+
+    # Second pass: Clean up the queue and player tracking
+    # Clear players from the players_in_match set
+    before_count = len(queue_handler.players_in_match)
+
+    # Clean up the players_in_match set - both from matches and queues
+    all_players_to_remove = match_player_ids.copy()
+    for player in all_queued_players:
+        if "id" in player:
+            all_players_to_remove.add(player["id"])
+
+    # Remove all these players from the in-memory tracking
+    removed_count = 0
+    for player_id in all_players_to_remove:
         if player_id in queue_handler.players_in_match:
             queue_handler.players_in_match.remove(player_id)
+            removed_count += 1
+
+    print(
+        f"[FORCESTOP] Removed {removed_count} players from players_in_match set (before: {before_count}, after: {len(queue_handler.players_in_match)})")
+
+    # Cancel any active votes
+    vote_active = vote_system.is_voting_active(channel_id)
+    if vote_active:
+        vote_system.cancel_voting(channel_id)
+        print(f"[FORCESTOP] Cancelled active vote in channel {channel_id}")
+
+    # Cancel any active selections
+    selection_active = captains_system.is_selection_active(channel_id)
+    if selection_active:
+        captains_system.cancel_selection(channel_id)
+        print(f"[FORCESTOP] Cancelled active captain selection in channel {channel_id}")
 
     # Clear the queue for this channel
-    queue_handler.queue_collection.delete_many({"channel_id": channel_id})
+    queue_result = queue_handler.queue_collection.delete_many({"channel_id": channel_id})
+    print(f"[FORCESTOP] Cleared {queue_result.deleted_count} players from queue collection")
 
     # Reset the active_queues structure for this channel
     if channel_id in queue_handler.active_queues:
         queue_handler.active_queues[channel_id] = []
+        print(f"[FORCESTOP] Reset active_queues for channel {channel_id}")
+
+    # Clear active_matches in the database that might not be properly marked
+    # This is a safety measure to ensure no lingering matches
+    active_matches_collection = queue_handler.matches_collection
+    active_match_result = active_matches_collection.update_many(
+        {"channel_id": channel_id, "status": {"$ne": "completed"}},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_at": datetime.datetime.utcnow(),
+            "cancelled_by": str(interaction.user.id)
+        }}
+    )
+    print(f"[FORCESTOP] Updated {active_match_result.modified_count} active matches in matches_collection")
 
     # Create a response message
     embed = discord.Embed(
@@ -1980,13 +2038,6 @@ async def forcestop_slash(interaction: discord.Interaction):
     )
 
     # Add appropriate fields based on what was stopped
-    if vote_active:
-        embed.add_field(name="Vote Canceled", value="Team selection voting has been canceled.", inline=False)
-
-    if selection_active:
-        embed.add_field(name="Team Selection Canceled", value="Captain selection process has been canceled.",
-                        inline=False)
-
     if active_matches:
         embed.add_field(
             name="Active Matches Canceled",
@@ -1994,9 +2045,44 @@ async def forcestop_slash(interaction: discord.Interaction):
             inline=False
         )
 
-    embed.add_field(name="Queue Cleared", value=f"Removed {count} player(s) from all queues in this channel.",
-                    inline=False)
+    if vote_active:
+        embed.add_field(
+            name="Vote Canceled",
+            value="Team selection voting has been canceled.",
+            inline=False
+        )
+
+    if selection_active:
+        embed.add_field(
+            name="Team Selection Canceled",
+            value="Captain selection process has been canceled.",
+            inline=False
+        )
+
+    embed.add_field(
+        name="Queue Cleared",
+        value=f"Removed {queued_count} player(s) from all queues in this channel.",
+        inline=False
+    )
+
     embed.set_footer(text=f"Executed by {interaction.user.display_name}")
+
+    # FINAL VERIFICATION: Check if any active matches remain
+    remaining_matches = list(match_system.matches.find({
+        "channel_id": channel_id,
+        "status": {"$ne": "completed"}
+    }))
+    if remaining_matches:
+        print(f"[FORCESTOP WARNING] {len(remaining_matches)} active matches still remain after cleanup!")
+        for match in remaining_matches:
+            print(f"Remaining match ID: {match.get('match_id')}, Status: {match.get('status')}")
+            # Try one more time to force-cancel these matches
+            match_system.matches.update_one(
+                {"_id": match["_id"]},
+                {"$set": {"status": "cancelled"}}
+            )
+    else:
+        print("[FORCESTOP] Verified no active matches remain - cleanup successful")
 
     await interaction.response.send_message(embed=embed)
 
@@ -2106,6 +2192,119 @@ async def sub_slash(interaction: discord.Interaction, action: str, player1: disc
 
         else:
             await interaction.response.send_message("Invalid action. Use 'swap' or 'in'.", ephemeral=True)
+
+            @bot.tree.command(name="debug", description="Admin-only command to check the state of matches and queues")
+            @app_commands.default_permissions(administrator=True)
+            async def debug_slash(interaction: discord.Interaction):
+                # Check if user has admin permissions
+                if not interaction.user.guild_permissions.administrator:
+                    await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                            ephemeral=True)
+                    return
+
+                # Defer the response to give us time to gather data
+                await interaction.response.defer(ephemeral=True)
+
+                channel_id = str(interaction.channel.id)
+
+                # Get active matches in this channel
+                active_matches = list(match_system.matches.find({
+                    "channel_id": channel_id,
+                    "status": {"$ne": "completed"}
+                }))
+
+                # Get players in queue for this channel
+                queued_players = list(queue_handler.queue_collection.find({"channel_id": channel_id}))
+
+                # Build a detailed summary
+                embed = discord.Embed(
+                    title="🔧 Debug Information",
+                    description=f"Current state of matches and queues in this channel",
+                    color=0x3498db
+                )
+
+                # Add active matches info
+                if active_matches:
+                    match_info = []
+                    for match in active_matches:
+                        match_id = match.get("match_id", "Unknown")
+                        status = match.get("status", "Unknown")
+                        team1_count = len(match.get("team1", [])) if "team1" in match else 0
+                        team2_count = len(match.get("team2", [])) if "team2" in match else 0
+                        players_count = len(match.get("players", [])) if "players" in match else 0
+
+                        match_info.append(
+                            f"ID: `{match_id}` | Status: `{status}` | Teams: {team1_count}+{team2_count} | Players: {players_count}")
+
+                    embed.add_field(
+                        name=f"🎮 Active Matches ({len(active_matches)})",
+                        value="\n".join(match_info) if match_info else "None",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="🎮 Active Matches",
+                        value="No active matches found in this channel",
+                        inline=False
+                    )
+
+                # Add queue info
+                if queued_players:
+                    # Group players by queue number
+                    queues = {}
+                    for player in queued_players:
+                        queue_num = player.get("queue_num", 1)
+                        if queue_num not in queues:
+                            queues[queue_num] = []
+                        queues[queue_num].append(player)
+
+                    # Add each queue's info
+                    for queue_num, players in sorted(queues.items()):
+                        player_names = [p.get("name", "Unknown") for p in players]
+                        embed.add_field(
+                            name=f"📋 Queue #{queue_num} ({len(players)}/6)",
+                            value=", ".join(player_names) if player_names else "Empty",
+                            inline=False
+                        )
+                else:
+                    embed.add_field(
+                        name="📋 Queues",
+                        value="No players in any queue in this channel",
+                        inline=False
+                    )
+
+                # Add info about players_in_match set
+                embed.add_field(
+                    name=f"👥 Players In Match Tracking ({len(queue_handler.players_in_match)})",
+                    value=f"`{', '.join(list(queue_handler.players_in_match)[:20])}`" +
+                          (f" and {len(queue_handler.players_in_match) - 20} more..." if len(
+                              queue_handler.players_in_match) > 20 else ""),
+                    inline=False
+                )
+
+                # Add active system states
+                active_votes = vote_system.is_voting_active(channel_id)
+                active_selections = captains_system.is_selection_active(channel_id)
+
+                status_text = []
+                if active_votes:
+                    status_text.append("✅ Active voting in progress")
+                else:
+                    status_text.append("❌ No active voting")
+
+                if active_selections:
+                    status_text.append("✅ Captain selection in progress")
+                else:
+                    status_text.append("❌ No active captain selection")
+
+                embed.add_field(
+                    name="⚙️ System Status",
+                    value="\n".join(status_text),
+                    inline=False
+                )
+
+                # Send the response
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
 async def swap_players(interaction, match, player1, player2):
         """Swap two players between teams"""
