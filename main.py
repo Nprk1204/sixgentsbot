@@ -374,23 +374,37 @@ async def status_slash(interaction: discord.Interaction):
     player = interaction.user
     player_id = str(player.id)
 
-    # Verify rank and role as before...
+    # Check if player has a rank entry in the ranks collection or has a role
     rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
+    # Get all rank roles
     rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
     rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
     rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
     has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
 
     if not (rank_record or has_rank_role):
-        # Player hasn't completed rank verification message as before...
+        # Player hasn't completed rank verification
+        embed = discord.Embed(
+            title="Rank Verification Required",
+            description="You need to verify your Rocket League rank before checking queue status.",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="How to Verify",
+            value="Visit the rank check page on the website to complete verification.",
+            inline=False
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
     channel_id = str(interaction.channel.id)
 
-    # Get data for queue status but limit fields to avoid Discord's 25 field limit
-    # We need to modify the get_queue_status method to be smarter about field counts
+    # Create embed
+    embed = discord.Embed(
+        title="Queue Status",
+        color=0x3498db
+    )
 
     # Get all queues in this channel grouped by queue_num
     all_queues = {}
@@ -406,12 +420,6 @@ async def status_slash(interaction: discord.Interaction):
         "channel_id": channel_id,
         "status": {"$ne": "completed"}
     }))
-
-    # Create embed
-    embed = discord.Embed(
-        title="Queue Status",
-        color=0x3498db
-    )
 
     # No queues or matches
     if not all_queues and not active_matches:
@@ -430,15 +438,21 @@ async def status_slash(interaction: discord.Interaction):
                 break
 
             match = active_matches[i]
-            match_players = match["players"]
             match_status = match["status"].upper()
-            queue_num = match.get("queue_num", 1)
 
-            player_mentions = [p["mention"] for p in match_players]
+            # Get players from team1 and team2 instead of 'players' field
+            team1_players = match.get("team1", [])
+            team2_players = match.get("team2", [])
+
+            # Combine teams for display
+            all_players = team1_players + team2_players
+            player_mentions = [p.get("mention", p.get("name", "Unknown")) for p in all_players]
+
+            queue_num = match.get("queue_num", 1)
 
             embed.add_field(
                 name=f"Queue #{queue_num} - ACTIVE MATCH ({match_status})",
-                value=", ".join(player_mentions),
+                value=", ".join(player_mentions) if player_mentions else "No players found",
                 inline=False
             )
             field_count += 1
@@ -465,7 +479,7 @@ async def status_slash(interaction: discord.Interaction):
             waiting_count = len(players)
 
             if waiting_count > 0:
-                waiting_mentions = [p["mention"] for p in players]
+                waiting_mentions = [p.get("mention", p.get("name", "Unknown")) for p in players]
 
                 # Add info about how many more players needed
                 more_needed = 6 - waiting_count
@@ -484,7 +498,7 @@ async def status_slash(interaction: discord.Interaction):
                 field_count += 1
 
         # If we limited the queues, add a note
-        if len(sorted_queues) > queue_count:
+        if len(sorted_queues) > queue_count and field_count < MAX_FIELDS:
             embed.add_field(
                 name="Additional Queues",
                 value=f"There are {len(sorted_queues) - queue_count} more queues not shown",
