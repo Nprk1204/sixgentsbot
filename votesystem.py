@@ -11,11 +11,11 @@ class VoteSystem:
         self.db = db
         self.queue = queue_handler
         self.match_system = match_system
-        self.captains_system = captains_system
+        self.captains_system = captains_system  # Add reference to captains_system
         self.bot = None
 
-        # Store voting state by match_id
-        self.active_votes = {}  # Map of match_id to voting state
+        # Store voting state by channel
+        self.active_votes = {}  # Map of channel_id to voting state
 
     def set_match_system(self, match_system):
         """Set the match system reference"""
@@ -29,35 +29,18 @@ class VoteSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def is_voting_active(self, channel_id=None, match_id=None):
-        """Check if voting is active by channel or match ID"""
-        if match_id:
-            return match_id in self.active_votes
-        elif channel_id:
-            # Look for any votes for this channel
-            channel_id_str = str(channel_id)
-            for vote_id, vote_state in self.active_votes.items():
-                if vote_state.get('channel_id') == channel_id_str:
-                    return True
-            return False
+    def is_voting_active(self, channel_id=None):
+        """Check if voting is active in a specific channel or any channel"""
+        if channel_id:
+            return str(channel_id) in self.active_votes
         else:
             return len(self.active_votes) > 0
 
-    def cancel_voting(self, channel_id=None, match_id=None):
-        """Cancel current voting by channel or match ID"""
-        if match_id:
-            if match_id in self.active_votes:
-                del self.active_votes[match_id]
-        elif channel_id:
-            # Find and remove all votes for this channel
-            channel_id_str = str(channel_id)
-            matches_to_remove = []
-            for vote_id, vote_state in self.active_votes.items():
-                if vote_state.get('channel_id') == channel_id_str:
-                    matches_to_remove.append(vote_id)
-
-            for match_id in matches_to_remove:
-                del self.active_votes[match_id]
+    def cancel_voting(self, channel_id=None):
+        """Cancel current voting in a specific channel or all channels"""
+        if channel_id:
+            if str(channel_id) in self.active_votes:
+                del self.active_votes[str(channel_id)]
         else:
             self.active_votes.clear()
 
@@ -65,66 +48,30 @@ class VoteSystem:
         """Start a vote for team selection using buttons in a specific channel"""
         channel_id = str(channel.id)
 
-        # Get the latest voting match for this channel
-        active_match = self.queue.matches_collection.find_one({
-            "channel_id": channel_id,
-            "status": "voting"
-        })
+        # Make sure any existing vote in this channel is canceled first
+        if channel_id in self.active_votes:
+            self.cancel_voting(channel_id)
 
-        if not active_match:
-            await channel.send("No active match found for voting!")
-            return False
-
-        # Ensure the match_id is 6 characters
-        match_id = active_match["match_id"]
-        if len(match_id) != 6:
-            # If it's a long UUID with dashes, fix it
-            if '-' in match_id:
-                new_match_id = str(uuid.uuid4().hex)[:6]  # Generate clean 6-character ID
-                print(f"Converting non-standard match ID {match_id} to standard format: {new_match_id}")
-                # Update the database with the new ID
-                self.queue.matches_collection.update_one(
-                    {"_id": active_match["_id"]},
-                    {"$set": {"match_id": new_match_id}}
-                )
-                match_id = new_match_id
-            # Otherwise just take the first 6 characters
-            else:
-                new_match_id = match_id[:6]
-                print(f"Shortening match ID {match_id} to standard format: {new_match_id}")
-                # Update the database with the shortened ID
-                self.queue.matches_collection.update_one(
-                    {"_id": active_match["_id"]},
-                    {"$set": {"match_id": new_match_id}}
-                )
-                match_id = new_match_id
-
-        print(f"Starting vote for match {match_id} in channel {channel_id}")
-
-        # CRITICAL: Don't cancel existing votes for other matches in the same channel!
-        # Only cancel a vote for THIS specific match if it already exists
-        if match_id in self.active_votes:
-            self.cancel_voting(match_id=match_id)
-            print(f"Cancelled existing vote for match {match_id}")
-
-        # Get the match players
-        players = active_match.get("players", [])
+        # Get the active match players from queue handler
+        players = self.queue.get_players_for_match(channel_id)
         if len(players) < 6:
             await channel.send("Not enough players to start voting!")
             return False
 
-        # Initialize voting state for this match
-        self.active_votes[match_id] = {
+        # Update match status to "voting"
+        if hasattr(self.queue, 'update_match_status'):
+            self.queue.update_match_status(channel_id, "voting")
+
+        # Initialize voting state for this channel
+        self.active_votes[channel_id] = {
             'message': None,
             'channel': channel,
-            'channel_id': channel_id,
-            'match_id': match_id,
             'voters': set(),
             'user_votes': {},
             'random_votes': 0,
             'captains_votes': 0,
-            'view': None,
-            'player_ids': [p['id'] for p in players]
+            'view': None,  # Store the View object
+            'player_ids': [p['id'] for p in players]  # Store original player IDs
         }
 
         # Get mentions of match players
@@ -132,7 +79,7 @@ class VoteSystem:
 
         # Create and send vote message with buttons
         embed = discord.Embed(
-            title=f"🗳️ Team Selection Vote - Match {match_id}",
+            title="🗳️ Team Selection Vote",
             description=(
                     "Vote for team selection method:\n\n"
                     "Match players: " + ", ".join(player_mentions) + "\n"
@@ -142,19 +89,9 @@ class VoteSystem:
         )
 
         # Create buttons
-        random_button = Button(
-            style=discord.ButtonStyle.primary,
-            custom_id=f"random_{match_id}",
-            label="Random Teams",
-            emoji="🎲"
-        )
-
-        captains_button = Button(
-            style=discord.ButtonStyle.primary,
-            custom_id=f"captains_{match_id}",
-            label="Captains Pick",
-            emoji="👑"
-        )
+        random_button = Button(style=discord.ButtonStyle.primary, custom_id="random", label="Random Teams", emoji="🎲")
+        captains_button = Button(style=discord.ButtonStyle.primary, custom_id="captains", label="Captains Pick",
+                                 emoji="👑")
 
         # Create View with 30 second timeout
         view = View(timeout=30)
@@ -163,58 +100,42 @@ class VoteSystem:
 
         # Set up button callbacks
         async def random_callback(interaction):
-            await self.handle_button_vote(interaction, "random", match_id)
+            await self.handle_button_vote(interaction, "random")
 
         async def captains_callback(interaction):
-            await self.handle_button_vote(interaction, "captains", match_id)
+            await self.handle_button_vote(interaction, "captains")
 
         random_button.callback = random_callback
         captains_button.callback = captains_callback
 
         # Send the vote message
         vote_message = await channel.send(embed=embed, view=view)
-        self.active_votes[match_id]['message'] = vote_message
-        self.active_votes[match_id]['view'] = view
+        self.active_votes[channel_id]['message'] = vote_message
+        self.active_votes[channel_id]['view'] = view
 
         # Start vote timeout
-        self.bot.loop.create_task(self.vote_timeout(match_id, 30))
+        self.bot.loop.create_task(self.vote_timeout(channel_id, 30))
 
         return True  # Vote started successfully
 
-    async def handle_button_vote(self, interaction, vote_type, match_id):
-        """Handle a button vote for a specific match"""
+    async def handle_button_vote(self, interaction, vote_type):
+        """Handle button presses for voting"""
+        # Get the channel_id from the interaction
         channel_id = str(interaction.channel.id)
         user_id = interaction.user.id
 
-        # Check if this is a vote message in the active votes
-        if match_id not in self.active_votes:
+        # Check if this is a vote message in any active votes
+        if channel_id not in self.active_votes:
             await interaction.response.send_message("This vote is no longer active.", ephemeral=True)
             return
 
-        vote_state = self.active_votes[match_id]
+        vote_state = self.active_votes[channel_id]
 
-        # CHANGE: Use match_id as primary lookup key instead of channel_id
-        active_match = self.queue.matches_collection.find_one({
-            "match_id": match_id,
-            "status": "voting"
-        })
-
-        if not active_match:
-            await interaction.response.send_message("This vote is no longer active.", ephemeral=True)
-            # Clean up the vote state
-            self.cancel_voting(match_id=match_id)
-            return
-
-        # Check if player is in this specific match
+        # Check if player is in the active match
         player_id = str(user_id)
-        player_in_match = False
 
-        for player in active_match.get("players", []):
-            if player.get("id") == player_id:
-                player_in_match = True
-                break
-
-        if not player_in_match:
+        # Check if this user is in the list of players for this vote
+        if player_id not in vote_state['player_ids']:
             await interaction.response.send_message("Only players in this match can vote!", ephemeral=True)
             return
 
@@ -252,23 +173,25 @@ class VoteSystem:
                                                     ephemeral=True)
 
         # Update vote message
-        await self.update_vote_message(match_id)
+        await self.update_vote_message(channel_id)
 
         # Check if all 6 players have voted
         if len(vote_state['voters']) >= 6:
-            await self.finalize_vote(match_id)
+            await self.finalize_vote(channel_id)
 
-    async def update_vote_message(self, match_id):
-        """Update the vote message with current counts"""
-        if match_id not in self.active_votes or self.active_votes[match_id]['message'] is None:
+    async def update_vote_message(self, channel_id):
+        """Update the vote message with current counts for specific channel"""
+        channel_id = str(channel_id)
+
+        if channel_id not in self.active_votes or self.active_votes[channel_id]['message'] is None:
             return
 
-        vote_state = self.active_votes[match_id]
+        vote_state = self.active_votes[channel_id]
         total_votes = len(vote_state['voters'])
         votes_needed = 6 - total_votes
 
         embed = discord.Embed(
-            title=f"🗳️ Team Selection Vote - Match {match_id}",
+            title="🗳️ Team Selection Vote",
             description=(
                 "Vote for team selection method:\n\n"
                 f"🎲 Random Teams: **{vote_state['random_votes']}** votes\n"
@@ -281,220 +204,91 @@ class VoteSystem:
 
         await vote_state['message'].edit(embed=embed)
 
-    async def vote_timeout(self, match_id, seconds):
-        """Handle vote timeout for a specific match"""
+    async def vote_timeout(self, channel_id, seconds):
+        """Handle vote timeout for a specific channel"""
+        channel_id = str(channel_id)
         await asyncio.sleep(seconds)
 
-        # Check if voting is still active for this match
-        if match_id not in self.active_votes:
-            print(f"Vote timeout handler: No active vote found for match {match_id}")
+        # Check if voting is still active for this channel
+        if channel_id not in self.active_votes:
             return  # Vote was already completed or canceled
 
-        print(f"Vote timeout triggered for match {match_id}")
-
-        vote_state = self.active_votes[match_id]
-        channel_id = vote_state.get('channel_id')
-
-        # Verify the match is still in voting status in the database
-        active_vote = None
-        try:
-            active_vote = self.queue.matches_collection.find_one({
-                "match_id": match_id,
-                "status": "voting"
-            })
-        except Exception as e:
-            print(f"Error checking for active vote: {e}")
-
-        if not active_vote:
-            # No active vote in the database - cancel the vote state
-            print(f"No active vote found in database for match {match_id}")
-            self.cancel_voting(match_id=match_id)
-            return
+        vote_state = self.active_votes[channel_id]
 
         # Check if voting is complete
         if len(vote_state['voters']) >= 6:
-            print(f"Vote timeout handler: All 6 players have already voted in match {match_id}")
             return  # Voting already complete
 
-        # Get the channel object
-        channel = vote_state.get('channel')
-        if not channel:
-            # Can't proceed without a channel
-            print(f"Vote timeout handler: No channel object found for match {match_id}")
-            self.cancel_voting(match_id=match_id)
-            return
-
-        # Announce timeout and create teams based on current votes
-        try:
-            await channel.send(f"⏱️ Match {match_id}: The vote has timed out! Creating teams based on current votes...")
-        except Exception as e:
-            print(f"Error sending timeout message: {e}")
-            # Try to cancel the vote even if we can't send the message
-            self.cancel_voting(match_id=match_id)
-            return
+        # If not, announce timeout and create teams based on current votes
+        await vote_state['channel'].send("⏱️ The vote has timed out! Creating teams based on current votes...")
 
         # Disable the buttons in the view
-        if vote_state.get('view'):
-            for item in vote_state['view'].children:
-                item.disabled = True
+        for item in vote_state['view'].children:
+            item.disabled = True
 
-            try:
-                if vote_state.get('message'):
-                    await vote_state['message'].edit(view=vote_state['view'])
-                    print(f"Vote timeout handler: Disabled vote buttons for match {match_id}")
-            except Exception as e:
-                print(f"Error disabling buttons: {e}")
+        await vote_state['message'].edit(view=vote_state['view'])
 
-        # Create a lock to prevent race conditions during timeout
-        if not hasattr(self, '_timeout_locks'):
-            self._timeout_locks = {}
+        # Finalize vote regardless of vote count
+        await self.finalize_vote(channel_id, force=True)
 
-        if match_id not in self._timeout_locks:
-            self._timeout_locks[match_id] = asyncio.Lock()
+    async def finalize_vote(self, channel_id, force=False):
+        """Finalize the vote and create teams for a specific channel"""
+        channel_id = str(channel_id)
 
-        async with self._timeout_locks[match_id]:
-            # Check again if vote is still active after acquiring the lock
-            if match_id not in self.active_votes:
-                print(f"Vote timeout handler: Vote is no longer active after lock for match {match_id}")
-                return
-
-            # Important: Pass the current match_id to finalize_vote to maintain consistency
-            # Finalize vote regardless of vote count
-            await self.finalize_vote(match_id, force=True)
-
-    async def finalize_vote(self, match_id, force=False):
-        """Finalize the vote and create teams for a specific match"""
-        if match_id not in self.active_votes:
+        if channel_id not in self.active_votes:
             return
 
-        vote_state = self.active_votes[match_id]
-        channel = vote_state.get('channel')
-        channel_id = vote_state.get('channel_id')
-
-        if not channel:
-            print(f"No channel found for finalizing vote for match {match_id}")
-            self.cancel_voting(match_id=match_id)
-            return
+        vote_state = self.active_votes[channel_id]
 
         # If forced, we'll create teams even with incomplete voting
         if not force and len(vote_state['voters']) < 6:
             # Not all players voted and not forced
             return
 
-        try:
-            # Get the match data from the database
-            db_match = self.queue.matches_collection.find_one({"match_id": match_id, "status": "voting"})
+        # Get the channel object
+        channel = vote_state['channel']
 
-            if not db_match:
-                print(f"No active match found in database for match {match_id}")
-                await channel.send(f"⚠️ Error: Match {match_id} not found. The vote has been cancelled.")
-                self.cancel_voting(match_id=match_id)
-                return
+        # Get players from the active match
+        players = self.queue.get_players_for_match(channel_id)
 
-            players = db_match.get("players", [])
+        # Disable the buttons in the view
+        for item in vote_state['view'].children:
+            item.disabled = True
 
-            if len(players) < 6:
-                print(f"Not enough players ({len(players)}) found in match {match_id}")
-                await channel.send(
-                    f"⚠️ Error: Not enough players found for match {match_id}. The vote has been cancelled.")
-                self.cancel_voting(match_id=match_id)
-                return
+        await vote_state['message'].edit(view=vote_state['view'])
 
-            # Disable the buttons in the view
-            if vote_state.get('view'):
-                for item in vote_state['view'].children:
-                    item.disabled = True
+        # Determine winner (default to random if tied or no votes)
+        if vote_state['captains_votes'] > vote_state['random_votes']:
+            # Cancel this vote
+            self.cancel_voting(channel_id)
 
-                if vote_state.get('message'):
-                    try:
-                        await vote_state['message'].edit(view=vote_state['view'])
-                    except Exception as e:
-                        print(f"Error disabling buttons on finalize: {e}")
+            # Update match status to "selection"
+            if hasattr(self.queue, 'update_match_status'):
+                self.queue.update_match_status(channel_id, "selection")
 
-            # Determine winner (default to random if tied or no votes)
-            if vote_state['captains_votes'] > vote_state['random_votes']:
-                # Update match status to "selection"
-                self.queue.matches_collection.update_one(
-                    {"match_id": match_id},  # Update by match_id, not by _id
-                    {"$set": {"status": "selection"}}
-                )
-
-                # Cancel this vote since we're moving to the next stage
-                self.cancel_voting(match_id=match_id)
-
-                # Use the captains_system
-                if self.captains_system:
-                    try:
-                        captains_result = self.captains_system.start_captains_selection(players, channel_id, match_id)
-                        if captains_result:
-                            await channel.send(embed=captains_result)
-                            # Add a small delay to ensure the embed is sent before starting selection
-                            await asyncio.sleep(0.5)
-                            await self.captains_system.execute_captain_selection(channel, match_id=match_id)
-                        else:
-                            print(f"Failed to start captains selection for match {match_id}")
-                            # Fallback to random teams
-                            await channel.send(
-                                f"Match {match_id}: Unable to start captains selection. Falling back to random teams...")
-                            # Pass match_id as a named parameter
-                            await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
-                    except Exception as e:
-                        import traceback
-                        print(f"Error in captains selection for match {match_id}: {e}")
-                        traceback.print_exc()
-                        # Fallback to random teams
-                        await channel.send(
-                            f"Match {match_id}: Error in captains selection: {str(e)}. Falling back to random teams...")
-                        # Pass match_id as a named parameter
-                        await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
-                else:
-                    # Fallback to random teams
-                    await channel.send(
-                        f"Match {match_id}: Captains system not available. Falling back to random teams...")
-                    # Pass match_id as a named parameter
-                    await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
+            # Use the captains_system reference
+            if self.captains_system:
+                captains_result = self.captains_system.start_captains_selection(players, channel_id)
+                await channel.send(embed=captains_result)
+                await self.captains_system.execute_captain_selection(channel)
             else:
-                # Random teams won - update match status to playing
-                self.queue.matches_collection.update_one(
-                    {"match_id": match_id},  # Update by match_id, not by _id
-                    {"$set": {"status": "in_progress"}}
-                )
+                # Fallback to random teams if captains_system is not set
+                await channel.send("Captains system not available. Falling back to random teams...")
+                await self.create_balanced_random_teams(channel, players, channel_id)
+        else:
+            # Create balanced random teams
+            # Update match status to "playing"
+            if hasattr(self.queue, 'update_match_status'):
+                self.queue.update_match_status(channel_id, "playing")
 
-                # Cancel this vote
-                self.cancel_voting(match_id=match_id)
-
-                # Create balanced random teams
-                # Pass match_id as a named parameter
-                await self.create_balanced_random_teams(channel, players, channel_id, match_id=match_id)
-        except Exception as e:
-            # Log the error and try to recover
-            import traceback
-            print(f"Error in finalize_vote for match {match_id}: {e}")
-            traceback.print_exc()
-
-            try:
-                # Try to inform users
-                await channel.send(
-                    f"⚠️ Match {match_id}: An error occurred during team selection: {str(e)}. The vote has been cancelled.")
-
-                # Cancel the vote
-                self.cancel_voting(match_id=match_id)
-
-                # Mark the match as cancelled in the database
-                self.queue.matches_collection.update_one(
-                    {"match_id": match_id},
-                    {"$set": {"status": "cancelled"}}
-                )
-            except Exception as e2:
-                print(f"Error in error handling during finalize_vote for match {match_id}: {e2}")
+            await self.create_balanced_random_teams(channel, players, channel_id)
 
     # New method to create balanced random teams
-    async def create_balanced_random_teams(self, channel, players, channel_id, match_id=None):
+    async def create_balanced_random_teams(self, channel, players, channel_id):
         """Create balanced random teams instead of completely random"""
         # Check if this is a global match by examining the channel name
         is_global = channel.name.lower() == "global"
-        print(
-            f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}, match_id: {match_id}")
+        print(f"Creating balanced random teams in channel: {channel.name}, is_global: {is_global}")
 
         # Get MMR for each player (real or dummy)
         player_mmrs = []
@@ -575,80 +369,21 @@ class VoteSystem:
         team1_avg_mmr = round(team1_mmr / len(team1), 1)
         team2_avg_mmr = round(team2_mmr / len(team2), 1)
 
-        # CRITICAL CHANGE: Always use the provided match_id if it exists
-        if match_id:
-            # Update the existing match with teams and status
-            match_update_result = self.match_system.matches.update_one(
-                {"match_id": match_id},
-                {"$set": {
-                    "team1": team1,
-                    "team2": team2,
-                    "status": "in_progress",
-                    "team1_avg_mmr": team1_avg_mmr,
-                    "team2_avg_mmr": team2_avg_mmr
-                }}
-            )
+        # Remove players from queue
+        self.queue.remove_players_from_queue(players, channel_id)
 
-            # Log whether an update actually occurred
-            print(f"Match update result: {match_update_result.modified_count} documents modified")
-
-            if match_update_result.modified_count == 0:
-                print(f"WARNING: Match with ID {match_id} was not found or not updated.")
-                # Use the same ID when creating the match
-                match_id = self.match_system.create_match(
-                    match_id,  # Keep using the same ID
-                    team1,
-                    team2,
-                    channel_id,
-                    is_global
-                )
-            else:
-                print(f"Successfully updated match with ID: {match_id}")
-        else:
-            # No match ID provided, use one from any active match or generate a short one
-            active_match = self.queue.matches_collection.find_one({
-                "channel_id": channel_id,
-                "status": {"$in": ["voting", "selection"]}
-            })
-
-            if active_match and "match_id" in active_match:
-                # Use the existing match ID
-                match_id = active_match["match_id"]
-                print(f"Using existing match ID: {match_id}")
-
-                # Update the match with new teams
-                self.match_system.matches.update_one(
-                    {"match_id": match_id},
-                    {"$set": {
-                        "team1": team1,
-                        "team2": team2,
-                        "status": "in_progress",
-                        "team1_avg_mmr": team1_avg_mmr,
-                        "team2_avg_mmr": team2_avg_mmr
-                    }}
-                )
-            else:
-                # Generate a shortened match ID only as a last resort
-                match_id = self.match_system.create_match(
-                    str(uuid.uuid4())[:6],  # Generate a short ID
-                    team1,
-                    team2,
-                    channel_id,
-                    is_global
-                )
-
-        # Ensure the match status is explicitly set to "in_progress"
-        self.match_system.matches.update_one(
-            {"match_id": match_id},
-            {"$set": {"status": "in_progress"}}
+        # Create match record - using self.match_system
+        match_id = self.match_system.create_match(
+            str(uuid.uuid4()),
+            team1,
+            team2,
+            channel_id,
+            is_global
         )
-
-        # Debug print to confirm the status
-        print(f"DEBUG: Match {match_id} status set to 'in_progress'")
 
         # Create an embed for team announcement
         embed = discord.Embed(
-            title="Teams Assigned! (Balanced Random Teams)",
+            title="Match Created! (Balanced Random Teams)",
             color=0xe74c3c
         )
 
@@ -657,19 +392,12 @@ class VoteSystem:
         embed.add_field(name=f"Team 2 (Avg MMR: {team2_avg_mmr})", value=", ".join(team2_mentions), inline=False)
         embed.add_field(
             name="Report Results",
-            value=f"Play your match and report the result using `/report {match_id} win` or `/report {match_id} loss`",
+            value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
             inline=False
         )
 
         # Send team announcement as embed
         await channel.send(embed=embed)
-
-        # NEW: After creating a match, explicitly clear the queue for this channel
-        try:
-            self.queue.queue_collection.delete_many({"channel_id": channel_id})
-            print(f"Cleared all queued players in channel {channel_id} after match creation")
-        except Exception as e:
-            print(f"Error clearing queue after match creation: {e}")
 
         # Cancel this vote
         self.cancel_voting(channel_id)

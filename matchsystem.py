@@ -30,23 +30,24 @@ class MatchSystem:
         # Generate a shorter match ID that's easier for users to type
         short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
 
-        # Add better debugging for channel detection
-        channel = None
-        is_global = False
-        try:
-            if self.bot:
-                channel = self.bot.get_channel(int(channel_id))
-                print(f"Channel lookup result: {channel}")
-                if channel:
-                    channel_name = channel.name.lower()
-                    print(f"Channel name: {channel_name}")
-                    is_global = channel_name == "global"
+        # Add better debugging for channel detection, but ONLY if is_global wasn't explicitly provided
+        if not is_global:  # Only try to detect if is_global wasn't explicitly True
+            try:
+                if self.bot:
+                    channel = self.bot.get_channel(int(channel_id))
+                    print(f"Channel lookup result: {channel}")
+                    if channel:
+                        channel_name = channel.name.lower()
+                        print(f"Channel name: {channel_name}")
+                        is_global = channel_name == "global"
+                    else:
+                        print(f"Failed to find channel with ID: {channel_id}")
                 else:
-                    print(f"Failed to find channel with ID: {channel_id}")
-            else:
-                print("Bot reference is None during match creation")
-        except Exception as e:
-            print(f"Error in channel detection: {e}")
+                    print("Bot reference is None during match creation")
+            except Exception as e:
+                print(f"Error in channel detection: {e}")
+        else:
+            print(f"Using provided is_global={is_global} without re-detection")
 
         # Clear debug print
         print(f"Created match with ID: {short_id}, status: in_progress, is_global: {is_global}")

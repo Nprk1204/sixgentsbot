@@ -28,8 +28,6 @@ class QueueHandler:
         """Set the captains system reference for a specific channel"""
         self.captains_systems[channel_id] = captains_system
 
-    # In queue_handler.py, further modify the add_player method:
-
     def add_player(self, player, channel_id):
         """Add a player to a queue"""
         player_id = str(player.id)
@@ -37,58 +35,36 @@ class QueueHandler:
         player_name = player.display_name
         channel_id = str(channel_id)
 
-        print(f"=== ADD PLAYER: {player_name} (ID: {player_id}) to channel {channel_id} ===")
+        # Check if this channel has an active match
+        active_match = self.matches_collection.find_one({"channel_id": channel_id})
+
+        # Check if player is already in this channel's active match
+        if active_match and player_id in [p["id"] for p in active_match["players"]]:
+            return f"{player_mention} is already in an active match in this channel!"
 
         # Check if player is already in this channel's queue
-        existing_queue = self.queue_collection.find_one({"id": player_id, "channel_id": channel_id})
-        if existing_queue:
+        if self.queue_collection.find_one({"id": player_id, "channel_id": channel_id}):
             return f"{player_mention} is already in this queue!"
 
-        # Check if in another queue
+        # Check if player is in any other queue
         other_queue = self.queue_collection.find_one({"id": player_id, "channel_id": {"$ne": channel_id}})
         if other_queue:
             other_channel_id = other_queue.get("channel_id")
-            channel_identifier = "another channel"
-
             if other_channel_id and other_channel_id.isdigit():
-                channel_identifier = f"<#{other_channel_id}>"
+                channel_mention = f"<#{other_channel_id}>"
+                return f"{player_mention} is already in a queue in {channel_mention}. Please leave that queue first."
+            else:
+                return f"{player_mention} is already in another queue. Please leave that queue first."
 
-            return f"{player_mention} is already in a queue in {channel_identifier}. Please leave that queue first."
-
-        # IMPROVED: Enhanced check for player in ANY active match with better reporting
-        active_matches = list(self.matches_collection.find({
-            "status": {"$in": ["voting", "selection", "in_progress"]},
-            "players.id": player_id
-        }))
-
-        if active_matches:
-            print(f"Found {len(active_matches)} active matches for player {player_id}")
-
-            # Check and fix any non-standard match IDs
-            for active_match in active_matches:
-                match_id = active_match.get("match_id", "unknown")
-                match_status = active_match.get("status", "active")
-
-                # Check if this is a non-standard match ID
-                if len(match_id) != 6:
-                    print(f"WARNING: Found non-standard match ID: {match_id} with status {match_status}")
-
-                    # If it's clearly a full UUID, we should fix it
-                    if '-' in match_id:
-                        short_id = match_id[:6]
-                        print(f"Attempting to fix by shortening to: {short_id}")
-
-                        # Update the database with the shortened ID
-                        self.matches_collection.update_one(
-                            {"_id": active_match["_id"]},
-                            {"$set": {"match_id": short_id}}
-                        )
-
-                        # Use the short ID for the message
-                        match_id = short_id
-
-                print(f"Active match found: {match_id} with status: {match_status}")
-                return f"{player_mention} cannot join the queue while you have an active match in progress! (Match ID: {match_id}, Status: {match_status})"
+        # Check if player is in any active match
+        other_match = self.matches_collection.find_one({"players.id": player_id})
+        if other_match:
+            other_channel_id = other_match.get("channel_id")
+            if other_channel_id and other_channel_id.isdigit():
+                channel_mention = f"<#{other_channel_id}>"
+                return f"{player_mention} is already in an active match in {channel_mention}."
+            else:
+                return f"{player_mention} is already in an active match in another channel."
 
         # Determine if this is a global queue
         channel = self.bot.get_channel(int(channel_id)) if self.bot else None
@@ -107,44 +83,47 @@ class QueueHandler:
         # Count players in the queue
         queue_count = self.queue_collection.count_documents({"channel_id": channel_id})
 
-        # If queue is full, check if we should start a new match
+        # If queue reached 6 players, create active match and start voting
         if queue_count >= 6:
-            # IMPROVED: Check for existing active match in this channel first
-            existing_vote = self.matches_collection.find_one({
-                "channel_id": channel_id,
-                "status": {"$in": ["voting", "selection"]}
-            })
-
-            if existing_vote:
-                # Don't start a new vote while one is already active in this channel
-                return f"{player_mention} has joined the queue! Queue now has {queue_count}/6 players, but another vote is already in progress. Please wait for the current vote to complete."
-
-            # Get the 6 oldest players in the queue by joined_at timestamp
-            players = list(self.queue_collection.find({"channel_id": channel_id}).sort("joined_at", 1).limit(6))
-
-            # Generate a unique 6-character match ID for the active match
-            match_id = str(uuid.uuid4().hex)[:6]  # Create 6-character match ID
-
-            # Remove these specific 6 players from the queue BEFORE creating the match
-            for match_player in players:
-                self.queue_collection.delete_one({"_id": match_player["_id"]})
-
-            # Create active match entry
-            active_match = {
-                "match_id": match_id,
-                "channel_id": channel_id,
-                "players": players,
-                "created_at": datetime.datetime.utcnow(),
-                "is_global": is_global,
-                "status": "voting"  # Initial status is voting
-            }
-
-            # Insert into active matches collection
-            self.matches_collection.insert_one(active_match)
-
-            return f"{player_mention} has joined the queue! Queue now has 6 players!\n\nStarting team selection vote..."
+            return self.create_active_match(channel_id, player_mention)
         else:
             return f"{player_mention} has joined the queue! There are {queue_count}/6 players"
+
+    def create_active_match(self, channel_id, trigger_player_mention):
+        """Create an active match from the first 6 players in queue"""
+        # Get the first 6 players
+        queue_players = list(self.queue_collection.find({"channel_id": channel_id}).limit(6))
+
+        if len(queue_players) < 6:
+            return f"Not enough players to start match (need 6, have {len(queue_players)})"
+
+        # Generate a unique match ID
+        match_id = str(uuid.uuid4())[:8]
+
+        # Determine if this is a global match
+        is_global = False
+        if queue_players and "is_global" in queue_players[0]:
+            is_global = queue_players[0]["is_global"]
+
+        # Create active match
+        active_match = {
+            "match_id": match_id,
+            "channel_id": channel_id,
+            "players": queue_players,
+            "created_at": datetime.datetime.utcnow(),
+            "is_global": is_global,
+            "status": "voting"  # Initial status is voting
+        }
+
+        # Insert into active matches collection
+        self.matches_collection.insert_one(active_match)
+
+        # Remove these players from the queue
+        for player in queue_players:
+            self.queue_collection.delete_one({"_id": player["_id"]})
+
+        # Return message
+        return f"{trigger_player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
 
     def remove_player(self, player, channel_id):
         """Remove a player from a channel's queue or active match"""
@@ -193,34 +172,6 @@ class QueueHandler:
             return f"{player.mention} has left the queue!"
         else:
             return f"{player.mention} was not in this queue or active match!"
-
-    def remove_players_from_queue(self, players, channel_id=None):
-        """Remove multiple players from the queue at once"""
-        removed_count = 0
-
-        # If channel_id is not provided, try to remove the players from any channel
-        if channel_id:
-            # Convert to string to ensure consistent comparison
-            channel_id = str(channel_id)
-
-            # Remove players from this specific channel's queue
-            for player in players:
-                player_id = player.get("id")
-                if player_id:
-                    result = self.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
-                    if result.deleted_count > 0:
-                        removed_count += 1
-        else:
-            # Remove players from any channel's queue
-            for player in players:
-                player_id = player.get("id")
-                if player_id:
-                    result = self.queue_collection.delete_one({"id": player_id})
-                    if result.deleted_count > 0:
-                        removed_count += 1
-
-        print(f"Removed {removed_count} players from the queue")
-        return removed_count
 
     def get_queue_status(self, channel_id):
         """Get the status of a channel's queue and active match"""
@@ -353,13 +304,3 @@ class QueueHandler:
 
             except Exception as e:
                 print(f"Error in remove_inactive_players task: {e}")
-
-    def is_player_in_active_match(self, player_id, channel_id=None):
-        """Check if a player is in an active match, optionally in a specific channel"""
-        query = {"players.id": player_id, "status": {"$in": ["voting", "selection", "in_progress"]}}
-
-        if channel_id:
-            query["channel_id"] = str(channel_id)
-
-        match = self.matches_collection.find_one(query)
-        return match is not None

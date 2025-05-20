@@ -160,7 +160,6 @@ except Exception as e:
 db = Database(MONGO_URI)
 queue_handler = QueueHandler(db)
 match_system = MatchSystem(db)
-match_system.set_queue_handler(queue_handler)
 
 # Create channel-specific vote and captain systems
 channel_names = ["rank-a", "rank-b", "rank-c", "global"]
@@ -188,18 +187,6 @@ async def on_ready():
     vote_system.set_bot(bot)
     captains_system.set_bot(bot)
     queue_handler.set_bot(bot)
-
-    # NEW: Clean up any stale matches that might be stuck in voting or selection status
-    stale_matches = list(queue_handler.matches_collection.find(
-        {"status": {"$in": ["voting", "selection"]}}
-    ))
-
-    if stale_matches:
-        print(f"Found {len(stale_matches)} stale matches. Cleaning up...")
-        queue_handler.matches_collection.update_many(
-            {"status": {"$in": ["voting", "selection"]}},
-            {"$set": {"status": "cancelled"}}
-        )
 
     # Get all queue channels and initialize systems
     for guild in bot.guilds:
@@ -306,12 +293,9 @@ async def queue_slash(interaction: discord.Interaction):
     response = queue_handler.add_player(player, channel_id)
     await interaction.response.send_message(response)
 
-    # Check if queue is full (has at least 6 real players) and start voting
-    # Fix: Count only real players, not dummy test players (IDs starting with 9000)
+    # Check if queue is full and start voting
     players = queue_handler.get_players_for_match(channel_id)
-    real_players = [p for p in players if not str(p.get("id", "")).startswith('9000')]
-
-    if len(real_players) >= 6:  # Only trigger voting if we have 6+ real players
+    if len(players) >= 6:
         # Check if voting is already active for this channel
         if not vote_system.is_voting_active(channel_id):
             await vote_system.start_vote(interaction.channel)
@@ -384,16 +368,10 @@ async def leave_slash(interaction: discord.Interaction):
             )
         return
 
-    # NEW: Check if player is in an active match in voting/selection in this channel
-    active_match = queue_handler.matches_collection.find_one({
-        "channel_id": channel_id,
-        "status": {"$in": ["voting", "selection"]},
-        "players.id": player_id
-    })
-
-    if active_match:
+    # Check if voting is active in this channel
+    if vote_system.is_voting_active(channel_id):
         await interaction.response.send_message(
-            f"{player_mention} cannot leave while team selection is in progress!",
+            f"{player_mention} cannot leave the queue while voting is in progress!",
             ephemeral=True
         )
         return
@@ -516,19 +494,6 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         )
         return
 
-    # Check if match ID is in the correct format
-    if len(match_id) != 6:
-        print(f"WARNING: User {interaction.user.id} attempting to report with non-standard match ID: {match_id}")
-
-        # If it's a long UUID with dashes, it may be from a bugged match
-        if len(match_id) > 6 and '-' in match_id:
-            short_id = match_id[:6]
-            await interaction.response.send_message(
-                f"⚠️ Detected a non-standard match ID format. Trying to use shortened ID: {short_id}",
-                ephemeral=True
-            )
-            match_id = short_id
-
     reporter_id = str(interaction.user.id)
 
     # Validate result argument
@@ -560,17 +525,14 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         winning_team = match_result["team2"]
         losing_team = match_result["team1"]
 
-    # Initialize empty arrays for MMR changes and streaks
+    # Initialize empty arrays for MMR changes
     winning_team_mmr_changes = ["?"] * len(winning_team)
     losing_team_mmr_changes = ["?"] * len(losing_team)
-    winning_team_streaks = ["?"] * len(winning_team)
-    losing_team_streaks = ["?"] * len(losing_team)
 
     # Extract MMR changes from the match result
     for change in match_result.get("mmr_changes", []):
         player_id = change.get("player_id")
         mmr_change = change.get("mmr_change", 0)
-        streak = change.get("streak", 0)
         is_win = change.get("is_win", False)
 
         # Find the player's index and set their MMR change
@@ -579,12 +541,6 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
             for i, player in enumerate(winning_team):
                 if player["id"] == player_id:
                     winning_team_mmr_changes[i] = f"+{mmr_change}"
-
-                    # Format streak for display
-                    if streak > 0:
-                        winning_team_streaks[i] = f"+{streak}"
-                    else:
-                        winning_team_streaks[i] = f"{streak}"
                     break
         else:
             # This is a loser
@@ -592,37 +548,25 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 if player["id"] == player_id:
                     # MMR change is already negative for losers
                     losing_team_mmr_changes[i] = f"{mmr_change}"
-
-                    # Format streak for display
-                    if streak > 0:
-                        losing_team_streaks[i] = f"+{streak}"
-                    else:
-                        losing_team_streaks[i] = f"{streak}"
                     break
 
     # Handle dummy players (they don't have MMR changes in the database)
     for i, player in enumerate(winning_team):
         if player["id"].startswith('9000'):  # Dummy player
             winning_team_mmr_changes[i] = "+0"
-            winning_team_streaks[i] = "0"
 
     for i, player in enumerate(losing_team):
         if player["id"].startswith('9000'):  # Dummy player
             losing_team_mmr_changes[i] = "-0"
-            losing_team_streaks[i] = "0"
 
     # Check for any remaining unknown MMR changes
     for i in range(len(winning_team_mmr_changes)):
         if winning_team_mmr_changes[i] == "?":
             winning_team_mmr_changes[i] = "+??"
-        if winning_team_streaks[i] == "?":
-            winning_team_streaks[i] = "0"
 
     for i in range(len(losing_team_mmr_changes)):
         if losing_team_mmr_changes[i] == "?":
             losing_team_mmr_changes[i] = "-??"
-        if losing_team_streaks[i] == "?":
-            losing_team_streaks[i] = "0"
 
     # Create the embed with updated formatting
     embed = discord.Embed(
@@ -640,36 +584,15 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Create individual fields for each winning player
     for i, player in enumerate(winning_team):
         try:
-            member = await interaction.guild.fetch_member(int(player["id"]) if player["id"].isdigit() else 0)
+            member = await interaction.guild.fetch_member(int(player["id"]))
             name = member.display_name if member else player['name']
         except:
             name = player["name"]
 
-        # Determine streak icon and style
-        streak_value = winning_team_streaks[i]
-        streak_icon = ""
-        streak_style = ""
-
-        # Add streak indicators
-        if streak_value.startswith("+"):
-            streak_num = int(streak_value[1:])
-            if streak_num >= 5:
-                streak_icon = "🔥"  # Fire emoji for big streaks
-                streak_style = "**"
-            elif streak_num >= 3:
-                streak_icon = "📈"  # Chart up emoji for decent streaks
-            else:
-                streak_icon = "▲"  # Up triangle
-        elif streak_value.startswith("-"):
-            streak_num = int(streak_value[1:])
-            streak_icon = "▼"  # Down triangle
-        else:
-            streak_icon = "•"  # Neutral dot
-
         # Add a field for this player
         embed.add_field(
             name=f"**{name}**",
-            value=f"{winning_team_mmr_changes[i]} MMR\n{streak_style}{streak_icon} Streak: {streak_value}{streak_style}",
+            value=f"{winning_team_mmr_changes[i]}",
             inline=True
         )
 
@@ -686,50 +609,29 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Create individual fields for each losing player
     for i, player in enumerate(losing_team):
         try:
-            member = await interaction.guild.fetch_member(int(player["id"]) if player["id"].isdigit() else 0)
+            member = await interaction.guild.fetch_member(int(player["id"]))
             name = member.display_name if member else player['name']
         except:
             name = player["name"]
 
-        # Determine streak icon and style
-        streak_value = losing_team_streaks[i]
-        streak_icon = ""
-        streak_style = ""
-
-        # Add streak indicators
-        if streak_value.startswith("+"):
-            streak_num = int(streak_value[1:])
-            streak_icon = "▲"  # Up triangle
-        elif streak_value.startswith("-"):
-            streak_num = abs(int(streak_value))
-            if streak_num >= 5:
-                streak_icon = "📉"  # Chart down emoji for big losing streaks
-                streak_style = "**"
-            elif streak_num >= 3:
-                streak_icon = "⚠️"  # Warning emoji for noticeable losing streaks
-            else:
-                streak_icon = "▼"  # Down triangle
-        else:
-            streak_icon = "•"  # Neutral dot
-
         # Add a field for this player
         embed.add_field(
             name=f"**{name}**",
-            value=f"{losing_team_mmr_changes[i]} MMR\n{streak_style}{streak_icon} Streak: {streak_value}{streak_style}",
+            value=f"{losing_team_mmr_changes[i]}",
             inline=True
         )
 
-        # Spacer field if needed to ensure proper alignment (for 3-column layout)
+    # Spacer field if needed to ensure proper alignment (for 3-column layout)
     if len(losing_team) % 3 == 1:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
     elif len(losing_team) % 3 == 2:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-        # MMR System explanation
+    # MMR System explanation
     embed.add_field(
         name="📊 MMR System",
-        value="Dynamic MMR: Changes based on games played and win/loss streaks",
+        value="Dynamic MMR: Changes based on games played",
         inline=False
     )
 
@@ -1017,7 +919,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     elif mmr >= 1100:
         tier = "Rank B"
 
-    tier_color = 0x128743  # Default color for Rank C (green)
+    tier_color = 0x12b51a  # Default color for Rank C (green)
     if tier == "Rank A":
         tier_color = 0xC41E3A  # Red color for Rank A
     elif tier == "Rank B":
@@ -1921,16 +1823,10 @@ async def forcestart_slash(interaction: discord.Interaction):
     # Get current players in queue and active match
     channel_id = str(interaction.channel.id)
 
-    # IMPORTANT FIX: Check if there's already an active match, but also provide
-    # an option to override/cancel it
-    active_match = queue_handler.matches_collection.find_one({"channel_id": channel_id, "status": "in_progress"})
+    # Check if there's already an active match
+    active_match = queue_handler.matches_collection.find_one({"channel_id": channel_id})
     if active_match:
-        # Ask if the admin wants to force cancel the existing match
-        await interaction.response.send_message(
-            "⚠️ An active match is already in progress in this channel. Do you want to cancel it and start a new one?",
-            ephemeral=True,
-            view=ForceStartConfirmView(interaction, active_match, channel_id)
-        )
+        await interaction.response.send_message("An active match is already in progress in this channel!")
         return
 
     # Get players from the queue
@@ -1983,9 +1879,6 @@ async def forcestart_slash(interaction: discord.Interaction):
 
             # Add dummy player to queue
             queue_handler.queue_collection.insert_one(dummy_player)
-    else:
-        # If we have enough players, just acknowledge the command
-        await interaction.response.send_message("Force starting team selection with existing players...")
 
     # Create active match
     match_id = str(uuid.uuid4())[:8]
@@ -2014,163 +1907,59 @@ async def forcestart_slash(interaction: discord.Interaction):
     await interaction.channel.send("**Force starting team selection!**")
     await vote_system.start_vote(interaction.channel)
 
-# Add this class to handle the confirmation dialog
-class ForceStartConfirmView(discord.ui.View):
-    def __init__(self, interaction, active_match, channel_id):
-        super().__init__(timeout=60)
-        self.interaction = interaction
-        self.active_match = active_match
-        self.channel_id = channel_id
-
-    @discord.ui.button(label="Yes, Cancel Existing Match", style=discord.ButtonStyle.danger)
-    async def confirm(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-        if button_interaction.user.id != self.interaction.user.id:
-            await button_interaction.response.send_message("You're not authorized to use this button.", ephemeral=True)
-            return
-
-        # Cancel the existing match
-        queue_handler.matches_collection.update_one(
-            {"_id": self.active_match["_id"]},
-            {"$set": {"status": "cancelled"}}
-        )
-
-        await button_interaction.response.send_message("Existing match cancelled. You can now use `/forcestart` again to create a new match.", ephemeral=True)
-        self.stop()
-
-    @discord.ui.button(label="No, Keep Existing Match", style=discord.ButtonStyle.secondary)
-    async def cancel(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-        if button_interaction.user.id != self.interaction.user.id:
-            await button_interaction.response.send_message("You're not authorized to use this button.", ephemeral=True)
-            return
-
-        await button_interaction.response.send_message("Operation cancelled. The existing match will not be affected.", ephemeral=True)
-        self.stop()
-
-
 @bot.tree.command(name="forcestop",
-                  description="Force stop any active votes or selections and clear the queue (Admin only)")
+                      description="Force stop any active votes or selections and clear the queue (Admin only)")
 async def forcestop_slash(interaction: discord.Interaction):
-    # Check if command is used in an allowed channel
-    if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
-            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-            ephemeral=True
-        )
-        return
+        # Check if command is used in an allowed channel
+        if not is_command_channel(interaction.channel):
+            await interaction.response.send_message(
+                f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+                ephemeral=True
+            )
+            return
 
-    # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
-        return
+        # Check if user has admin permissions
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                    ephemeral=True)
+            return
 
-    # Get current channel ID
-    channel_id = str(interaction.channel.id)
+        # Get current players in queue
+        channel_id = str(interaction.channel.id)
+        players = queue_handler.get_players_for_match(channel_id)
+        count = len(players)
 
-    # Get count of players in the queue for this channel
-    queue_count = queue_handler.queue_collection.count_documents({"channel_id": channel_id})
+        # Cancel any active votes
+        vote_active = vote_system.is_voting_active()
+        if vote_active:
+            vote_system.cancel_voting()
 
-    # Find all active matches in this channel
-    active_matches = list(queue_handler.matches_collection.find({
-        "channel_id": channel_id,
-        "status": {"$in": ["voting", "selection", "in_progress"]}
-    }))
+        # Cancel any active selections
+        selection_active = captains_system.is_selection_active()
+        if selection_active:
+            captains_system.cancel_selection()
 
-    # Track what was cancelled
-    votes_cancelled = 0
-    selections_cancelled = 0
-    matches_cancelled = 0
-    players_removed = 0
+        # Clear the queue collection
+        queue_handler.queue_collection.delete_many({})
 
-    # 1. Cancel any active votes in this channel by match ID
-    for match in active_matches:
-        match_id = match.get("match_id")
-        status = match.get("status")
-
-        if match_id:
-            if status == "voting" and vote_system.is_voting_active(match_id=match_id):
-                vote_system.cancel_voting(match_id=match_id)
-                votes_cancelled += 1
-                print(f"Cancelled voting for match {match_id}")
-
-            if status == "selection" and captains_system.is_selection_active(match_id=match_id):
-                captains_system.cancel_selection(match_id=match_id)
-                selections_cancelled += 1
-                print(f"Cancelled captain selection for match {match_id}")
-
-    # 2. Mark all active matches in this channel as cancelled in the database
-    update_result = queue_handler.matches_collection.update_many(
-        {
-            "channel_id": channel_id,
-            "status": {"$in": ["voting", "selection", "in_progress"]}
-        },
-        {"$set": {"status": "cancelled"}}
-    )
-
-    matches_cancelled = update_result.modified_count
-    print(f"Marked {matches_cancelled} matches as cancelled in channel {channel_id}")
-
-    # 3. Clear the queue for this channel
-    delete_result = queue_handler.queue_collection.delete_many({"channel_id": channel_id})
-    players_removed = delete_result.deleted_count
-    print(f"Removed {players_removed} players from queue in channel {channel_id}")
-
-    # 4. As a backup, also use the original methods to cancel votes and selections
-    if vote_system.is_voting_active(channel_id=channel_id):
-        vote_system.cancel_voting(channel_id=channel_id)
-        print(f"Backup: Cancelled votes in channel {channel_id}")
-
-    if captains_system.is_selection_active(channel_id=channel_id):
-        captains_system.cancel_selection(channel_id=channel_id)
-        print(f"Backup: Cancelled captain selection in channel {channel_id}")
-
-    # Create a detailed response
-    embed = discord.Embed(
-        title="⚠️ Force Stop Executed",
-        color=0xff9900,
-        description=f"All active votes, selections, and queues in this channel have been cleared."
-    )
-
-    # Add details about what was stopped
-    if votes_cancelled > 0:
-        embed.add_field(
-            name="Votes Cancelled",
-            value=f"{votes_cancelled} active vote(s) have been cancelled",
-            inline=False
+        # Create a response message
+        embed = discord.Embed(
+            title="⚠️ Force Stop Executed",
+            color=0xff9900
         )
 
-    if selections_cancelled > 0:
-        embed.add_field(
-            name="Selections Cancelled",
-            value=f"{selections_cancelled} captain selection(s) have been cancelled",
-            inline=False
-        )
+        # Add appropriate fields based on what was stopped
+        if vote_active:
+            embed.add_field(name="Vote Canceled", value="Team selection voting has been canceled.", inline=False)
 
-    if matches_cancelled > 0:
-        embed.add_field(
-            name="Matches Cancelled",
-            value=f"{matches_cancelled} active match(es) have been cancelled",
-            inline=False
-        )
+        if selection_active:
+            embed.add_field(name="Team Selection Canceled", value="Captain selection process has been canceled.",
+                            inline=False)
 
-    if players_removed > 0:
-        embed.add_field(
-            name="Queue Cleared",
-            value=f"{players_removed} player(s) have been removed from the queue",
-            inline=False
-        )
+        embed.add_field(name="Queue Cleared", value=f"Removed {count} player(s) from the queue.", inline=False)
+        embed.set_footer(text=f"Executed by {interaction.user.display_name}")
 
-    if votes_cancelled == 0 and selections_cancelled == 0 and matches_cancelled == 0 and players_removed == 0:
-        embed.add_field(
-            name="No Changes",
-            value="No active votes, selections, or queued players were found in this channel.",
-            inline=False
-        )
-
-    embed.set_footer(text=f"Executed by {interaction.user.display_name}")
-
-    # Send the response
-    await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
 @bot.tree.command(name="sub", description="Substitute players in an active match")
 @app_commands.describe(

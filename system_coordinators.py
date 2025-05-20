@@ -19,12 +19,9 @@ class VoteSystemCoordinator:
         if channel_name in self.vote_systems:
             await self.vote_systems[channel_name].handle_reaction(reaction, user)
 
-    def is_voting_active(self, channel_id=None, match_id=None):
-        """Check if voting is active in a specific channel or any channel or match"""
-        if match_id:
-            # Forward the match_id to all vote systems and check if any return True
-            return any(vs.is_voting_active(match_id=match_id) for vs in self.vote_systems.values())
-        elif channel_id:
+    def is_voting_active(self, channel_id=None):
+        """Check if voting is active in a specific channel or any channel"""
+        if channel_id:
             channel = self.bot.get_channel(int(channel_id))
             if not channel:
                 return False
@@ -36,14 +33,9 @@ class VoteSystemCoordinator:
         else:
             return any(vs.is_voting_active() for vs in self.vote_systems.values())
 
-    def cancel_voting(self, channel_id=None, match_id=None):
-        """Cancel voting in a specific channel or all channels or by match_id"""
-        if match_id:
-            # Forward the match_id to all vote systems
-            for vs in self.vote_systems.values():
-                if hasattr(vs, 'cancel_voting') and callable(getattr(vs, 'cancel_voting')):
-                    vs.cancel_voting(match_id=match_id)
-        elif channel_id:
+    def cancel_voting(self, channel_id=None):
+        """Cancel voting in a specific channel or all channels"""
+        if channel_id:
             channel = self.bot.get_channel(int(channel_id))
             if not channel:
                 return
@@ -74,15 +66,9 @@ class CaptainSystemCoordinator:
         for cs in self.captains_systems.values():
             cs.set_bot(bot)
 
-    def is_selection_active(self, channel_id=None, match_id=None):
-        """Check if selection is active in a specific channel or any channel or match"""
-        if match_id:
-            # Forward the match_id to all captain systems and check if any return True
-            return any(cs.is_selection_active(match_id=match_id)
-                     for cs in self.captains_systems.values()
-                     if hasattr(cs, 'is_selection_active') and
-                        callable(getattr(cs, 'is_selection_active')))
-        elif channel_id:
+    def is_selection_active(self, channel_id=None):
+        """Check if selection is active in a specific channel or any channel"""
+        if channel_id:
             channel = self.bot.get_channel(int(channel_id))
             if not channel:
                 return False
@@ -94,14 +80,9 @@ class CaptainSystemCoordinator:
         else:
             return any(cs.is_selection_active() for cs in self.captains_systems.values())
 
-    def cancel_selection(self, channel_id=None, match_id=None):
-        """Cancel selection in a specific channel or all channels or by match_id"""
-        if match_id:
-            # Forward the match_id to all captain systems
-            for cs in self.captains_systems.values():
-                if hasattr(cs, 'cancel_selection') and callable(getattr(cs, 'cancel_selection')):
-                    cs.cancel_selection(match_id=match_id)
-        elif channel_id:
+    def cancel_selection(self, channel_id=None):
+        """Cancel selection in a specific channel or all channels"""
+        if channel_id:
             channel = self.bot.get_channel(int(channel_id))
             if not channel:
                 return
