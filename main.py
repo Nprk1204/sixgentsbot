@@ -738,7 +738,9 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
         member = interaction.user
 
     player_id = str(member.id)
-    player_data = system_coordinator.match_system.get_player_stats(player_id)
+
+    # FIX: Use players.find_one directly instead of get_player_stats method
+    player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
     # If no player data exists, create a placeholder profile based on their rank role
     if not player_data:
@@ -781,7 +783,17 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
             "losses": 0,
             "matches": 0,
             "tier": tier,
-            "is_new": True  # Flag to indicate this is a new player
+            "is_new": True,  # Flag to indicate this is a new player
+            "global_mmr": 300,  # Default global MMR
+            "global_wins": 0,
+            "global_losses": 0,
+            "global_matches": 0,
+            "current_streak": 0,
+            "longest_win_streak": 0,
+            "longest_loss_streak": 0,
+            "global_current_streak": 0,
+            "global_longest_win_streak": 0,
+            "global_longest_loss_streak": 0
         }
 
     # Calculate stats - add global stats
@@ -794,6 +806,14 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     matches = player_data.get("matches", 0)
     global_matches = player_data.get("global_matches", 0)
     is_new = player_data.get("is_new", False)
+
+    # Get streak information
+    current_streak = player_data.get("current_streak", 0)
+    longest_win_streak = player_data.get("longest_win_streak", 0)
+    longest_loss_streak = player_data.get("longest_loss_streak", 0)
+    global_current_streak = player_data.get("global_current_streak", 0)
+    global_longest_win_streak = player_data.get("global_longest_win_streak", 0)
+    global_longest_loss_streak = player_data.get("global_longest_loss_streak", 0)
 
     # Calculate win rates
     win_rate = 0
@@ -864,6 +884,22 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     embed.add_field(name="Record", value=f"{wins}W - {losses}L", inline=True)
     embed.add_field(name="Matches", value=str(matches), inline=True)
 
+    # Add streak information for ranked matches
+    if current_streak != 0:
+        streak_display = ""
+        if current_streak > 0:
+            if current_streak >= 3:
+                streak_display = f"🔥 {current_streak} Win Streak"
+            else:
+                streak_display = f"{current_streak} Win Streak"
+        else:
+            if current_streak <= -3:
+                streak_display = f"❄️ {abs(current_streak)} Loss Streak"
+            else:
+                streak_display = f"{abs(current_streak)} Loss Streak"
+
+        embed.add_field(name="Current Streak", value=streak_display, inline=True)
+
     # Add global section
     embed.add_field(name="__Global Stats__", value="", inline=False)
 
@@ -877,12 +913,44 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     embed.add_field(name="Record", value=f"{global_wins}W - {global_losses}L", inline=True)
     embed.add_field(name="Matches", value=str(global_matches), inline=True)
 
+    # Add streak information for global matches
+    if global_current_streak != 0:
+        global_streak_display = ""
+        if global_current_streak > 0:
+            if global_current_streak >= 3:
+                global_streak_display = f"🔥 {global_current_streak} Win Streak"
+            else:
+                global_streak_display = f"{global_current_streak} Win Streak"
+        else:
+            if global_current_streak <= -3:
+                global_streak_display = f"❄️ {abs(global_current_streak)} Loss Streak"
+            else:
+                global_streak_display = f"{abs(global_current_streak)} Loss Streak"
+
+        embed.add_field(name="Global Streak", value=global_streak_display, inline=True)
+
     # Add note for new players
     if is_new:
         embed.set_footer(
             text="⭐ New player - this is your starting MMR based on rank verification. Play matches to earn your spot on the leaderboard!")
     else:
-        embed.set_footer(text="Stats updated after each match")
+        # Add streak info in footer if there are any notable streaks
+        if (longest_win_streak >= 3 or abs(longest_loss_streak) >= 3 or
+                global_longest_win_streak >= 3 or abs(global_longest_loss_streak) >= 3):
+
+            streak_info = []
+            if longest_win_streak >= 3:
+                streak_info.append(f"Best ranked streak: {longest_win_streak} wins")
+            if abs(longest_loss_streak) >= 3:
+                streak_info.append(f"Worst ranked streak: {abs(longest_loss_streak)} losses")
+            if global_longest_win_streak >= 3:
+                streak_info.append(f"Best global streak: {global_longest_win_streak} wins")
+            if abs(global_longest_loss_streak) >= 3:
+                streak_info.append(f"Worst global streak: {abs(global_longest_loss_streak)} losses")
+
+            embed.set_footer(text=" | ".join(streak_info))
+        else:
+            embed.set_footer(text="Stats updated after each match")
 
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
 
