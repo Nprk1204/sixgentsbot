@@ -1134,6 +1134,680 @@ async def on_app_command_error(interaction: discord.Interaction, error):
                 print(f"Could not respond to interaction with error: {error}")
 
 
+# 1. Adjust MMR Command
+@bot.tree.command(name="adjustmmr", description="Admin command to adjust a player's MMR")
+@app_commands.describe(
+    player="The player whose MMR you want to adjust",
+    amount="The amount to adjust (positive or negative)",
+    global_mmr="Whether to adjust global MMR instead of ranked MMR"
+)
+@app_commands.choices(global_mmr=[
+    app_commands.Choice(name="Ranked MMR", value="false"),
+    app_commands.Choice(name="Global MMR", value="true")
+])
+async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Member, amount: int,
+                          global_mmr: str = "false"):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    # Determine which MMR to adjust
+    is_global = global_mmr.lower() == "true"
+    mmr_type = "Global" if is_global else "Ranked"
+
+    # Get player data
+    player_id = str(player.id)
+    player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+
+    # Handle player not found
+    if not player_data:
+        # Check for rank record as fallback
+        rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+        if rank_record:
+            # Create player entry with initial values
+            if is_global:
+                starting_mmr = rank_record.get("global_mmr", 300)
+                new_mmr = starting_mmr + amount
+
+                system_coordinator.match_system.players.insert_one({
+                    "id": player_id,
+                    "name": player.display_name,
+                    "mmr": 600,  # Default ranked MMR
+                    "global_mmr": new_mmr,
+                    "wins": 0,
+                    "global_wins": 0,
+                    "losses": 0,
+                    "global_losses": 0,
+                    "matches": 0,
+                    "global_matches": 0,
+                    "created_at": datetime.datetime.utcnow(),
+                    "last_updated": datetime.datetime.utcnow()
+                })
+
+                await interaction.response.send_message(
+                    f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
+                )
+                return
+            else:
+                # For ranked MMR, use tier-based MMR
+                tier = rank_record.get("tier", "Rank C")
+                starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
+                new_mmr = starting_mmr + amount
+
+                system_coordinator.match_system.players.insert_one({
+                    "id": player_id,
+                    "name": player.display_name,
+                    "mmr": new_mmr,
+                    "global_mmr": 300,  # Default global MMR
+                    "wins": 0,
+                    "global_wins": 0,
+                    "losses": 0,
+                    "global_losses": 0,
+                    "matches": 0,
+                    "global_matches": 0,
+                    "created_at": datetime.datetime.utcnow(),
+                    "last_updated": datetime.datetime.utcnow()
+                })
+
+                await interaction.response.send_message(
+                    f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
+                )
+                return
+        else:
+            await interaction.response.send_message(
+                f"Player {player.mention} not found in the database and has no rank verification. They need to verify their rank first.",
+                ephemeral=True
+            )
+            return
+
+    # Update existing player
+    if is_global:
+        old_mmr = player_data.get("global_mmr", 300)
+        new_mmr = old_mmr + amount
+
+        system_coordinator.match_system.players.update_one(
+            {"id": player_id},
+            {"$set": {
+                "global_mmr": new_mmr,
+                "last_updated": datetime.datetime.utcnow()
+            }}
+        )
+    else:
+        old_mmr = player_data.get("mmr", 600)
+        new_mmr = old_mmr + amount
+
+        system_coordinator.match_system.players.update_one(
+            {"id": player_id},
+            {"$set": {
+                "mmr": new_mmr,
+                "last_updated": datetime.datetime.utcnow()
+            }}
+        )
+
+    # Create embed response
+    embed = discord.Embed(
+        title=f"MMR Adjustment for {player.display_name}",
+        color=0x00ff00 if amount >= 0 else 0xff0000
+    )
+
+    embed.add_field(
+        name=f"{mmr_type} MMR Adjustment",
+        value=f"**Old MMR:** {old_mmr}\n**New MMR:** {new_mmr}\n**Change:** {'+' if amount >= 0 else ''}{amount}",
+        inline=False
+    )
+
+    # Add tier information if it's ranked MMR
+    if not is_global:
+        # Determine new tier based on MMR
+        old_tier = "Rank C"
+        if old_mmr >= 1600:
+            old_tier = "Rank A"
+        elif old_mmr >= 1100:
+            old_tier = "Rank B"
+
+        new_tier = "Rank C"
+        if new_mmr >= 1600:
+            new_tier = "Rank A"
+        elif new_mmr >= 1100:
+            new_tier = "Rank B"
+
+        tier_changed = old_tier != new_tier
+
+        embed.add_field(
+            name="Rank Tier",
+            value=f"**Old Tier:** {old_tier}\n**New Tier:** {new_tier}\n**Changed:** {'Yes' if tier_changed else 'No'}",
+            inline=False
+        )
+
+        # Update Discord role if tier changed
+        if tier_changed:
+            embed.add_field(
+                name="Discord Role",
+                value="Discord role will be updated on the player's next match.",
+                inline=False
+            )
+
+    embed.set_footer(
+        text=f"Adjusted by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    await interaction.response.send_message(embed=embed)
+
+
+# 2. Remove Match Command
+@bot.tree.command(name="removematch", description="Remove the results of a match (Admin only)")
+@app_commands.describe(
+    match_id="The ID of the match to remove"
+)
+async def removematch_slash(interaction: discord.Interaction, match_id: str):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    # Defer response since this might take some time
+    await interaction.response.defer()
+
+    # Look up the match
+    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+
+    if not match:
+        await interaction.followup.send(f"Match with ID `{match_id}` not found.")
+        return
+
+    # Check if the match is completed
+    if match.get("status") != "completed":
+        await interaction.followup.send(f"Match with ID `{match_id}` is not completed and cannot be removed.")
+        return
+
+    # Store match details for confirmation
+    winner = match.get("winner")
+    team1 = match.get("team1", [])
+    team2 = match.get("team2", [])
+    is_global = match.get("is_global", False)
+    mmr_changes = match.get("mmr_changes", [])
+
+    if not mmr_changes:
+        await interaction.followup.send(
+            f"Match with ID `{match_id}` has no MMR changes recorded. Cannot safely remove it.")
+        return
+
+    # Reverse MMR changes for each player
+    for change in mmr_changes:
+        player_id = change.get("player_id")
+        old_mmr = change.get("old_mmr")
+        is_win = change.get("is_win")
+        is_global_match = change.get("is_global", is_global)
+
+        if not player_id or old_mmr is None:
+            continue
+
+        # Update player record
+        player = system_coordinator.match_system.players.find_one({"id": player_id})
+
+        if player:
+            if is_global_match:
+                # Update global stats
+                system_coordinator.match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {"global_mmr": old_mmr},
+                     "$inc": {
+                         "global_matches": -1,
+                         "global_wins": -1 if is_win else 0,
+                         "global_losses": 0 if is_win else -1
+                     }}
+                )
+            else:
+                # Update ranked stats
+                system_coordinator.match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {"mmr": old_mmr},
+                     "$inc": {
+                         "matches": -1,
+                         "wins": -1 if is_win else 0,
+                         "losses": 0 if is_win else -1
+                     }}
+                )
+
+    # Remove the match from the database
+    system_coordinator.match_system.matches.delete_one({"match_id": match_id})
+
+    # Create embed response
+    embed = discord.Embed(
+        title="Match Removed",
+        description=f"Match ID: `{match_id}`",
+        color=0xff0000
+    )
+
+    # Format team names
+    team1_names = [p.get("name", "Unknown") for p in team1]
+    team2_names = [p.get("name", "Unknown") for p in team2]
+
+    embed.add_field(
+        name="Team 1" + (" (Winner)" if winner == 1 else ""),
+        value=", ".join(team1_names) if team1_names else "Unknown",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Team 2" + (" (Winner)" if winner == 2 else ""),
+        value=", ".join(team2_names) if team2_names else "Unknown",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Match Type",
+        value="Global" if is_global else "Ranked",
+        inline=True
+    )
+
+    embed.add_field(
+        name="MMR Changes",
+        value="All MMR changes have been reversed",
+        inline=True
+    )
+
+    embed.set_footer(
+        text=f"Removed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    await interaction.followup.send(embed=embed)
+
+
+# 3. Reset Leaderboard Command
+@bot.tree.command(name="resetleaderboard", description="Reset the leaderboard (Admin only)")
+@app_commands.describe(
+    confirmation="Type 'CONFIRM' to confirm the reset",
+    reset_type="Type of reset to perform"
+)
+@app_commands.choices(reset_type=[
+    app_commands.Choice(name="Global Only", value="global"),
+    app_commands.Choice(name="Ranked Only", value="ranked"),
+    app_commands.Choice(name="Complete Reset", value="all")
+])
+async def resetleaderboard_slash(interaction: discord.Interaction, confirmation: str, reset_type: str = "all"):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    # Check confirmation
+    if confirmation != "CONFIRM":
+        await interaction.response.send_message(
+            "❌ Leaderboard reset canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
+            ephemeral=True
+        )
+        return
+
+    # Defer response as this operation could take time
+    await interaction.response.defer()
+
+    # Create backup collection name with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_collection_name = f"players_backup_{timestamp}"
+
+    # Create a backup of the current players collection
+    backup_collection = db.get_collection(backup_collection_name)
+    all_players = list(system_coordinator.match_system.players.find())
+
+    if all_players:
+        backup_collection.insert_many(all_players)
+
+    # Initialize counters
+    player_count = len(all_players)
+    reset_count = 0
+
+    if reset_type == "global":
+        # Reset only global stats
+        result = system_coordinator.match_system.players.update_many(
+            {},
+            {"$set": {
+                "global_mmr": 300,
+                "global_wins": 0,
+                "global_losses": 0,
+                "global_matches": 0
+            }}
+        )
+        reset_count = result.modified_count
+
+        # Reset global matches
+        matches_result = system_coordinator.match_system.matches.delete_many({"is_global": True})
+        matches_removed = matches_result.deleted_count
+
+    elif reset_type == "ranked":
+        # Reset only ranked stats
+        for player in all_players:
+            player_id = player.get("id")
+
+            # Look up rank record for default MMR based on tier
+            rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+            if rank_record:
+                tier = rank_record.get("tier", "Rank C")
+                starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
+            else:
+                starting_mmr = 600  # Default
+
+            # Update with tier-based starting MMR
+            system_coordinator.match_system.players.update_one(
+                {"id": player_id},
+                {"$set": {
+                    "mmr": starting_mmr,
+                    "wins": 0,
+                    "losses": 0,
+                    "matches": 0
+                }}
+            )
+            reset_count += 1
+
+        # Reset ranked matches
+        matches_result = system_coordinator.match_system.matches.delete_many({"is_global": {"$ne": True}})
+        matches_removed = matches_result.deleted_count
+
+    else:  # "all"
+        # Reset all stats - preserve player entries but reset everything
+        for player in all_players:
+            player_id = player.get("id")
+
+            # Look up rank record for default MMR based on tier
+            rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+            if rank_record:
+                tier = rank_record.get("tier", "Rank C")
+                starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
+            else:
+                starting_mmr = 600  # Default
+
+            # Update with tier-based starting MMR
+            system_coordinator.match_system.players.update_one(
+                {"id": player_id},
+                {"$set": {
+                    "mmr": starting_mmr,
+                    "global_mmr": 300,
+                    "wins": 0,
+                    "global_wins": 0,
+                    "losses": 0,
+                    "global_losses": 0,
+                    "matches": 0,
+                    "global_matches": 0
+                }}
+            )
+            reset_count += 1
+
+        # Delete all matches
+        matches_result = system_coordinator.match_system.matches.delete_many({})
+        matches_removed = matches_result.deleted_count
+
+    # Record the reset in the resets collection
+    resets_collection = db.get_collection('resets')
+    resets_collection.insert_one({
+        "type": "leaderboard_reset",
+        "reset_type": reset_type,
+        "timestamp": datetime.datetime.utcnow(),
+        "admin_id": str(interaction.user.id),
+        "admin_name": interaction.user.display_name,
+        "backup_collection": backup_collection_name
+    })
+
+    # Send confirmation
+    embed = discord.Embed(
+        title="🔄 Leaderboard Reset Complete",
+        description=f"Reset type: **{reset_type.upper()}**",
+        color=0xff9900  # Orange color
+    )
+
+    embed.add_field(
+        name="Stats",
+        value=f"Players affected: {reset_count}/{player_count}\nMatches removed: {matches_removed}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Backup Created",
+        value=f"Collection: `{backup_collection_name}`",
+        inline=False
+    )
+
+    if reset_type in ["ranked", "all"]:
+        embed.add_field(
+            name="MMR Reset",
+            value="All players have been reset to their rank-based starting MMR values.",
+            inline=False
+        )
+
+    embed.set_footer(
+        text=f"Reset performed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    await interaction.followup.send(embed=embed)
+
+    # Announce the reset in the channel
+    announcement = discord.Embed(
+        title="🔄 Season Reset",
+        description=f"A leaderboard reset has been performed by {interaction.user.mention}",
+        color=0xff9900
+    )
+
+    announcement.add_field(
+        name="Reset Type",
+        value=f"{reset_type.title()} stats have been reset.",
+        inline=False
+    )
+
+    announcement.add_field(
+        name="What This Means",
+        value="Your MMR has been reset to the starting value based on your verified rank.",
+        inline=False
+    )
+
+    # Send announcement to the channel
+    await interaction.channel.send(embed=announcement)
+
+
+# 4. Sub Command
+@bot.tree.command(name="sub", description="Substitute players in an active match")
+@app_commands.describe(
+    match_id="The ID of the match",
+    player_out="The player to remove from the match",
+    player_in="The player to add to the match"
+)
+async def sub_slash(interaction: discord.Interaction, match_id: str, player_out: discord.Member,
+                    player_in: discord.Member):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has permissions (admin or match participant)
+    is_admin = interaction.user.guild_permissions.administrator
+
+    # Look up the match
+    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+
+    if not match:
+        await interaction.response.send_message(f"Match with ID `{match_id}` not found.", ephemeral=True)
+        return
+
+    # Check if match is in progress
+    if match.get("status") != "in_progress":
+        await interaction.response.send_message(
+            f"Match with ID `{match_id}` is not in progress (status: {match.get('status')}). " +
+            "Substitutions are only available for in-progress matches.",
+            ephemeral=True
+        )
+        return
+
+    # Get player data
+    player_out_id = str(player_out.id)
+    player_in_id = str(player_in.id)
+    player_out_name = player_out.display_name
+    player_in_name = player_in.display_name
+    player_out_mention = player_out.mention
+    player_in_mention = player_in.mention
+
+    # If not admin, check if user is part of the match
+    if not is_admin:
+        # Get teams
+        team1 = match.get("team1", [])
+        team2 = match.get("team2", [])
+        all_players = team1 + team2
+
+        # Check if interaction user is part of the match
+        user_in_match = any(p.get("id") == str(interaction.user.id) for p in all_players)
+
+        if not user_in_match:
+            await interaction.response.send_message(
+                "You must be part of the match or an administrator to make substitutions.",
+                ephemeral=True
+            )
+            return
+
+    # Check which team player_out is on
+    team1 = match.get("team1", [])
+    team2 = match.get("team2", [])
+
+    player_found = False
+    team_num = 0
+    team_index = -1
+
+    # Check team1
+    for i, player in enumerate(team1):
+        if player.get("id") == player_out_id:
+            team_num = 1
+            team_index = i
+            player_found = True
+            break
+
+    # Check team2 if not found in team1
+    if not player_found:
+        for i, player in enumerate(team2):
+            if player.get("id") == player_out_id:
+                team_num = 2
+                team_index = i
+                player_found = True
+                break
+
+    if not player_found:
+        await interaction.response.send_message(
+            f"{player_out_mention} is not part of match `{match_id}`.",
+            ephemeral=True
+        )
+        return
+
+    # Check if player_in is already in a match
+    player_in_match = system_coordinator.queue_manager.get_player_match(player_in_id)
+
+    if player_in_match and player_in_match.get("match_id") != match_id:
+        await interaction.response.send_message(
+            f"{player_in_mention} is already in another active match and cannot be substituted.",
+            ephemeral=True
+        )
+        return
+
+    # Check if player_in is already in this match
+    player_in_this_match = any(p.get("id") == player_in_id for p in team1 + team2)
+
+    if player_in_this_match:
+        await interaction.response.send_message(
+            f"{player_in_mention} is already part of match `{match_id}`.",
+            ephemeral=True
+        )
+        return
+
+    # Create new player data
+    new_player_data = {
+        "id": player_in_id,
+        "name": player_in_name,
+        "mention": player_in_mention
+    }
+
+    # Update the match in the database
+    if team_num == 1:
+        # Replace in team1
+        team1[team_index] = new_player_data
+
+        system_coordinator.match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {"team1": team1}}
+        )
+
+        # Update in the queue manager's active matches
+        if match_id in system_coordinator.queue_manager.active_matches:
+            system_coordinator.queue_manager.active_matches[match_id]["team1"] = team1
+
+            # Update player-match mapping
+            system_coordinator.queue_manager.player_matches.pop(player_out_id, None)
+            system_coordinator.queue_manager.player_matches[player_in_id] = match_id
+    else:
+        # Replace in team2
+        team2[team_index] = new_player_data
+
+        system_coordinator.match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {"team2": team2}}
+        )
+
+        # Update in the queue manager's active matches
+        if match_id in system_coordinator.queue_manager.active_matches:
+            system_coordinator.queue_manager.active_matches[match_id]["team2"] = team2
+
+            # Update player-match mapping
+            system_coordinator.queue_manager.player_matches.pop(player_out_id, None)
+            system_coordinator.queue_manager.player_matches[player_in_id] = match_id
+
+    # Create embed response
+    embed = discord.Embed(
+        title="Player Substitution",
+        description=f"Match ID: `{match_id}`",
+        color=0x00aaff
+    )
+
+    embed.add_field(
+        name="Team",
+        value=f"Team {team_num}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Substitution",
+        value=f"OUT: {player_out_mention}\nIN: {player_in_mention}",
+        inline=False
+    )
+
+    embed.set_footer(
+        text=f"Requested by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    await interaction.response.send_message(embed=embed)
+
 # Run the bot with the keepalive server
 if __name__ == "__main__":
     # Start the keepalive server first
