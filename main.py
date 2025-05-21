@@ -1532,8 +1532,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_collection_name = f"players_backup_{timestamp}"
 
-    # Create a backup of the current players collection
-    backup_collection = db[f'players_backup_{timestamp}']
+    # Create a backup of the current players collection - using get_collection method
+    backup_collection = db.get_collection(backup_collection_name)
     all_players = list(system_coordinator.match_system.players.find())
 
     if all_players:
@@ -1596,6 +1596,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         # 1. Make backup of rank verification data
         ranks_collection = db.get_collection('ranks')
         all_ranks = list(ranks_collection.find())
+        # Use get_collection instead of dictionary access
         backup_ranks_collection = db.get_collection(f"ranks_backup_{timestamp}")
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
