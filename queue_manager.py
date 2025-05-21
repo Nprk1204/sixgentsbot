@@ -303,9 +303,8 @@ class QueueManager:
             return f"Not enough players to start match (need 6, have {len(players)})"
 
         # Generate a unique match ID - make it shorter and more readable
-        # Use a specific format that's easy to read and consistent
-        # Format: 8 character hexadecimal
-        match_id = str(uuid.uuid4())[:8]
+        # Always use 6 character hexadecimal format
+        match_id = str(uuid.uuid4().hex)[:6]
 
         # Determine if this is a global match
         is_global = channel.name.lower() == "global"

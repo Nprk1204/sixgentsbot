@@ -371,6 +371,11 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Create context for backward compatibility
     ctx = SimpleContext(interaction)
 
+    # Normalize the match ID (take just the first 6 characters if longer)
+    match_id = match_id.strip()
+    if len(match_id) > 8:
+        match_id = match_id[:6]
+
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(

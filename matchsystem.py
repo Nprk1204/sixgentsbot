@@ -33,6 +33,7 @@ class MatchSystem:
 
         # Generate a shorter match ID if needed
         if not match_id or len(match_id) > 8:
+            # Use a consistent short format (6 hex characters)
             match_id = str(uuid.uuid4().hex)[:6]
 
         # If is_global wasn't explicitly provided, try to detect from channel
@@ -73,6 +74,11 @@ class MatchSystem:
 
     async def report_match_by_id(self, match_id, reporter_id, result, ctx=None):
         """Report a match result by match ID and win/loss"""
+        # Clean the match ID first (remove any potential long format)
+        match_id = match_id.strip()
+        if len(match_id) > 8:  # If it's longer than our standard 6-char format
+            match_id = match_id[:6]  # Take just the first 6 characters
+
         # Check if this is an active match in the queue manager
         active_match = None
         if self.queue_manager:
@@ -659,6 +665,9 @@ class MatchSystem:
                     if player_data:
                         mmr = player_data.get("mmr", 600)
                         await self.update_discord_role(ctx, player_id, mmr)
+
+        if self.queue_manager:
+            self.queue_manager.remove_match(match_id)
 
         return updated_match, None
 
