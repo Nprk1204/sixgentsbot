@@ -562,6 +562,13 @@ class CaptainsSystem:
 
         selection_state = self.active_selections[channel_id]
 
+        # Get the original match ID from the selection state
+        original_match_id = selection_state.get('match_id')
+        if not original_match_id:
+            print("No match ID found in selection state")
+            # If no match ID is found, generate a short consistent one
+            original_match_id = str(uuid.uuid4().hex)[:6]
+
         # Get the announcement channel
         channel = selection_state.get('announcement_channel')
         if not channel:
@@ -591,8 +598,9 @@ class CaptainsSystem:
 
         # Create match record with explicit is_global flag
         try:
+            # Use the original match ID instead of creating a new UUID
             match_id = self.match_system.create_match(
-                str(uuid.uuid4()),
+                original_match_id,  # Use the original match ID
                 team1,
                 team2,
                 channel_id,
@@ -636,7 +644,18 @@ class CaptainsSystem:
         # Clean up
         try:
             print(f"Fallback: Removing {len(all_players)} players from queue")
-            self.queue.remove_players_from_queue(all_players)
+            # Fix: Use queue_manager instead of queue
+            if self.queue_manager:
+                # Remove players from the appropriate queue collection
+                player_ids = [p.get('id') for p in all_players]
+                self.queue_manager.queue_collection.delete_many({"id": {"$in": player_ids}})
+
+                # Make sure to update the in-memory player tracking
+                for player in all_players:
+                    player_id = player.get('id')
+                    if player_id:
+                        self.queue_manager.player_matches[player_id] = match_id
+
             print(f"Fallback: Canceling selection for channel {channel_id}")
             self.cancel_selection(channel_id)
         except Exception as e:
