@@ -29,21 +29,13 @@ class MatchSystem:
 
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
         """Create a completed match entry in the database"""
-        print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
+        print(
+            f"MatchSystem.create_match called with match_id: {match_id}, channel_id: {channel_id}, is_global: {is_global}")
 
         # Generate a shorter match ID if needed
         if not match_id or len(match_id) > 8:
-            # Use a consistent short format (6 hex characters)
             match_id = str(uuid.uuid4().hex)[:6]
-
-        # If is_global wasn't explicitly provided, try to detect from channel
-        if not is_global and self.bot:
-            try:
-                channel = self.bot.get_channel(int(channel_id))
-                if channel:
-                    is_global = channel.name.lower() == "global"
-            except Exception as e:
-                print(f"Error in channel detection: {e}")
+            print(f"Generated new short match ID: {match_id}")
 
         # Create match data
         match_data = {
@@ -60,10 +52,26 @@ class MatchSystem:
             "is_global": is_global
         }
 
-        # Store in database
-        self.matches.insert_one(match_data)
-        print(f"Created match with ID: {match_id}, status: in_progress, is_global: {is_global}")
+        # Check if this match already exists in the database
+        existing_match = self.matches.find_one({"match_id": match_id})
+        if existing_match:
+            print(f"Match {match_id} already exists in database. Updating it.")
+            # Update the existing match
+            self.matches.update_one(
+                {"match_id": match_id},
+                {"$set": {
+                    "team1": team1,
+                    "team2": team2,
+                    "status": "in_progress",
+                    "is_global": is_global
+                }}
+            )
+        else:
+            # Insert as a new match
+            print(f"Creating new match in database: {match_id}")
+            self.matches.insert_one(match_data)
 
+        print(f"Match {match_id} successfully created/updated in database")
         return match_id
 
     def get_active_match_by_channel(self, channel_id):
