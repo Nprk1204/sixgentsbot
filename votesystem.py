@@ -297,12 +297,17 @@ class VoteSystem:
         if not channel:
             return
 
-        # Get the match
+        # Get the match - make sure we're using the exact match ID
         match = self.queue_manager.get_match_by_id(match_id)
         if not match:
+            print(f"Match {match_id} not found during vote finalization")
+            await channel.send(f"Error: Match {match_id} not found. This is a system error, please try again.")
             return
 
         players = match.get('players', [])
+
+        print(f"Finalizing vote for match {match_id} - {len(vote_state['voters'])}/6 players voted")
+        print(f"Random votes: {vote_state['random_votes']}, Captains votes: {vote_state['captains_votes']}")
 
         # Disable the buttons in the view
         if vote_state['view']:
@@ -336,7 +341,7 @@ class VoteSystem:
                 await channel.send("Captains system not available. Falling back to random teams...")
                 await self.create_balanced_random_teams(channel, match_id)
         else:
-            # Random teams wins - create balanced random teams
+            # Random teams wins - create balanced random teams with the original match ID
             await self.create_balanced_random_teams(channel, match_id)
 
             # Cancel this vote
