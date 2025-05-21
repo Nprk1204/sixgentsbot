@@ -8,14 +8,14 @@ import uuid
 
 
 class CaptainsSystem:
-    def __init__(self, db, queue_handler, match_system=None):
-        self.queue = queue_handler
+    def __init__(self, db, queue_manager, match_system=None):
+        self.queue_manager = queue_manager
         self.match_system = match_system
         self.bot = None
         self.db = db
 
-        # Track active selections by channel
-        self.active_selections = {}  # Map of channel_id to selection state
+        # Track active selections by match ID
+        self.active_selections = {}  # Map of match_id to selection state
 
     def set_match_system(self, match_system):
         """Set the match system reference"""
@@ -25,27 +25,54 @@ class CaptainsSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def is_selection_active(self, channel_id=None):
-        """Check if captain selection is active in a specific channel or any channel"""
-        if channel_id:
-            return str(channel_id) in self.active_selections
+    def is_selection_active(self, match_id=None, channel_id=None):
+        """
+        Check if captain selection is active
+        If match_id is provided, check for that specific match
+        If channel_id is provided, check for any match in that channel
+        If neither is provided, check if any selection is active
+        """
+        if match_id:
+            return match_id in self.active_selections
+        elif channel_id:
+            # Check if any match in this channel has active selection
+            for match_id, selection_state in self.active_selections.items():
+                match = self.queue_manager.get_match_by_id(match_id)
+                if match and str(match.get('channel_id', '')) == str(channel_id):
+                    return True
+            return False
         else:
             return len(self.active_selections) > 0
 
-    def cancel_selection(self, channel_id=None):
-        """Cancel the current selection process for a specific channel or all channels"""
-        if channel_id:
-            if str(channel_id) in self.active_selections:
-                print(f"Canceling captain selection for channel_id: {channel_id}")
-                del self.active_selections[str(channel_id)]
+    def cancel_selection(self, match_id=None, channel_id=None):
+        """
+        Cancel the current selection process
+        If match_id is provided, cancel for that specific match
+        If channel_id is provided, cancel for all matches in that channel
+        If neither is provided, cancel all selection processes
+        """
+        if match_id:
+            if match_id in self.active_selections:
+                print(f"Canceling captain selection for match_id: {match_id}")
+                del self.active_selections[match_id]
+        elif channel_id:
+            # Cancel selection for all matches in this channel
+            match_ids_to_remove = []
+            for match_id, selection_state in self.active_selections.items():
+                match = self.queue_manager.get_match_by_id(match_id)
+                if match and str(match.get('channel_id', '')) == str(channel_id):
+                    match_ids_to_remove.append(match_id)
+
+            for match_id in match_ids_to_remove:
+                if match_id in self.active_selections:
+                    print(f"Canceling captain selection for match_id: {match_id} in channel_id: {channel_id}")
+                    del self.active_selections[match_id]
         else:
             print("Canceling all captain selections")
             self.active_selections.clear()
 
-    def start_captains_selection(self, players, channel_id):
-        """Start the captains selection process for a specific channel"""
-        channel_id = str(channel_id)
-
+    def start_captains_selection(self, players, match_id, channel):
+        """Start the captains selection process for a specific match"""
         if len(players) < 6:
             return "Not enough players to start captain selection!"
 
@@ -55,19 +82,21 @@ class CaptainsSystem:
         captain2 = players[1]
         remaining_players = players[2:]
 
-        # Initialize selection state for this channel
-        self.active_selections[channel_id] = {
+        # Initialize selection state for this match
+        self.active_selections[match_id] = {
             'captain1': captain1,
             'captain2': captain2,
             'remaining_players': remaining_players,
             'captain1_team': [captain1],
             'captain2_team': [captain2],
             'match_players': players,
+            'match_id': match_id,
+            'channel_id': str(channel.id),
             'announcement_channel': None
         }
 
         # Format remaining players for display
-        remaining_mentions = [p['mention'] for p in remaining_players]
+        remaining_mentions = [p.get('mention', p.get('name', 'Unknown')) for p in remaining_players]
 
         # Create an embed instead of plain text
         embed = discord.Embed(
@@ -75,25 +104,36 @@ class CaptainsSystem:
             color=0xf1c40f  # Warm yellow color
         )
 
-        embed.add_field(name="Captain 1", value=captain1['mention'], inline=True)
-        embed.add_field(name="Captain 2", value=captain2['mention'], inline=True)
+        embed.add_field(name="Captain 1", value=captain1.get('mention', captain1.get('name', 'Unknown')), inline=True)
+        embed.add_field(name="Captain 2", value=captain2.get('mention', captain2.get('name', 'Unknown')), inline=True)
         embed.add_field(name="Available Players", value=", ".join(remaining_mentions), inline=False)
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
         embed.set_footer(text="Captains will be contacted via DM to make their selections.")
 
         return embed
 
-    async def execute_captain_selection(self, channel):
+    async def execute_captain_selection(self, channel, match_id=None):
+        """Execute the captain selection process for a match in the channel"""
         channel_id = str(channel.id)
         is_global = channel.name.lower() == "global"
 
-        print(f"Captain selection for channel: {channel.name}, is_global: {is_global}")
+        # If match_id is not provided, find the active match in selection state
+        if not match_id:
+            match = self.queue_manager.get_match_by_channel(channel_id, status="selection")
+            if not match:
+                await channel.send("No match in selection phase found in this channel.")
+                return
+            match_id = match.get('match_id')
 
-        # Check if selection is active for this channel
-        if not self.is_selection_active(channel_id):
+        print(f"Captain selection for match: {match_id}, is_global: {is_global}")
+
+        # Check if selection is active for this match
+        if match_id not in self.active_selections:
+            await channel.send(f"No active captain selection for match ID: {match_id}")
             return
 
-        # Get the selection state for this channel
-        selection_state = self.active_selections[channel_id]
+        # Get the selection state for this match
+        selection_state = self.active_selections[match_id]
 
         # Set announcement channel
         selection_state['announcement_channel'] = channel
@@ -107,25 +147,26 @@ class CaptainsSystem:
 
         try:
             # Check if captains are dummy players
-            if captain1['id'].startswith('9000') or captain2['id'].startswith('9000'):
+            if captain1.get('id', '').startswith('9000') or captain2.get('id', '').startswith('9000'):
                 await channel.send(
                     "One or both captains are dummy players for testing. Falling back to random team selection.")
-                await self.fallback_to_random(channel_id)
+                await self.fallback_to_random(match_id)
                 return
 
             # Get discord users from IDs
             try:
-                captain1_user = await self.bot.fetch_user(int(captain1['id']))
-                captain2_user = await self.bot.fetch_user(int(captain2['id']))
+                captain1_user = await self.bot.fetch_user(int(captain1.get('id', 0)))
+                captain2_user = await self.bot.fetch_user(int(captain2.get('id', 0)))
             except (ValueError, discord.NotFound, discord.HTTPException) as e:
                 await channel.send(f"Error fetching captain users: {str(e)}. Falling back to random team selection.")
-                await self.fallback_to_random(channel_id)
+                await self.fallback_to_random(match_id)
                 return
 
             # Initial message to players
-            await channel.send(f"📨 DMing captains for team selection... {captain1['mention']} will pick first.")
+            await channel.send(
+                f"📨 DMing captains for team selection... {captain1.get('mention', captain1.get('name', 'Unknown'))} will pick first.")
 
-            # Get player MMRs for display - now passing the channel to determine if global or ranked
+            # Get player MMRs for display - pass channel for global vs ranked determination
             player_mmrs = await self.get_player_mmrs(remaining_players, channel)
 
             # PHASE 1: Captain 1 selects one player
@@ -135,7 +176,8 @@ class CaptainsSystem:
                 # Random selection if timeout
                 selection_index = random.randint(0, len(remaining_players) - 1)
                 selected_player = remaining_players[selection_index]
-                await channel.send(f"⏱️ {captain1['mention']} didn't respond in time. Random player selected.")
+                await channel.send(
+                    f"⏱️ {captain1.get('mention', captain1.get('name', 'Unknown'))} didn't respond in time. Random player selected.")
                 try:
                     await captain1_user.send("Time's up! A random player has been selected for you.")
                 except:
@@ -143,7 +185,8 @@ class CaptainsSystem:
 
             # Add selected player to team1
             captain1_team.append(selected_player)
-            await channel.send(f"🔄 **Captain 1** ({captain1['name']}) selected {selected_player['name']}")
+            await channel.send(
+                f"🔄 **Captain 1** ({captain1.get('name', 'Unknown')}) selected {selected_player.get('name', 'Unknown')}")
 
             # Remove selected player from remaining players
             remaining_players.remove(selected_player)
@@ -153,36 +196,35 @@ class CaptainsSystem:
 
             if not selected_players or len(selected_players) < 2:
                 # Random selection for missing picks
-                needed = 2 - len(selected_players)
+                needed = 2 - len(selected_players or [])
                 for _ in range(needed):
                     if remaining_players:
                         selection_index = random.randint(0, len(remaining_players) - 1)
                         selected_player = remaining_players.pop(selection_index)
                         captain2_team.append(selected_player)
                         await channel.send(
-                            f"🔄 **Captain 2** ({captain2['name']}) randomly selected {selected_player['name']}")
+                            f"🔄 **Captain 2** ({captain2.get('name', 'Unknown')}) randomly selected {selected_player.get('name', 'Unknown')}")
             else:
                 # Add selected players to team2
                 for player in selected_players:
                     captain2_team.append(player)
                     if player in remaining_players:  # Use this check to avoid errors
                         remaining_players.remove(player)
-                    await channel.send(f"🔄 **Captain 2** ({captain2['name']}) selected {player['name']}")
+                    await channel.send(
+                        f"🔄 **Captain 2** ({captain2.get('name', 'Unknown')}) selected {player.get('name', 'Unknown')}")
 
             # Last player automatically goes to Team 1
             if remaining_players:
                 last_player = remaining_players[0]
                 captain1_team.append(last_player)
-                await channel.send(f"🔄 Last player {last_player['name']} automatically assigned to Team 1")
+                await channel.send(
+                    f"🔄 Last player {last_player.get('name', 'Unknown')} automatically assigned to Team 1")
 
             # Create the match
-            match_id = self.match_system.create_match(
-                str(uuid.uuid4()),
-                captain1_team,
-                captain2_team,
-                channel_id,
-                is_global=is_global
-            )
+            channel_id = selection_state.get('channel_id')
+
+            # Update the team assignments in queue_manager
+            self.queue_manager.assign_teams_to_match(match_id, captain1_team, captain2_team)
 
             # Create team announcement embed
             embed = self.create_teams_embed(match_id, captain1, captain2, captain1_team, captain2_team)
@@ -191,8 +233,7 @@ class CaptainsSystem:
             await channel.send(embed=embed)
 
             # Clean up
-            self.queue.remove_players_from_queue(selection_state['match_players'])
-            self.cancel_selection(channel_id)
+            self.cancel_selection(match_id=match_id)
 
         except Exception as e:
             import traceback
@@ -201,7 +242,7 @@ class CaptainsSystem:
             # Something went wrong
             await channel.send(
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
-            await self.fallback_to_random(channel_id)
+            await self.fallback_to_random(match_id)
 
     async def get_player_mmrs(self, players, channel=None):
         """

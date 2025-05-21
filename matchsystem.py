@@ -1,19 +1,18 @@
 import math
 import discord
-from discord.ext import commands
 import datetime
 import uuid
 
 
 class MatchSystem:
-    def __init__(self, db):
+    def __init__(self, db, queue_manager=None):
         self.db = db
-        self.matches = db.get_collection('matches')
-        self.players = db.get_collection('players')
-        self.active_matches = {}  # Store active matches in memory
+        self.matches = db.get_collection('matches')  # For completed match history
+        self.players = db.get_collection('players')  # For player stats
+        self.queue_manager = queue_manager  # Reference to queue manager for active matches
         self.bot = None
 
-        # Simplified - keep just the three tier-based MMR values
+        # Tier-based MMR values
         self.TIER_MMR = {
             "Rank A": 1850,  # Grand Champion I and above
             "Rank B": 1350,  # Champion I to Champion III
@@ -24,82 +23,83 @@ class MatchSystem:
         """Set the bot instance"""
         self.bot = bot
 
-    def create_match(self, match_id, team1, team2, channel_id, is_global=False):
-        print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
-        """Create a new match entry"""
-        # Generate a shorter match ID that's easier for users to type
-        short_id = str(uuid.uuid4().hex)[:6]  # Just use first 6 characters of a UUID
+    def set_queue_manager(self, queue_manager):
+        """Set the queue manager reference"""
+        self.queue_manager = queue_manager
 
-        # Add better debugging for channel detection, but ONLY if is_global wasn't explicitly provided
-        if not is_global:  # Only try to detect if is_global wasn't explicitly True
+    def create_match(self, match_id, team1, team2, channel_id, is_global=False):
+        """Create a completed match entry in the database"""
+        print(f"MatchSystem.create_match called with channel_id: {channel_id}, is_global: {is_global}")
+
+        # Generate a shorter match ID if needed
+        if not match_id or len(match_id) > 8:
+            match_id = str(uuid.uuid4().hex)[:6]
+
+        # If is_global wasn't explicitly provided, try to detect from channel
+        if not is_global and self.bot:
             try:
-                if self.bot:
-                    channel = self.bot.get_channel(int(channel_id))
-                    print(f"Channel lookup result: {channel}")
-                    if channel:
-                        channel_name = channel.name.lower()
-                        print(f"Channel name: {channel_name}")
-                        is_global = channel_name == "global"
-                    else:
-                        print(f"Failed to find channel with ID: {channel_id}")
-                else:
-                    print("Bot reference is None during match creation")
+                channel = self.bot.get_channel(int(channel_id))
+                if channel:
+                    is_global = channel.name.lower() == "global"
             except Exception as e:
                 print(f"Error in channel detection: {e}")
-        else:
-            print(f"Using provided is_global={is_global} without re-detection")
 
-        # Clear debug print
-        print(f"Created match with ID: {short_id}, status: in_progress, is_global: {is_global}")
-
+        # Create match data
         match_data = {
-            "match_id": short_id,  # Use the shorter ID
+            "match_id": match_id,
             "team1": team1,
             "team2": team2,
-            "status": "in_progress",  # Make sure this is set correctly
+            "status": "in_progress",
             "winner": None,
             "score": {"team1": 0, "team2": 0},
             "channel_id": channel_id,
             "created_at": datetime.datetime.utcnow(),
             "completed_at": None,
             "reported_by": None,
-            "is_global": is_global  # Add this line to track global matches
+            "is_global": is_global
         }
 
         # Store in database
         self.matches.insert_one(match_data)
+        print(f"Created match with ID: {match_id}, status: in_progress, is_global: {is_global}")
 
-        # Store in memory for quick access
-        self.active_matches[short_id] = match_data
-
-        # Debug print to confirm match creation
-        print(f"Created match with ID: {short_id}, status: {match_data['status']}, is_global: {is_global}")
-
-        return short_id  # Return the short ID
+        return match_id
 
     def get_active_match_by_channel(self, channel_id):
-        """Get active match by channel ID"""
-        match = self.matches.find_one({"channel_id": channel_id, "status": "in_progress"})
-        return match
+        """Get active match by channel ID (delegates to queue_manager)"""
+        if self.queue_manager:
+            return self.queue_manager.get_match_by_channel(channel_id, status="in_progress")
+        return None
 
     async def report_match_by_id(self, match_id, reporter_id, result, ctx=None):
         """Report a match result by match ID and win/loss"""
-        # Find the match by ID
-        match = self.matches.find_one({"match_id": match_id})
+        # Check if this is an active match in the queue manager
+        active_match = None
+        if self.queue_manager:
+            active_match = self.queue_manager.get_match_by_id(match_id)
 
-        if not match:
-            return None, "No match found with that ID."
+        # If not found in active matches, check the completed matches
+        if not active_match:
+            completed_match = self.matches.find_one({"match_id": match_id})
+            if not completed_match:
+                return None, "No match found with that ID."
+
+            # If match exists but is already completed, return error
+            if completed_match.get("status") != "in_progress":
+                return None, "This match has already been reported."
+
+            # Use the completed match data
+            match = completed_match
+        else:
+            # Use the active match data
+            match = active_match
 
         # Debug print to troubleshoot
         print(f"Reporting match {match_id}, current status: {match.get('status')}")
 
-        # Make sure we're checking for "in_progress" status correctly
-        if match.get("status") != "in_progress":
-            return None, "This match has already been reported."
-
         # Check if reporter is in either team
-        team1_ids = [p["id"] for p in match["team1"]]
-        team2_ids = [p["id"] for p in match["team2"]]
+        team1_ids = [p.get("id") for p in match.get("team1", [])]
+        team2_ids = [p.get("id") for p in match.get("team2", [])]
 
         if reporter_id in team1_ids:
             reporter_team = 1
@@ -124,21 +124,23 @@ class MatchSystem:
             team1_score = 0
             team2_score = 1
 
-        # Update match data with a timestamp to ensure it's updated correctly
+        # Update match data with completion info
+        now = datetime.datetime.utcnow()
+
+        # Update match in the database
         result = self.matches.update_one(
-            {"match_id": match_id, "status": "in_progress"},  # Only update if still in progress
+            {"match_id": match_id, "status": "in_progress"},
             {"$set": {
                 "status": "completed",
                 "winner": winner,
                 "score": {"team1": team1_score, "team2": team2_score},
-                "completed_at": datetime.datetime.utcnow(),
+                "completed_at": now,
                 "reported_by": reporter_id
             }}
         )
 
-        # Check if the update was successful
+        # If the match update was successful
         if result.modified_count == 0:
-            # This means the match wasn't updated - either doesn't exist or already reported
             # Double check if it exists but is already completed
             completed_match = self.matches.find_one({"match_id": match_id, "status": "completed"})
             if completed_match:
@@ -146,105 +148,81 @@ class MatchSystem:
             else:
                 return None, "Failed to update match. Please check the match ID."
 
-        # Now get the updated match document
+        # Remove the match from active matches if it exists there
+        if self.queue_manager:
+            self.queue_manager.remove_match(match_id)
+
+        # Get the updated match document
         updated_match = self.matches.find_one({"match_id": match_id})
 
         # Check if this is a global match
         is_global_match = updated_match.get("is_global", False)
-        channel_id = updated_match.get("channel_id")
-        print(f"Match type: {'Global' if is_global_match else 'Ranked'}, Channel ID: {channel_id}")
 
-        # Update MMR for all players with the new algorithm
+        # Determine winning and losing teams
         if winner == 1:
-            winning_team = match["team1"]
-            losing_team = match["team2"]
+            winning_team = match.get("team1", [])
+            losing_team = match.get("team2", [])
         else:
-            winning_team = match["team2"]
-            losing_team = match["team1"]
+            winning_team = match.get("team2", [])
+            losing_team = match.get("team1", [])
 
-        # Calculate team average MMRs
+        # Calculate team average MMRs for MMR adjustment calculation
         team1_mmrs = []
         team2_mmrs = []
 
-        # Get MMRs for team 1
-        for player in match["team1"]:
-            player_id = player["id"]
-
-            # Check for dummy players with stored MMR
-            if player_id.startswith('9000') and "dummy_mmr" in player:
-                team1_mmrs.append(player["dummy_mmr"])
-                continue
-
-            # Skip dummy players without MMR
-            if player_id.startswith('9000'):
-                continue
-
-            # Get player MMR for real players
-            player_data = self.players.find_one({"id": player_id})
-            if player_data:
-                # Use global or ranked MMR based on match type
-                if is_global_match:
-                    mmr = player_data.get("global_mmr", 300)  # Default global MMR is 300
-                else:
-                    mmr = player_data.get("mmr", 600)  # Default ranked MMR
-                team1_mmrs.append(mmr)
-            else:
-                # For new players, get MMR from rank verification or use default
-                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
-                if rank_record:
-                    if is_global_match:
-                        mmr = rank_record.get("global_mmr", 300)
+        # Determine which MMR to use based on match type
+        if is_global_match:
+            # For global matches, use global MMR for calculations
+            for player in match.get("team1", []):
+                player_id = player.get("id")
+                if player_id and not player_id.startswith('9000'):  # Skip dummy players
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data and "global_mmr" in player_data:
+                        team1_mmrs.append(player_data.get("global_mmr", 300))
                     else:
-                        tier = rank_record.get("tier", "Rank C")
-                        mmr = self.TIER_MMR.get(tier, 600)
-                    team1_mmrs.append(mmr)
-                else:
-                    # Use default MMR
-                    if is_global_match:
                         team1_mmrs.append(300)  # Default global MMR
+
+            for player in match.get("team2", []):
+                player_id = player.get("id")
+                if player_id and not player_id.startswith('9000'):  # Skip dummy players
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data and "global_mmr" in player_data:
+                        team2_mmrs.append(player_data.get("global_mmr", 300))
                     else:
-                        team1_mmrs.append(600)  # Default ranked MMR
-
-        # Get MMRs for team 2
-        for player in match["team2"]:
-            player_id = player["id"]
-
-            # Check for dummy players with stored MMR
-            if player_id.startswith('9000') and "dummy_mmr" in player:
-                team2_mmrs.append(player["dummy_mmr"])
-                continue
-
-            # Skip dummy players without MMR
-            if player_id.startswith('9000'):
-                continue
-
-            # Get player MMR for real players
-            player_data = self.players.find_one({"id": player_id})
-            if player_data:
-                # Use global or ranked MMR based on match type
-                if is_global_match:
-                    mmr = player_data.get("global_mmr", 300)
-                else:
-                    mmr = player_data.get("mmr", 600)
-                team2_mmrs.append(mmr)
-            else:
-                # For new players, get MMR from rank verification or use default
-                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
-                if rank_record:
-                    if is_global_match:
-                        mmr = rank_record.get("global_mmr", 300)
-                    else:
-                        tier = rank_record.get("tier", "Rank C")
-                        mmr = self.TIER_MMR.get(tier, 600)
-                    team2_mmrs.append(mmr)
-                else:
-                    # Use default MMR
-                    if is_global_match:
                         team2_mmrs.append(300)  # Default global MMR
+        else:
+            # For ranked matches, use regular MMR for calculations
+            for player in match.get("team1", []):
+                player_id = player.get("id")
+                if player_id and not player_id.startswith('9000'):  # Skip dummy players
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data:
+                        team1_mmrs.append(player_data.get("mmr", 600))
                     else:
-                        team2_mmrs.append(600)  # Default ranked MMR
+                        # For new players, check rank record or use default
+                        rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                        if rank_record:
+                            tier = rank_record.get("tier", "Rank C")
+                            team1_mmrs.append(self.TIER_MMR.get(tier, 600))
+                        else:
+                            team1_mmrs.append(600)  # Default MMR
 
-        # Calculate average MMRs for each team
+            for player in match.get("team2", []):
+                player_id = player.get("id")
+                if player_id and not player_id.startswith('9000'):  # Skip dummy players
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data:
+                        team2_mmrs.append(player_data.get("mmr", 600))
+                    else:
+                        # For new players, check rank record or use default
+                        rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                        if rank_record:
+                            tier = rank_record.get("tier", "Rank C")
+                            team2_mmrs.append(self.TIER_MMR.get(tier, 600))
+                        else:
+                            team2_mmrs.append(600)  # Default MMR
+
+        # Calculate average MMRs
         team1_avg_mmr = sum(team1_mmrs) / len(team1_mmrs) if team1_mmrs else 0
         team2_avg_mmr = sum(team2_mmrs) / len(team2_mmrs) if team2_mmrs else 0
 
@@ -256,14 +234,14 @@ class MatchSystem:
 
         # Update MMR for winners
         for player in winning_team:
-            player_id = player["id"]
+            player_id = player.get("id")
 
             # Skip dummy players
-            if player_id.startswith('9000'):
+            if not player_id or player_id.startswith('9000'):
                 continue
 
-            # Determine which team this player is on
-            is_team1 = player in match["team1"]
+            # Determine which team this player is on for average MMR calculations
+            is_team1 = player in match.get("team1", [])
             player_team_avg = team1_avg_mmr if is_team1 else team2_avg_mmr
             opponent_avg = team2_avg_mmr if is_team1 else team1_avg_mmr
 
@@ -278,7 +256,7 @@ class MatchSystem:
                     global_wins = player_data.get("global_wins", 0) + 1
                     old_mmr = player_data.get("global_mmr", 300)
 
-                    # Calculate MMR gain with new algorithm
+                    # Calculate MMR gain with dynamic algorithm
                     mmr_gain = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
@@ -288,7 +266,8 @@ class MatchSystem:
                     )
 
                     new_mmr = old_mmr + mmr_gain
-                    print(f"Player {player['name']} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+                    print(
+                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -315,7 +294,7 @@ class MatchSystem:
                     wins = player_data.get("wins", 0) + 1
                     old_mmr = player_data.get("mmr", 600)
 
-                    # Calculate MMR gain with new algorithm
+                    # Calculate MMR gain with dynamic algorithm
                     mmr_gain = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
@@ -325,7 +304,8 @@ class MatchSystem:
                     )
 
                     new_mmr = old_mmr + mmr_gain
-                    print(f"Player {player['name']} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+                    print(
+                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -357,7 +337,7 @@ class MatchSystem:
                     if rank_record and "global_mmr" in rank_record:
                         starting_global_mmr = rank_record.get("global_mmr", 300)
 
-                    # Calculate first win MMR with the new algorithm
+                    # Calculate first win MMR with the dynamic algorithm
                     mmr_gain = self.calculate_dynamic_mmr(
                         starting_global_mmr,
                         player_team_avg,
@@ -368,7 +348,7 @@ class MatchSystem:
 
                     new_global_mmr = starting_global_mmr + mmr_gain
                     print(
-                        f"NEW PLAYER {player['name']} FIRST GLOBAL WIN: {starting_global_mmr} + {mmr_gain} = {new_global_mmr}")
+                        f"NEW PLAYER {player.get('name', 'Unknown')} FIRST GLOBAL WIN: {starting_global_mmr} + {mmr_gain} = {new_global_mmr}")
 
                     # Get default ranked MMR from rank verification if available
                     starting_ranked_mmr = 600  # Default ranked MMR
@@ -378,7 +358,7 @@ class MatchSystem:
 
                     self.players.insert_one({
                         "id": player_id,
-                        "name": player["name"],
+                        "name": player.get("name", "Unknown"),
                         "mmr": starting_ranked_mmr,  # Default ranked MMR
                         "global_mmr": new_global_mmr,  # Updated global MMR
                         "wins": 0,
@@ -410,7 +390,7 @@ class MatchSystem:
                         tier = rank_record.get("tier", "Rank C")
                         starting_mmr = self.TIER_MMR.get(tier, 600)
 
-                    # Calculate first win MMR with the new algorithm
+                    # Calculate first win MMR with the dynamic algorithm
                     mmr_gain = self.calculate_dynamic_mmr(
                         starting_mmr,
                         player_team_avg,
@@ -420,11 +400,12 @@ class MatchSystem:
                     )
 
                     new_mmr = starting_mmr + mmr_gain
-                    print(f"NEW PLAYER {player['name']} FIRST RANKED WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
+                    print(
+                        f"NEW PLAYER {player.get('name', 'Unknown')} FIRST RANKED WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
 
                     self.players.insert_one({
                         "id": player_id,
-                        "name": player["name"],
+                        "name": player.get("name", "Unknown"),
                         "mmr": new_mmr,  # Updated ranked MMR
                         "global_mmr": 300,  # Default global MMR
                         "wins": 1,
@@ -447,16 +428,16 @@ class MatchSystem:
                         "is_global": False
                     })
 
-        # Update MMR for losing team - similar logic as above
+        # Update MMR for losers
         for player in losing_team:
-            player_id = player["id"]
+            player_id = player.get("id")
 
             # Skip dummy players
-            if player_id.startswith('9000'):
+            if not player_id or player_id.startswith('9000'):
                 continue
 
-            # Determine which team this player is on
-            is_team1 = player in match["team1"]
+            # Determine which team this player is on for average MMR calculations
+            is_team1 = player in match.get("team1", [])
             player_team_avg = team1_avg_mmr if is_team1 else team2_avg_mmr
             opponent_avg = team2_avg_mmr if is_team1 else team1_avg_mmr
 
@@ -471,7 +452,7 @@ class MatchSystem:
                     global_losses = player_data.get("global_losses", 0) + 1
                     old_mmr = player_data.get("global_mmr", 300)
 
-                    # Calculate MMR loss with new algorithm
+                    # Calculate MMR loss with dynamic algorithm
                     mmr_loss = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
@@ -481,7 +462,8 @@ class MatchSystem:
                     )
 
                     new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                    print(f"Player {player['name']} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                    print(
+                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -508,7 +490,7 @@ class MatchSystem:
                     losses = player_data.get("losses", 0) + 1
                     old_mmr = player_data.get("mmr", 600)
 
-                    # Calculate MMR loss with new algorithm
+                    # Calculate MMR loss with dynamic algorithm
                     mmr_loss = self.calculate_dynamic_mmr(
                         old_mmr,
                         player_team_avg,
@@ -518,7 +500,8 @@ class MatchSystem:
                     )
 
                     new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                    print(f"Player {player['name']} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                    print(
+                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
 
                     self.players.update_one(
                         {"id": player_id},
@@ -543,7 +526,6 @@ class MatchSystem:
                 # New player logic
                 if is_global_match:
                     # New player's first global match - loss
-                    # Logic for new player who loses their first global match
                     rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                     starting_global_mmr = 300  # Default global MMR
 
@@ -561,7 +543,7 @@ class MatchSystem:
 
                     new_global_mmr = max(0, starting_global_mmr - mmr_loss)  # Don't go below 0
                     print(
-                        f"NEW PLAYER {player['name']} FIRST GLOBAL LOSS: {starting_global_mmr} - {mmr_loss} = {new_global_mmr}")
+                        f"NEW PLAYER {player.get('name', 'Unknown')} FIRST GLOBAL LOSS: {starting_global_mmr} - {mmr_loss} = {new_global_mmr}")
 
                     # Get default ranked MMR from rank verification if available
                     starting_ranked_mmr = 600  # Default ranked MMR
@@ -571,7 +553,7 @@ class MatchSystem:
 
                     self.players.insert_one({
                         "id": player_id,
-                        "name": player["name"],
+                        "name": player.get("name", "Unknown"),
                         "mmr": starting_ranked_mmr,  # Default ranked MMR
                         "global_mmr": new_global_mmr,  # Updated global MMR
                         "wins": 0,
@@ -595,7 +577,6 @@ class MatchSystem:
                     })
                 else:
                     # New player's first ranked match - loss
-                    # Logic for new player who loses their first match
                     rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                     starting_mmr = 600  # Default MMR
 
@@ -613,11 +594,12 @@ class MatchSystem:
                     )
 
                     new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
-                    print(f"NEW PLAYER {player['name']} FIRST RANKED LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
+                    print(
+                        f"NEW PLAYER {player.get('name', 'Unknown')} FIRST RANKED LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
 
                     self.players.insert_one({
                         "id": player_id,
-                        "name": player["name"],
+                        "name": player.get("name", "Unknown"),
                         "mmr": new_mmr,  # Updated ranked MMR
                         "global_mmr": 300,  # Default global MMR
                         "wins": 0,
@@ -650,41 +632,33 @@ class MatchSystem:
             }}
         )
 
-        # After updating MMR for winners and losers:
+        # Update Discord roles for players if ctx is provided
         if ctx:
-            # Update roles for winners
+            # Update roles for winners based on ranked MMR (not global)
             for player in winning_team:
-                player_id = player["id"]
-                # Skip dummy players (those with IDs starting with 9000)
-                if player_id.startswith('9000'):
+                player_id = player.get("id")
+                if not player_id or player_id.startswith('9000'):  # Skip dummy players
                     continue
 
-                # Get updated MMR from database
-                player_data = self.players.find_one({"id": player_id})
-                if player_data:
-                    # Only update Discord role based on ranked MMR, not global MMR
-                    mmr = player_data.get("mmr", 600)
-                    # Update Discord role based on new MMR
-                    await self.update_discord_role(ctx, player_id, mmr)
+                # Only update roles for ranked MMR changes, not global
+                if not is_global_match:
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data:
+                        mmr = player_data.get("mmr", 600)
+                        await self.update_discord_role(ctx, player_id, mmr)
 
-            # Update roles for losers
+            # Update roles for losers based on ranked MMR (not global)
             for player in losing_team:
-                player_id = player["id"]
-                # Skip dummy players
-                if player_id.startswith('9000'):
+                player_id = player.get("id")
+                if not player_id or player_id.startswith('9000'):  # Skip dummy players
                     continue
 
-                # Get updated MMR from database
-                player_data = self.players.find_one({"id": player_id})
-                if player_data:
-                    # Only update Discord role based on ranked MMR, not global MMR
-                    mmr = player_data.get("mmr", 600)
-                    # Update Discord role based on new MMR
-                    await self.update_discord_role(ctx, player_id, mmr)
-
-        # Remove from active matches
-        if match["match_id"] in self.active_matches:
-            del self.active_matches[match["match_id"]]
+                # Only update roles for ranked MMR changes, not global
+                if not is_global_match:
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data:
+                        mmr = player_data.get("mmr", 600)
+                        await self.update_discord_role(ctx, player_id, mmr)
 
         return updated_match, None
 
