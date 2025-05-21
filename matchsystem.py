@@ -114,18 +114,24 @@ class MatchSystem:
         print(f"Reporting match {match_id}, current status: {match.get('status')}")
         print(f"Reporter ID: {reporter_id}")
 
-        # NEW: If teams are empty, try to look up the match by ID in the database
-        if (not match.get("team1") or not match.get("team2")) and self.matches:
-            print(f"Teams are empty. Looking up match in database: {match_id}")
-            db_match = self.matches.find_one({"match_id": match_id})
-            if db_match and db_match.get("team1") and db_match.get("team2"):
-                print(f"Found match in database with teams. Using that data instead.")
-                match = db_match
-
-        # Check if reporter is in either team - enhanced checking
+        # FIX: Changed the condition to prevent error when comparing with MongoDB collection
         team1 = match.get("team1", [])
         team2 = match.get("team2", [])
 
+        # Check if teams are empty and try to get them from the database
+        if (not team1 or not team2) and self.matches is not None:
+            print(f"Teams are empty or missing. Looking up match in database: {match_id}")
+            db_match = self.matches.find_one({"match_id": match_id})
+            if db_match:
+                db_team1 = db_match.get("team1", [])
+                db_team2 = db_match.get("team2", [])
+                if db_team1 and db_team2:
+                    print(f"Found match in database with teams. Using that data instead.")
+                    team1 = db_team1
+                    team2 = db_team2
+                    match = db_match
+
+        # Convert IDs to strings for consistent comparison
         team1_ids = [str(p.get("id", "")) for p in team1]
         team2_ids = [str(p.get("id", "")) for p in team2]
 
@@ -150,12 +156,12 @@ class MatchSystem:
         else:
             print(f"Reporter {reporter_id} not found in either team")
 
-            # NEW: If reporter not found but there are active matches for this player, check if any match this match_id
+            # Check if reporter is in player_matches tracking
             if self.queue_manager and reporter_id in self.queue_manager.player_matches:
                 player_match_id = self.queue_manager.player_matches[reporter_id]
                 if player_match_id == match_id:
                     print(f"Reporter found in player_matches tracking for this match. Allowing report.")
-                    # Determine team based on the match ID
+                    # Determine team based on other evidence
                     if len(team1) > 0 and len(team2) > 0:
                         # If there are players in both teams, just assign to team 1 for now
                         reporter_team = 1
