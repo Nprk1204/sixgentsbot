@@ -439,6 +439,15 @@ class QueueManager:
 
     def assign_teams_to_match(self, match_id, team1, team2):
         """Assign teams to a match after selection"""
+        # Normalize match ID
+        match_id = str(match_id).strip()
+        if len(match_id) > 8:
+            match_id = match_id[:6]
+
+        print(f"Assigning teams to match {match_id}")
+        print(f"Team 1: {[p.get('name', 'Unknown') + ' (ID: ' + str(p.get('id', 'None')) + ')' for p in team1]}")
+        print(f"Team 2: {[p.get('name', 'Unknown') + ' (ID: ' + str(p.get('id', 'None')) + ')' for p in team2]}")
+
         # Update in database
         self.active_matches_collection.update_one(
             {"match_id": match_id},
@@ -455,8 +464,11 @@ class QueueManager:
             self.active_matches[match_id]["team2"] = team2
             self.active_matches[match_id]["status"] = "in_progress"
 
-            # Update player_matches mapping
+            # Update player_matches mapping - convert all IDs to strings for consistency
             for player in team1 + team2:
-                player_id = player.get('id')
+                player_id = str(player.get('id', ''))
                 if player_id:
                     self.player_matches[player_id] = match_id
+                    print(f"Added player {player.get('name', 'Unknown')} (ID: {player_id}) to match {match_id}")
+        else:
+            print(f"Warning: Match {match_id} not found in active_matches during team assignment")

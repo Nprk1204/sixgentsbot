@@ -76,7 +76,7 @@ class MatchSystem:
         """Report a match result by match ID and win/loss"""
         # Clean the match ID first (remove any potential long format)
         match_id = match_id.strip()
-        if len(match_id) > 8:  # If it's longer than our standard 6-char format
+        if len(match_id) > 8:  # If it's longer than our standard format
             match_id = match_id[:6]  # Take just the first 6 characters
 
         # Check if this is an active match in the queue manager
@@ -102,17 +102,53 @@ class MatchSystem:
 
         # Debug print to troubleshoot
         print(f"Reporting match {match_id}, current status: {match.get('status')}")
+        print(f"Reporter ID: {reporter_id}")
 
-        # Check if reporter is in either team
-        team1_ids = [p.get("id") for p in match.get("team1", [])]
-        team2_ids = [p.get("id") for p in match.get("team2", [])]
+        # Check if reporter is in either team - enhanced checking
+        team1_ids = [str(p.get("id")) for p in match.get("team1", [])]
+        team2_ids = [str(p.get("id")) for p in match.get("team2", [])]
 
-        if reporter_id in team1_ids:
+        # Debug print team members and their IDs
+        print(f"Team 1 IDs: {team1_ids}")
+        print(f"Team 2 IDs: {team2_ids}")
+        print(f"Checking if reporter ID: {reporter_id} is in either team")
+
+        # Fix: Convert reporter_id to string to ensure consistent comparison
+        reporter_id = str(reporter_id)
+
+        # Check both teams for reporter's ID
+        reporter_in_team1 = reporter_id in team1_ids
+        reporter_in_team2 = reporter_id in team2_ids
+
+        if reporter_in_team1:
             reporter_team = 1
-        elif reporter_id in team2_ids:
+            print(f"Reporter found in team 1")
+        elif reporter_in_team2:
             reporter_team = 2
+            print(f"Reporter found in team 2")
         else:
-            return None, "You must be a player in this match to report results."
+            print(f"Reporter {reporter_id} not found in either team")
+
+            # Enhanced checking - look through player objects more thoroughly
+            found_in_team = False
+            for team_num, team in enumerate([match.get("team1", []), match.get("team2", [])], 1):
+                for player in team:
+                    # Try different ways the ID might be stored
+                    player_id = str(player.get("id", ""))
+                    if player_id == reporter_id or str(player.get("discord_id", "")) == reporter_id:
+                        reporter_team = team_num
+                        found_in_team = True
+                        print(f"Reporter found in team {team_num} after deep check")
+                        break
+
+                    # For debugging - print each player's data
+                    print(f"Player data: {player}")
+
+                if found_in_team:
+                    break
+
+            if not found_in_team:
+                return None, "You must be a player in this match to report results."
 
         # Determine winner based on reporter's team and their reported result
         if result.lower() == "win":

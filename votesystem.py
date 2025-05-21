@@ -344,6 +344,11 @@ class VoteSystem:
 
     async def create_balanced_random_teams(self, channel, match_id):
         """Create balanced random teams based on MMR"""
+        # Normalize match ID
+        match_id = str(match_id).strip()
+        if len(match_id) > 8:
+            match_id = match_id[:6]
+
         # Get the match
         match = self.queue_manager.get_match_by_id(match_id)
         if not match:
@@ -456,6 +461,12 @@ class VoteSystem:
 
         # Update match with teams - making sure to preserve the same match_id
         self.queue_manager.assign_teams_to_match(match_id, team1, team2)
+
+        for player in team1 + team2:
+            player_id = str(player.get('id', ''))
+            if player_id:
+                self.queue_manager.player_matches[player_id] = match_id
+                print(f"Added player {player.get('name', 'Unknown')} (ID: {player_id}) to match {match_id}")
 
         # Create an embed for team announcement
         embed = discord.Embed(
