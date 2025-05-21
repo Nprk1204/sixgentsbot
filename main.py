@@ -282,90 +282,42 @@ async def status_slash(interaction: discord.Interaction):
     # Use the queue manager to get status
     status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
 
-    # Create an embed
+    # Get queue count and players
+    queue_count = status_data['queue_count']
+    queue_players = status_data['queue_players']
+
+    # Create a simple embed that just shows queue status
     embed = discord.Embed(
         title="Queue Status",
-        description=f"**Current Queue: {status_data['queue_count']}/6 players**",
+        description=f"**Current Queue: {queue_count}/6 players**",
         color=0x3498db
     )
 
-    if status_data['queue_count'] == 0:
+    if queue_count == 0:
         embed.add_field(name="Status", value="Queue is empty! Use `/queue` to join the queue.", inline=False)
-        await interaction.response.send_message(embed=embed)
-        return
-
-    # Create a list of player mentions
-    player_mentions = [player['mention'] for player in status_data['queue_players']]
-
-    # Add player list to embed
-    embed.add_field(name="Players", value=", ".join(player_mentions), inline=False)
-
-    # Add info about how many more players are needed
-    if status_data['queue_count'] < 6:
-        more_needed = 6 - status_data['queue_count']
-        embed.add_field(name="Info", value=f"{more_needed} more player(s) needed for a match.", inline=False)
     else:
-        # Queue is full
-        embed.add_field(name="Status", value="**Queue is FULL!** Ready to start match.", inline=False)
+        # Create a list of player mentions
+        player_mentions = [player['mention'] for player in queue_players]
 
-    # Add active matches if any - MODIFIED TO STAY WITHIN 25 FIELD LIMIT
+        # Add player list to embed
+        embed.add_field(name="Players in Queue", value=", ".join(player_mentions), inline=False)
+
+        # Add info about how many more players are needed
+        if queue_count < 6:
+            more_needed = 6 - queue_count
+            embed.add_field(name="Info", value=f"{more_needed} more player(s) needed for a match.", inline=False)
+        else:
+            # Queue is full
+            embed.add_field(name="Status", value="**Queue is FULL!** Ready to start match.", inline=False)
+
+    # Simply note the number of active matches without details
     active_matches = status_data['active_matches']
     if active_matches:
-        # First add a header field for active matches
-        embed.add_field(name="Active Matches", value=f"{len(active_matches)} match(es) in progress", inline=False)
-
-        # Calculate how many fields we can still add
-        # We've already added at least 2 fields (Players + Info/Status)
-        # We need to reserve 1 field for the active matches header
-        # So we can add up to 22 more fields for match details
-        fields_used = len(embed.fields)  # Current count of fields
-        fields_available = 25 - fields_used
-
-        # Limit the number of matches to display
-        # Each match takes at least 1 field, but usually 3 (match + team1 + team2)
-        # So limit to showing details for at most 7 matches (7*3 = 21 fields max)
-        max_matches_to_display = min(7, len(active_matches))
-
-        # Only display the first few active matches if there are too many
-        for i, match in enumerate(active_matches[:max_matches_to_display]):
-            match_id = match.get('match_id', 'Unknown')
-            match_status = match.get('status', 'unknown')
-
-            # Add a single field per match with compact info to save space
-            match_info = f"ID: `{match_id}` | Status: {match_status}"
-
-            # Add teams info if available (on separate lines)
-            if 'team1' in match and 'team2' in match:
-                team1_names = [p.get('name', 'Unknown') for p in match['team1']]
-                team2_names = [p.get('name', 'Unknown') for p in match['team2']]
-
-                # Limit team names if too many to display (to prevent field value exceeding 1024 chars)
-                if len(team1_names) > 3:
-                    team1_display = ', '.join(team1_names[:3]) + f" +{len(team1_names) - 3} more"
-                else:
-                    team1_display = ', '.join(team1_names)
-
-                if len(team2_names) > 3:
-                    team2_display = ', '.join(team2_names[:3]) + f" +{len(team2_names) - 3} more"
-                else:
-                    team2_display = ', '.join(team2_names)
-
-                match_info += f"\nTeam 1: {team1_display}\nTeam 2: {team2_display}"
-
-            embed.add_field(
-                name=f"Match {i + 1}",
-                value=match_info,
-                inline=False
-            )
-
-        # If we had to limit the number of matches shown, add a note
-        if len(active_matches) > max_matches_to_display:
-            remaining = len(active_matches) - max_matches_to_display
-            embed.add_field(
-                name="Note",
-                value=f"{remaining} more active match(es) not displayed. Use `/status` again to see more details.",
-                inline=False
-            )
+        embed.add_field(
+            name="Active Matches",
+            value=f"There are currently {len(active_matches)} active match(es) in progress.",
+            inline=False
+        )
 
     await interaction.response.send_message(embed=embed)
 
