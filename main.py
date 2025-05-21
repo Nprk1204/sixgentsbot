@@ -1531,25 +1531,26 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         matches_result = system_coordinator.match_system.matches.delete_many({"is_global": {"$ne": True}})
         matches_removed = matches_result.deleted_count
 
-    else:  # "all"
-        # Reset all stats - preserve player entries but reset everything
+    else:  # "all" - Complete reset
+        # COMPLETE RESET: Clear and reset everything including rank verifications
+
+        # 1. Make backup of rank verification data
+        ranks_collection = db.get_collection('ranks')
+        all_ranks = list(ranks_collection.find())
+        backup_ranks_collection = db.get_collection(f"ranks_backup_{timestamp}")
+        if all_ranks:
+            backup_ranks_collection.insert_many(all_ranks)
+
+        # 2. Reset player stats
         for player in all_players:
             player_id = player.get("id")
 
-            # Look up rank record for default MMR based on tier
-            rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
-
-            if rank_record:
-                tier = rank_record.get("tier", "Rank C")
-                starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
-            else:
-                starting_mmr = 600  # Default
-
-            # Update with tier-based starting MMR
+            # For complete resets, we reset to the base values
+            # Future ranks will be set on re-verification
             system_coordinator.match_system.players.update_one(
                 {"id": player_id},
                 {"$set": {
-                    "mmr": starting_mmr,
+                    "mmr": 600,  # Default MMR
                     "global_mmr": 300,
                     "wins": 0,
                     "global_wins": 0,
@@ -1561,7 +1562,10 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             )
             reset_count += 1
 
-        # Delete all matches
+        # 3. Delete all rank verification records to force re-verification
+        ranks_removed = ranks_collection.delete_many({}).deleted_count
+
+        # 4. Delete all matches
         matches_result = system_coordinator.match_system.matches.delete_many({})
         matches_removed = matches_result.deleted_count
 
@@ -1595,7 +1599,14 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         inline=False
     )
 
-    if reset_type in ["ranked", "all"]:
+    if reset_type == "all":
+        # For complete reset, mention rank verification
+        embed.add_field(
+            name="Rank Verification Reset",
+            value=f"**{ranks_removed}** rank verifications have been removed. All players must re-verify their ranks.",
+            inline=False
+        )
+    elif reset_type in ["ranked", "all"]:
         embed.add_field(
             name="MMR Reset",
             value="All players have been reset to their rank-based starting MMR values.",
@@ -1620,11 +1631,24 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         inline=False
     )
 
-    announcement.add_field(
-        name="What This Means",
-        value="Your MMR has been reset to the starting value based on your verified rank.",
-        inline=False
-    )
+    if reset_type == "all":
+        announcement.add_field(
+            name="🚨 IMPORTANT: Re-verification Required 🚨",
+            value="This was a complete reset. **All players must re-verify their ranks** before joining the queue again.",
+            inline=False
+        )
+
+        announcement.add_field(
+            name="How to Verify",
+            value="Use the `/verify` command or visit the rank check page on the website to verify your rank.",
+            inline=False
+        )
+    else:
+        announcement.add_field(
+            name="What This Means",
+            value="Your MMR has been reset to the starting value based on your verified rank.",
+            inline=False
+        )
 
     # Send announcement to the channel
     await interaction.channel.send(embed=announcement)
