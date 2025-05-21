@@ -79,14 +79,24 @@ class MatchSystem:
         if len(match_id) > 8:  # If it's longer than our standard format
             match_id = match_id[:6]  # Take just the first 6 characters
 
+        # Debug print match ID being searched
+        print(f"Looking for match with ID: {match_id}")
+
         # Check if this is an active match in the queue manager
         active_match = None
         if self.queue_manager:
             active_match = self.queue_manager.get_match_by_id(match_id)
+            if active_match:
+                print(f"Found active match with ID {match_id}")
+            else:
+                print(f"No active match found with ID {match_id}")
 
         # If not found in active matches, check the completed matches
         if not active_match:
             completed_match = self.matches.find_one({"match_id": match_id})
+            if completed_match:
+                print(f"Found match in completed matches collection: {match_id}")
+
             if not completed_match:
                 return None, "No match found with that ID."
 
@@ -104,9 +114,20 @@ class MatchSystem:
         print(f"Reporting match {match_id}, current status: {match.get('status')}")
         print(f"Reporter ID: {reporter_id}")
 
+        # NEW: If teams are empty, try to look up the match by ID in the database
+        if (not match.get("team1") or not match.get("team2")) and self.matches:
+            print(f"Teams are empty. Looking up match in database: {match_id}")
+            db_match = self.matches.find_one({"match_id": match_id})
+            if db_match and db_match.get("team1") and db_match.get("team2"):
+                print(f"Found match in database with teams. Using that data instead.")
+                match = db_match
+
         # Check if reporter is in either team - enhanced checking
-        team1_ids = [str(p.get("id")) for p in match.get("team1", [])]
-        team2_ids = [str(p.get("id")) for p in match.get("team2", [])]
+        team1 = match.get("team1", [])
+        team2 = match.get("team2", [])
+
+        team1_ids = [str(p.get("id", "")) for p in team1]
+        team2_ids = [str(p.get("id", "")) for p in team2]
 
         # Debug print team members and their IDs
         print(f"Team 1 IDs: {team1_ids}")
@@ -129,25 +150,21 @@ class MatchSystem:
         else:
             print(f"Reporter {reporter_id} not found in either team")
 
-            # Enhanced checking - look through player objects more thoroughly
-            found_in_team = False
-            for team_num, team in enumerate([match.get("team1", []), match.get("team2", [])], 1):
-                for player in team:
-                    # Try different ways the ID might be stored
-                    player_id = str(player.get("id", ""))
-                    if player_id == reporter_id or str(player.get("discord_id", "")) == reporter_id:
-                        reporter_team = team_num
-                        found_in_team = True
-                        print(f"Reporter found in team {team_num} after deep check")
-                        break
-
-                    # For debugging - print each player's data
-                    print(f"Player data: {player}")
-
-                if found_in_team:
-                    break
-
-            if not found_in_team:
+            # NEW: If reporter not found but there are active matches for this player, check if any match this match_id
+            if self.queue_manager and reporter_id in self.queue_manager.player_matches:
+                player_match_id = self.queue_manager.player_matches[reporter_id]
+                if player_match_id == match_id:
+                    print(f"Reporter found in player_matches tracking for this match. Allowing report.")
+                    # Determine team based on the match ID
+                    if len(team1) > 0 and len(team2) > 0:
+                        # If there are players in both teams, just assign to team 1 for now
+                        reporter_team = 1
+                    else:
+                        return None, "Match teams are not properly set up. Please contact an admin."
+                else:
+                    return None, f"You are in a different match (ID: {player_match_id})."
+            else:
+                # If we got here, the reporter is not found anywhere
                 return None, "You must be a player in this match to report results."
 
         # Determine winner based on reporter's team and their reported result

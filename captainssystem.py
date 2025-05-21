@@ -569,6 +569,8 @@ class CaptainsSystem:
             # If no match ID is found, generate a short consistent one
             original_match_id = str(uuid.uuid4().hex)[:6]
 
+        print(f"Using match ID: {original_match_id} for fallback")
+
         # Get the announcement channel
         channel = selection_state.get('announcement_channel')
         if not channel:
@@ -588,6 +590,12 @@ class CaptainsSystem:
         team1_mentions = [player['mention'] for player in team1]
         team2_mentions = [player['mention'] for player in team2]
 
+        # Debug logging for team members
+        print(
+            f"Team 1 Members: {[p.get('name', 'Unknown') + ' (ID: ' + str(p.get('id', 'None')) + ')' for p in team1]}")
+        print(
+            f"Team 2 Members: {[p.get('name', 'Unknown') + ' (ID: ' + str(p.get('id', 'None')) + ')' for p in team2]}")
+
         # Calculate team average MMRs
         team1_mmr = self.calculate_team_mmr(team1)
         team2_mmr = self.calculate_team_mmr(team2)
@@ -596,9 +604,8 @@ class CaptainsSystem:
         is_global = channel.name.lower() == "global"
         print(f"Fallback: Channel {channel.name}, is_global: {is_global}")
 
-        # Create match record with explicit is_global flag
         try:
-            # Use the original match ID instead of creating a new UUID
+            # Use the match system to create/update the match record
             match_id = self.match_system.create_match(
                 original_match_id,  # Use the original match ID
                 team1,
@@ -607,6 +614,32 @@ class CaptainsSystem:
                 is_global=is_global
             )
             print(f"Fallback: Created match with ID {match_id}")
+
+            # IMPORTANT: Update player_matches mapping in queue manager
+            if self.queue_manager:
+                # Find the existing match or create a new active match entry
+                if match_id not in self.queue_manager.active_matches:
+                    self.queue_manager.active_matches[match_id] = {
+                        "match_id": match_id,
+                        "channel_id": channel_id,
+                        "team1": team1,
+                        "team2": team2,
+                        "status": "in_progress",
+                        "is_global": is_global
+                    }
+                else:
+                    # Update existing record
+                    self.queue_manager.active_matches[match_id]["team1"] = team1
+                    self.queue_manager.active_matches[match_id]["team2"] = team2
+                    self.queue_manager.active_matches[match_id]["status"] = "in_progress"
+
+                # Make sure all players are tracked in the player_matches dictionary
+                for player in team1 + team2:
+                    player_id = str(player.get('id', ''))
+                    if player_id:
+                        self.queue_manager.player_matches[player_id] = match_id
+                        print(f"Tracked player {player.get('name', 'Unknown')} (ID: {player_id}) in match {match_id}")
+
         except Exception as e:
             print(f"Error creating match in fallback: {str(e)}")
             # Even if match creation fails, still try to send a message to the channel
@@ -641,21 +674,8 @@ class CaptainsSystem:
             except:
                 pass
 
-        # Clean up
+        # Clean up - REMOVE THE BUGGY CODE and just cancel the selection
         try:
-            print(f"Fallback: Removing {len(all_players)} players from queue")
-            # Fix: Use queue_manager instead of queue
-            if self.queue_manager:
-                # Remove players from the appropriate queue collection
-                player_ids = [p.get('id') for p in all_players]
-                self.queue_manager.queue_collection.delete_many({"id": {"$in": player_ids}})
-
-                # Make sure to update the in-memory player tracking
-                for player in all_players:
-                    player_id = player.get('id')
-                    if player_id:
-                        self.queue_manager.player_matches[player_id] = match_id
-
             print(f"Fallback: Canceling selection for channel {channel_id}")
             self.cancel_selection(channel_id)
         except Exception as e:
