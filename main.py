@@ -155,25 +155,32 @@ db = Database(MONGO_URI)
 system_coordinator = SystemCoordinator(db)
 
 
-@bot.event
 async def on_ready():
     print(f"{bot.user.name} is now online with ID: {bot.user.id}")
     print(f"Connected to {len(bot.guilds)} guilds")
 
-    # Clear existing commands first (to prevent duplicates)
-    bot.tree.clear_commands(guild=None)
+    try:
+        # Set bot in system coordinator first
+        system_coordinator.set_bot(bot)
 
-    # Set bot in system coordinator
-    system_coordinator.set_bot(bot)
+        # Start background task to check for ready matches
+        bot.loop.create_task(system_coordinator.check_for_ready_matches())
 
-    # Start background task to check for ready matches
-    bot.loop.create_task(system_coordinator.check_for_ready_matches())
+        print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
-    print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
+        # Sync command tree with Discord - don't clear commands first
+        # bot.tree.clear_commands(guild=None)  # This line is problematic - removing it
+        await bot.tree.sync()
 
-    # Sync command tree with Discord
-    await bot.tree.sync()
-    print("Successfully synced application commands")
+        # Log the commands that were registered
+        commands = bot.tree.get_commands()
+        print(f"Successfully synced {len(commands)} application commands:")
+        for cmd in commands:
+            print(f"- /{cmd.name}")
+    except Exception as e:
+        print(f"Error during bot initialization: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 @bot.event
