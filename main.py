@@ -1541,17 +1541,16 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
 
-        # 2. Reset player stats
+        # 2. Reset player stats - Set MMR to 0 for unverified players
         for player in all_players:
             player_id = player.get("id")
 
-            # For complete resets, we reset to the base values
-            # Future ranks will be set on re-verification
+            # For complete resets, we reset to zero MMR until re-verification
             system_coordinator.match_system.players.update_one(
                 {"id": player_id},
                 {"$set": {
-                    "mmr": 600,  # Default MMR
-                    "global_mmr": 300,
+                    "mmr": 0,  # Reset to 0 until re-verification
+                    "global_mmr": 0,
                     "wins": 0,
                     "global_wins": 0,
                     "losses": 0,
@@ -1562,10 +1561,33 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             )
             reset_count += 1
 
-        # 3. Delete all rank verification records to force re-verification
+            # 3. Remove Discord roles for all players
+            try:
+                member = await interaction.guild.fetch_member(int(player_id))
+                if member:
+                    # Get all rank roles
+                    rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+                    rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+                    rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+
+                    # Remove all rank roles
+                    roles_to_remove = []
+                    if rank_a_role and rank_a_role in member.roles:
+                        roles_to_remove.append(rank_a_role)
+                    if rank_b_role and rank_b_role in member.roles:
+                        roles_to_remove.append(rank_b_role)
+                    if rank_c_role and rank_c_role in member.roles:
+                        roles_to_remove.append(rank_c_role)
+
+                    if roles_to_remove:
+                        await member.remove_roles(*roles_to_remove, reason="Leaderboard reset")
+            except Exception as e:
+                print(f"Error removing roles for {player_id}: {e}")
+
+        # 4. Delete all rank verification records to force re-verification
         ranks_removed = ranks_collection.delete_many({}).deleted_count
 
-        # 4. Delete all matches
+        # 5. Delete all matches
         matches_result = system_coordinator.match_system.matches.delete_many({})
         matches_removed = matches_result.deleted_count
 
@@ -1606,6 +1628,12 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             value=f"**{ranks_removed}** rank verifications have been removed. All players must re-verify their ranks.",
             inline=False
         )
+
+        embed.add_field(
+            name="Discord Roles",
+            value="All Rank A, B, and C roles have been removed from members. Roles will be reassigned during re-verification.",
+            inline=False
+        )
     elif reset_type in ["ranked", "all"]:
         embed.add_field(
             name="MMR Reset",
@@ -1634,13 +1662,15 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     if reset_type == "all":
         announcement.add_field(
             name="🚨 IMPORTANT: Re-verification Required 🚨",
-            value="This was a complete reset. **All players must re-verify their ranks** before joining the queue again.",
+            value="This was a complete reset. **All Discord roles have been removed and MMR has been set to 0**. " +
+                  "**All players must re-verify their ranks** before joining the queue again.",
             inline=False
         )
 
         announcement.add_field(
             name="How to Verify",
-            value="Use the `/verify` command or visit the rank check page on the website to verify your rank.",
+            value="Use the rank check page on the website to verify your rank. " +
+                  "This will assign your appropriate Discord role and starting MMR.",
             inline=False
         )
     else:
