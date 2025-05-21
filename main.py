@@ -1533,7 +1533,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     backup_collection_name = f"players_backup_{timestamp}"
 
     # Create a backup of the current players collection
-    backup_collection = db.get_collection(backup_collection_name)
+    backup_collection = db[f'players_backup_{timestamp}']
     all_players = list(system_coordinator.match_system.players.find())
 
     if all_players:
@@ -1600,27 +1600,14 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
 
-        # 2. Reset player stats - Set MMR to 0 for unverified players
+        # 2. For complete resets, DELETE all player records instead of setting to 0
+        players_removed = system_coordinator.match_system.players.delete_many({}).deleted_count
+        print(f"Removed {players_removed} player records for complete reset")
+        reset_count = players_removed
+
+        # 3. Remove Discord roles for all players
         for player in all_players:
             player_id = player.get("id")
-
-            # For complete resets, we reset to zero MMR until re-verification
-            system_coordinator.match_system.players.update_one(
-                {"id": player_id},
-                {"$set": {
-                    "mmr": 0,  # Reset to 0 until re-verification
-                    "global_mmr": 0,
-                    "wins": 0,
-                    "global_wins": 0,
-                    "losses": 0,
-                    "global_losses": 0,
-                    "matches": 0,
-                    "global_matches": 0
-                }}
-            )
-            reset_count += 1
-
-            # 3. Remove Discord roles for all players
             try:
                 member = await interaction.guild.fetch_member(int(player_id))
                 if member:
@@ -1721,7 +1708,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     if reset_type == "all":
         announcement.add_field(
             name="🚨 IMPORTANT: Re-verification Required 🚨",
-            value="This was a complete reset. **All Discord roles have been removed and MMR has been set to 0**. " +
+            value="This was a complete reset. **All Discord roles have been removed and player records have been deleted**. " +
                   "**All players must re-verify their ranks** before joining the queue again.",
             inline=False
         )
