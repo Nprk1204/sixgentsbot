@@ -1325,10 +1325,11 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     embed.add_field(
         name="🔥 Streak System:",
         value=(
-            "**NEW!** 6 Mans now has a dynamic streak system that impacts MMR gains and losses!\n\n"
+            "**NEW!** 6 Mans now has a dynamic streak system for both ranked and global matches!\n\n"
             "• Win streaks of 3+ games give **bonus MMR** with 🔥 fire indicator\n"
             "• Loss streaks of 3+ games have **MMR penalties** with ❄️ snowflake indicator\n"
             "• The longer your streak, the bigger the impact (up to +50%)\n"
+            "• Streaks are tracked separately for ranked and global matches\n"
             "• Check your streak status with `/streak`\n"
             "• Admins can view top streaks with `/topstreaks`"
         ),
@@ -1955,265 +1956,384 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 
     await interaction.response.send_message(embed=embed)
 
+
 @bot.tree.command(name="streak", description="Check your current streak or another player's streak")
 @app_commands.describe(member="The member whose streak you want to check (optional)")
 async def streak_slash(interaction: discord.Interaction, member: discord.Member = None):
-        # Check if command is used in an allowed channel
-        if not is_command_channel(interaction.channel):
-            await interaction.response.send_message(
-                f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-                ephemeral=True
-            )
-            return
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
 
-        if member is None:
-            member = interaction.user
+    if member is None:
+        member = interaction.user
 
-        player_id = str(member.id)
-        player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+    player_id = str(member.id)
+    # Fix: Use players.find_one directly instead of get_player_stats
+    player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
-        if not player_data:
-            await interaction.response.send_message(
-                f"{member.mention} hasn't played any matches yet. No streak information available.",
-                ephemeral=True
-            )
-            return
+    if not player_data:
+        await interaction.response.send_message(
+            f"{member.mention} hasn't played any matches yet. No streak information available.",
+            ephemeral=True
+        )
+        return
 
-        # Extract streak information
-        current_streak = player_data.get("current_streak", 0)
-        longest_win_streak = player_data.get("longest_win_streak", 0)
-        longest_loss_streak = player_data.get("longest_loss_streak", 0)
+    # Extract streak information
+    # Ranked Streaks
+    current_streak = player_data.get("current_streak", 0)
+    longest_win_streak = player_data.get("longest_win_streak", 0)
+    longest_loss_streak = player_data.get("longest_loss_streak", 0)
 
-        # Get general player stats
-        mmr = player_data.get("mmr", 0)
-        global_mmr = player_data.get("global_mmr", 300)
-        matches = player_data.get("matches", 0)
-        global_matches = player_data.get("global_matches", 0)
-        wins = player_data.get("wins", 0)
-        losses = player_data.get("losses", 0)
+    # Global Streaks
+    global_current_streak = player_data.get("global_current_streak", 0)
+    global_longest_win_streak = player_data.get("global_longest_win_streak", 0)
+    global_longest_loss_streak = player_data.get("global_longest_loss_streak", 0)
 
-        # Calculate win rates
-        win_rate = round((wins / matches) * 100, 1) if matches > 0 else 0
+    # Get general player stats
+    mmr = player_data.get("mmr", 0)
+    global_mmr = player_data.get("global_mmr", 300)
+    matches = player_data.get("matches", 0)
+    global_matches = player_data.get("global_matches", 0)
+    wins = player_data.get("wins", 0)
+    losses = player_data.get("losses", 0)
+    global_wins = player_data.get("global_wins", 0)
+    global_losses = player_data.get("global_losses", 0)
 
-        # Format streak info
+    # Calculate win rates
+    win_rate = round((wins / matches) * 100, 1) if matches > 0 else 0
+    global_win_rate = round((global_wins / global_matches) * 100, 1) if global_matches > 0 else 0
+
+    # Create embed for streaks
+    embed = discord.Embed(
+        title=f"{member.display_name}'s Streak Status",
+        description="View both ranked and global streak information below",
+        color=0x7289da  # Discord Blurple as default
+    )
+
+    # Add player avatar
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+
+    # RANKED STREAKS SECTION
+    embed.add_field(
+        name="📊 RANKED STREAKS",
+        value="",
+        inline=False
+    )
+
+    # Format ranked streak info
+    if current_streak > 0:
+        streak_color = 0x43b581  # Green
+        streak_icon = "🔥" if current_streak >= 3 else "↗️"
+        streak_text = f"{streak_icon} **{current_streak}** Win Streak"
+        streak_desc = "On fire! Each win gives bonus MMR."
+    elif current_streak < 0:
+        streak_color = 0xf04747  # Red
+        streak_icon = "❄️" if current_streak <= -3 else "↘️"
+        streak_text = f"{streak_icon} **{abs(current_streak)}** Loss Streak"
+        streak_desc = "In a slump. Each loss costs extra MMR."
+    else:
+        streak_color = 0x7289da  # Discord Blurple
+        streak_text = "No active streak"
+        streak_desc = "No active win or loss streak."
+
+    # Main ranked streak info
+    embed.add_field(
+        name="Current Ranked Streak",
+        value=f"{streak_text}\n{streak_desc}",
+        inline=False
+    )
+
+    # Ranked MMR impact info
+    if abs(current_streak) >= 3:
+        bonus_percent = min((abs(current_streak) - 3 + 1) * 10, 50)
+        embed.add_field(
+            name="Ranked MMR Impact",
+            value=f"**+{bonus_percent}%** {'bonus' if current_streak > 0 else 'penalty'} to MMR changes",
+            inline=False
+        )
+
+    # Ranked personal bests
+    embed.add_field(
+        name="Best Ranked Win Streak",
+        value=f"🏆 **{longest_win_streak}** wins" if longest_win_streak > 0 else "None yet",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Worst Ranked Loss Streak",
+        value=f"📉 **{abs(longest_loss_streak)}** losses" if longest_loss_streak < 0 else "None yet",
+        inline=True
+    )
+
+    # Ranked stats
+    embed.add_field(
+        name="Ranked Stats",
+        value=f"MMR: **{mmr}**\nRecord: **{wins}W-{losses}L**\nWin Rate: **{win_rate}%**",
+        inline=False
+    )
+
+    # Add a separator
+    embed.add_field(
+        name="⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯",
+        value="",
+        inline=False
+    )
+
+    # GLOBAL STREAKS SECTION
+    embed.add_field(
+        name="🌐 GLOBAL STREAKS",
+        value="",
+        inline=False
+    )
+
+    # Format global streak info
+    if global_current_streak > 0:
+        global_streak_icon = "🔥" if global_current_streak >= 3 else "↗️"
+        global_streak_text = f"{global_streak_icon} **{global_current_streak}** Win Streak"
+        global_streak_desc = "On fire in global matches!"
+    elif global_current_streak < 0:
+        global_streak_icon = "❄️" if global_current_streak <= -3 else "↘️"
+        global_streak_text = f"{global_streak_icon} **{abs(global_current_streak)}** Loss Streak"
+        global_streak_desc = "In a global slump."
+    else:
+        global_streak_text = "No active global streak"
+        global_streak_desc = "No active global win or loss streak."
+
+    # Main global streak info
+    embed.add_field(
+        name="Current Global Streak",
+        value=f"{global_streak_text}\n{global_streak_desc}",
+        inline=False
+    )
+
+    # Global MMR impact info
+    if abs(global_current_streak) >= 3:
+        global_bonus_percent = min((abs(global_current_streak) - 3 + 1) * 10, 50)
+        embed.add_field(
+            name="Global MMR Impact",
+            value=f"**+{global_bonus_percent}%** {'bonus' if global_current_streak > 0 else 'penalty'} to Global MMR changes",
+            inline=False
+        )
+
+    # Global personal bests
+    embed.add_field(
+        name="Best Global Win Streak",
+        value=f"🏆 **{global_longest_win_streak}** wins" if global_longest_win_streak > 0 else "None yet",
+        inline=True
+    )
+
+    embed.add_field(
+        name="Worst Global Loss Streak",
+        value=f"📉 **{abs(global_longest_loss_streak)}** losses" if global_longest_loss_streak < 0 else "None yet",
+        inline=True
+    )
+
+    # Global stats
+    embed.add_field(
+        name="Global Stats",
+        value=f"Global MMR: **{global_mmr}**\nRecord: **{global_wins}W-{global_losses}L**\nWin Rate: **{global_win_rate}%**",
+        inline=False
+    )
+
+    # Tips based on streak
+    if current_streak >= 3 or global_current_streak >= 3:
+        embed.add_field(
+            name="💡 Tip",
+            value="Keep playing while you're hot! You're earning bonus MMR on each win.",
+            inline=False
+        )
+    elif current_streak <= -3 or global_current_streak <= -3:
+        embed.add_field(
+            name="💡 Tip",
+            value="Consider taking a short break or changing up your strategy. Each additional loss is costing you extra MMR.",
+            inline=False
+        )
+
+    # Add footer with explanation
+    embed.set_footer(
+        text="Streaks of 3+ affect MMR gains and losses. The longer the streak, the bigger the impact!")
+
+    # Set embed color based on most significant streak
+    if abs(current_streak) >= abs(global_current_streak):
+        # Ranked streak is more significant
         if current_streak > 0:
-            streak_color = 0x43b581  # Green
-            streak_icon = "🔥" if current_streak >= 3 else "↗️"
-            streak_text = f"{streak_icon} **{current_streak}** Win Streak"
-            streak_desc = "You're on fire! Each win is giving you bonus MMR."
+            embed.color = 0x43b581  # Green for win streak
         elif current_streak < 0:
-            streak_color = 0xf04747  # Red
-            streak_icon = "❄️" if current_streak <= -3 else "↘️"
-            streak_text = f"{streak_icon} **{abs(current_streak)}** Loss Streak"
-            streak_desc = "You're in a slump. Each loss is costing you extra MMR."
+            embed.color = 0xf04747  # Red for loss streak
+    else:
+        # Global streak is more significant
+        if global_current_streak > 0:
+            embed.color = 0x43b581  # Green for win streak
+        elif global_current_streak < 0:
+            embed.color = 0xf04747  # Red for loss streak
+
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="topstreaks",
+                  description="Show players with the highest win or loss streaks (Admin only)")
+@app_commands.describe(
+    streak_type="Type of streak to view",
+    mode="Ranked or Global mode",
+    limit="Number of players to show (1-25)"
+)
+@app_commands.choices(streak_type=[
+    app_commands.Choice(name="Win Streaks", value="win"),
+    app_commands.Choice(name="Loss Streaks", value="loss"),
+    app_commands.Choice(name="Current Streaks", value="current")
+])
+@app_commands.choices(mode=[
+    app_commands.Choice(name="Ranked", value="ranked"),
+    app_commands.Choice(name="Global", value="global")
+])
+async def topstreaks_slash(
+        interaction: discord.Interaction,
+        streak_type: str,
+        mode: str = "ranked",
+        limit: int = 10
+):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    # Validate limit
+    limit = max(1, min(25, limit))  # Clamp between 1 and 25
+
+    # Determine if we're looking at ranked or global mode
+    is_global = mode == "global"
+    mode_prefix = "Global " if is_global else "Ranked "
+
+    # Set up query based on streak type and mode
+    if streak_type == "win":
+        # Get players with highest win streaks
+        field_name = "global_longest_win_streak" if is_global else "longest_win_streak"
+        query = {field_name: {"$gt": 0}}
+        sort_field = field_name
+        sort_dir = -1  # Descending
+        title = f"Top {limit} {mode_prefix}Win Streaks"
+        embed_color = 0x43b581  # Green
+    elif streak_type == "loss":
+        # Get players with worst loss streaks
+        field_name = "global_longest_loss_streak" if is_global else "longest_loss_streak"
+        query = {field_name: {"$lt": 0}}
+        sort_field = field_name
+        sort_dir = 1  # Ascending (for negative values)
+        title = f"Top {limit} {mode_prefix}Loss Streaks"
+        embed_color = 0xf04747  # Red
+    else:  # current
+        # Get players with highest absolute current streaks
+        field_name = "global_current_streak" if is_global else "current_streak"
+        query = {field_name: {"$ne": 0}}
+        sort_field = field_name
+        sort_dir = -1  # Get highest absolute values first by using MongoDB's $abs in aggregation
+        title = f"Top {limit} Current {mode_prefix}Streaks"
+        embed_color = 0x7289da  # Discord Blurple
+
+    # Start deferred response since this might take time
+    await interaction.response.defer()
+
+    # Get players from database
+    try:
+        if streak_type == "current":
+            # For current streaks, we need to sort by absolute value
+            # to get both highest win and loss streaks together
+            pipeline = [
+                {"$match": query},
+                {"$addFields": {
+                    "abs_streak": {"$abs": f"${field_name}"}
+                }},
+                {"$sort": {"abs_streak": -1}},
+                {"$limit": limit}
+            ]
+            players = list(system_coordinator.match_system.players.aggregate(pipeline))
         else:
-            streak_color = 0x7289da  # Discord Blurple
-            streak_text = "No active streak"
-            streak_desc = "You don't have an active win or loss streak."
+            players = list(system_coordinator.match_system.players.find(query)
+                           .sort(sort_field, sort_dir)
+                           .limit(limit))
+
+        if not players:
+            await interaction.followup.send(f"No players found with {mode_prefix.lower()}{streak_type} streaks.")
+            return
 
         # Create embed
         embed = discord.Embed(
-            title=f"{member.display_name}'s Streak Status",
-            description=streak_text,
-            color=streak_color
+            title=title,
+            color=embed_color
         )
 
-        # Add player avatar
-        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+        # Add fields for each player
+        for i, player in enumerate(players):
+            player_id = player.get("id")
+            player_name = player.get("name", "Unknown")
 
-        # Main streak info
-        embed.add_field(
-            name="Current Status",
-            value=streak_desc,
-            inline=False
-        )
-
-        # MMR impact info
-        if abs(current_streak) >= 3:
-            bonus_percent = min((abs(current_streak) - 3 + 1) * 10, 50)
-            embed.add_field(
-                name="MMR Impact",
-                value=f"**+{bonus_percent}%** {'bonus' if current_streak > 0 else 'penalty'} to MMR changes",
-                inline=False
-            )
-
-        # Personal bests
-        embed.add_field(
-            name="Best Win Streak",
-            value=f"🏆 **{longest_win_streak}** wins" if longest_win_streak > 0 else "None yet",
-            inline=True
-        )
-
-        embed.add_field(
-            name="Worst Loss Streak",
-            value=f"📉 **{abs(longest_loss_streak)}** losses" if longest_loss_streak < 0 else "None yet",
-            inline=True
-        )
-
-        # Player stats
-        embed.add_field(
-            name="Player Stats",
-            value=f"MMR: **{mmr}**\nRecord: **{wins}W-{losses}L**\nWin Rate: **{win_rate}%**",
-            inline=False
-        )
-
-        # Tips based on streak
-        if current_streak >= 3:
-            embed.add_field(
-                name="💡 Tip",
-                value="Keep playing while you're hot! You're earning bonus MMR on each win.",
-                inline=False
-            )
-        elif current_streak <= -3:
-            embed.add_field(
-                name="💡 Tip",
-                value="Consider taking a short break or changing up your strategy. Each additional loss is costing you extra MMR.",
-                inline=False
-            )
-
-        # Add footer with explanation
-        embed.set_footer(
-            text="Streaks of 3+ affect MMR gains and losses. The longer the streak, the bigger the impact!")
-
-        await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="topstreaks",
-                          description="Show players with the highest win or loss streaks (Admin only)")
-@app_commands.describe(
-        streak_type="Type of streak to view",
-        limit="Number of players to show (1-25)"
-    )
-@app_commands.choices(streak_type=[
-            app_commands.Choice(name="Win Streaks", value="win"),
-            app_commands.Choice(name="Loss Streaks", value="loss"),
-            app_commands.Choice(name="Current Streaks", value="current")
-        ])
-async def topstreaks_slash(interaction: discord.Interaction, streak_type: str, limit: int = 10):
-            # Check if command is used in an allowed channel
-            if not is_command_channel(interaction.channel):
-                await interaction.response.send_message(
-                    f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-                    ephemeral=True
-                )
-                return
-
-            # Check if user has admin permissions
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                        ephemeral=True)
-                return
-
-            # Validate limit
-            limit = max(1, min(25, limit))  # Clamp between 1 and 25
-
-            # Set up query based on streak type
-            if streak_type == "win":
-                # Get players with highest win streaks
-                query = {"longest_win_streak": {"$gt": 0}}
-                sort_field = "longest_win_streak"
-                sort_dir = -1  # Descending
-                title = f"Top {limit} Longest Win Streaks"
-                embed_color = 0x43b581  # Green
-            elif streak_type == "loss":
-                # Get players with worst loss streaks
-                query = {"longest_loss_streak": {"$lt": 0}}
-                sort_field = "longest_loss_streak"
-                sort_dir = 1  # Ascending (for negative values)
-                title = f"Top {limit} Longest Loss Streaks"
-                embed_color = 0xf04747  # Red
-            else:  # current
-                # Get players with highest absolute current streaks
-                query = {"current_streak": {"$ne": 0}}
-                sort_field = "current_streak"
-                sort_dir = -1  # Get highest absolute values first by using MongoDB's $abs in aggregation
-                title = f"Top {limit} Current Streaks"
-                embed_color = 0x7289da  # Discord Blurple
-
-            # Start deferred response since this might take time
-            await interaction.response.defer()
-
-            # Get players from database
+            # Try to get Discord member name
             try:
-                if streak_type == "current":
-                    # For current streaks, we need to sort by absolute value
-                    # to get both highest win and loss streaks together
-                    pipeline = [
-                        {"$match": query},
-                        {"$addFields": {
-                            "abs_streak": {"$abs": "$current_streak"}
-                        }},
-                        {"$sort": {"abs_streak": -1}},
-                        {"$limit": limit}
-                    ]
-                    players = list(system_coordinator.match_system.players.aggregate(pipeline))
+                member = await interaction.guild.fetch_member(int(player_id))
+                if member:
+                    player_name = member.display_name
+            except:
+                pass  # Use name from database if member not found
+
+            # Format streak value
+            if streak_type == "win":
+                streak_value = player.get(field_name, 0)
+                streak_display = f"🏆 {streak_value} Wins"
+            elif streak_type == "loss":
+                streak_value = player.get(field_name, 0)
+                streak_display = f"📉 {abs(streak_value)} Losses"
+            else:  # current
+                streak_value = player.get(field_name, 0)
+                if streak_value > 0:
+                    icon = "🔥" if streak_value >= 3 else "↗️"
+                    streak_display = f"{icon} {streak_value} Win Streak"
                 else:
-                    players = list(system_coordinator.match_system.players.find(query)
-                                   .sort(sort_field, sort_dir)
-                                   .limit(limit))
+                    icon = "❄️" if streak_value <= -3 else "↘️"
+                    streak_display = f"{icon} {abs(streak_value)} Loss Streak"
 
-                if not players:
-                    await interaction.followup.send(f"No players found with {streak_type} streaks.")
-                    return
+            # Get player's MMR based on mode
+            if is_global:
+                mmr = player.get("global_mmr", 300)
+                mmr_label = "Global MMR"
+            else:
+                mmr = player.get("mmr", 0)
+                # Determine rank based on MMR
+                if mmr >= 1600:
+                    rank = "Rank A"
+                elif mmr >= 1100:
+                    rank = "Rank B"
+                else:
+                    rank = "Rank C"
+                mmr_label = f"MMR ({rank})"
 
-                # Create embed
-                embed = discord.Embed(
-                    title=title,
-                    color=embed_color
-                )
+            # Add player field
+            embed.add_field(
+                name=f"#{i + 1}: {player_name}",
+                value=f"{streak_display}\n{mmr_label}: {mmr}",
+                inline=False
+            )
 
-                # Add fields for each player
-                for i, player in enumerate(players):
-                    player_id = player.get("id")
-                    player_name = player.get("name", "Unknown")
+        # Add footer
+        embed.set_footer(text=f"Streak data as of {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
-                    # Try to get Discord member name
-                    try:
-                        member = await interaction.guild.fetch_member(int(player_id))
-                        if member:
-                            player_name = member.display_name
-                    except:
-                        pass  # Use name from database if member not found
+        # Send response
+        await interaction.followup.send(embed=embed)
 
-                    # Format streak value
-                    if streak_type == "win":
-                        streak_value = player.get("longest_win_streak", 0)
-                        streak_display = f"🏆 {streak_value} Wins"
-                    elif streak_type == "loss":
-                        streak_value = player.get("longest_loss_streak", 0)
-                        streak_display = f"📉 {abs(streak_value)} Losses"
-                    else:  # current
-                        streak_value = player.get("current_streak", 0)
-                        if streak_value > 0:
-                            icon = "🔥" if streak_value >= 3 else "↗️"
-                            streak_display = f"{icon} {streak_value} Win Streak"
-                        else:
-                            icon = "❄️" if streak_value <= -3 else "↘️"
-                            streak_display = f"{icon} {abs(streak_value)} Loss Streak"
-
-                    # Get player's MMR and rank
-                    mmr = player.get("mmr", 0)
-                    if mmr >= 1600:
-                        rank = "Rank A"
-                    elif mmr >= 1100:
-                        rank = "Rank B"
-                    else:
-                        rank = "Rank C"
-
-                    # Add player field
-                    embed.add_field(
-                        name=f"#{i + 1}: {player_name}",
-                        value=f"{streak_display}\nMMR: {mmr} ({rank})",
-                        inline=False
-                    )
-
-                # Add footer
-                embed.set_footer(text=f"Streak data as of {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-
-                # Send response
-                await interaction.followup.send(embed=embed)
-
-            except Exception as e:
-                await interaction.followup.send(f"Error retrieving streak data: {str(e)}")
+    except Exception as e:
+        await interaction.followup.send(f"Error retrieving streak data: {str(e)}")
 
 @bot.tree.command(name="resetstreak", description="Reset a player's streak (Admin only)")
 @app_commands.describe(
