@@ -349,10 +349,12 @@ class VoteSystem:
         if len(match_id) > 8:
             match_id = match_id[:6]
 
+        print(f"Creating balanced random teams for match ID: {match_id}")
+
         # Get the match
         match = self.queue_manager.get_match_by_id(match_id)
         if not match:
-            await channel.send("Error: Match no longer exists!")
+            await channel.send(f"Error: Match with ID {match_id} no longer exists!")
             return
 
         players = match.get('players', [])
@@ -459,14 +461,24 @@ class VoteSystem:
         team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
         team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
 
-        # Update match with teams - making sure to preserve the same match_id
+        # Debug log teams before assignment
+        print(f"Assigning balanced teams to match {match_id}")
+        print(f"Team 1: {[p.get('name', 'Unknown') for p in team1]}")
+        print(f"Team 2: {[p.get('name', 'Unknown') for p in team2]}")
+
+        # Update match with teams - MAKE SURE WE'RE USING THE ORIGINAL MATCH ID
         self.queue_manager.assign_teams_to_match(match_id, team1, team2)
 
+        # Ensure players are properly tracked in the system
         for player in team1 + team2:
             player_id = str(player.get('id', ''))
             if player_id:
                 self.queue_manager.player_matches[player_id] = match_id
                 print(f"Added player {player.get('name', 'Unknown')} (ID: {player_id}) to match {match_id}")
+
+        # Calculate average MMR per team for display
+        team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
+        team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
 
         # Create an embed for team announcement
         embed = discord.Embed(
@@ -485,3 +497,6 @@ class VoteSystem:
 
         # Send team announcement as embed
         await channel.send(embed=embed)
+
+        # Cancel this vote
+        self.cancel_voting(match_id=match_id)
