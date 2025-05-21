@@ -802,7 +802,7 @@ class MatchSystem:
             print(f"Error updating Discord role: {str(e)}")
 
     def update_player_mmr(self, winning_team, losing_team, match_id=None):
-        """Update MMR for all players in the match with dynamic MMR changes based on team balance"""
+        """Update MMR for all players in the match with dynamic MMR changes based on team balance and streaks"""
         # Retrieve match data if match_id is provided
         match = None
         if match_id:
@@ -833,7 +833,8 @@ class MatchSystem:
                 # For new players, get MMR from rank verification or use default
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
-                    winning_team_mmrs.append(rank_record.get("mmr", 600))
+                    tier = rank_record.get("tier", "Rank C")
+                    winning_team_mmrs.append(self.TIER_MMR.get(tier, 600))
                 else:
                     # Use tier-based default
                     winning_team_mmrs.append(600)  # Default to Rank C MMR
@@ -859,7 +860,8 @@ class MatchSystem:
                 # For new players, get MMR from rank verification or use default
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
-                    losing_team_mmrs.append(rank_record.get("mmr", 600))
+                    tier = rank_record.get("tier", "Rank C")
+                    losing_team_mmrs.append(self.TIER_MMR.get(tier, 600))
                 else:
                     # Use tier-based default
                     losing_team_mmrs.append(600)  # Default to Rank C MMR
@@ -871,7 +873,7 @@ class MatchSystem:
         print(f"Winning team avg MMR: {winning_team_avg_mmr}")
         print(f"Losing team avg MMR: {losing_team_avg_mmr}")
 
-        # Track MMR changes for each player
+        # Add tracking for streak changes
         mmr_changes = []
 
         # Process winners
@@ -890,17 +892,26 @@ class MatchSystem:
                 wins = player_data.get("wins", 0) + 1
                 old_mmr = player_data.get("mmr", 600)
 
-                # Calculate MMR gain with new algorithm
+                # Get current streak info or initialize
+                current_streak = player_data.get("current_streak", 0)
+                # Positive number means win streak, negative means loss streak
+
+                # Update streak - player won, so streak increases or resets from negative
+                new_streak = current_streak + 1 if current_streak >= 0 else 1
+                longest_win_streak = max(player_data.get("longest_win_streak", 0), new_streak)
+
+                # Calculate MMR gain with streak bonus
                 mmr_gain = self.calculate_dynamic_mmr(
                     old_mmr,
                     winning_team_avg_mmr,
                     losing_team_avg_mmr,
                     matches_played,
-                    is_win=True
+                    is_win=True,
+                    streak=new_streak  # Pass the streak to the MMR calculation
                 )
 
                 new_mmr = old_mmr + mmr_gain
-                print(f"Player {player['name']} MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+                print(f"Player {player['name']} MMR update: {old_mmr} + {mmr_gain} = {new_mmr} (Streak: {new_streak})")
 
                 self.players.update_one(
                     {"id": player_id},
@@ -908,6 +919,8 @@ class MatchSystem:
                         "mmr": new_mmr,
                         "wins": wins,
                         "matches": matches_played,
+                        "current_streak": new_streak,
+                        "longest_win_streak": longest_win_streak,
                         "last_updated": datetime.datetime.utcnow()
                     }}
                 )
@@ -918,7 +931,8 @@ class MatchSystem:
                     "old_mmr": old_mmr,
                     "new_mmr": new_mmr,
                     "mmr_change": mmr_gain,
-                    "is_win": True
+                    "is_win": True,
+                    "streak": new_streak
                 })
             else:
                 # Look up player's rank in ranks collection
@@ -940,18 +954,20 @@ class MatchSystem:
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
-                # Calculate first win MMR with the new algorithm
+                # Calculate first win MMR with the new algorithm - include streak of 1
                 mmr_gain = self.calculate_dynamic_mmr(
                     starting_mmr,
                     winning_team_avg_mmr,
                     losing_team_avg_mmr,
                     1,  # First match
-                    is_win=True
+                    is_win=True,
+                    streak=1  # First win, streak of 1
                 )
 
                 new_mmr = starting_mmr + mmr_gain
                 print(f"NEW PLAYER {player['name']} FIRST WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
 
+                # Initialize player record with streak information
                 self.players.insert_one({
                     "id": player_id,
                     "name": player["name"],
@@ -959,6 +975,9 @@ class MatchSystem:
                     "wins": 1,
                     "losses": 0,
                     "matches": 1,
+                    "current_streak": 1,  # Start with a win streak of 1
+                    "longest_win_streak": 1,
+                    "longest_loss_streak": 0,
                     "created_at": datetime.datetime.utcnow(),
                     "last_updated": datetime.datetime.utcnow()
                 })
@@ -969,7 +988,8 @@ class MatchSystem:
                     "old_mmr": starting_mmr,
                     "new_mmr": new_mmr,
                     "mmr_change": mmr_gain,
-                    "is_win": True
+                    "is_win": True,
+                    "streak": 1
                 })
 
         # Process losers with similar logic
@@ -988,17 +1008,25 @@ class MatchSystem:
                 losses = player_data.get("losses", 0) + 1
                 old_mmr = player_data.get("mmr", 600)
 
-                # Calculate MMR loss with new algorithm
+                # Get current streak info
+                current_streak = player_data.get("current_streak", 0)
+
+                # Update streak - player lost, so streak decreases or resets from positive
+                new_streak = current_streak - 1 if current_streak <= 0 else -1
+                longest_loss_streak = min(player_data.get("longest_loss_streak", 0), new_streak)
+
+                # Calculate MMR loss with streak penalty
                 mmr_loss = self.calculate_dynamic_mmr(
                     old_mmr,
                     losing_team_avg_mmr,
                     winning_team_avg_mmr,
                     matches_played,
-                    is_win=False
+                    is_win=False,
+                    streak=new_streak  # Pass the negative streak value
                 )
 
                 new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                print(f"Player {player['name']} MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                print(f"Player {player['name']} MMR update: {old_mmr} - {mmr_loss} = {new_mmr} (Streak: {new_streak})")
 
                 self.players.update_one(
                     {"id": player_id},
@@ -1006,6 +1034,8 @@ class MatchSystem:
                         "mmr": new_mmr,
                         "losses": losses,
                         "matches": matches_played,
+                        "current_streak": new_streak,
+                        "longest_loss_streak": longest_loss_streak,
                         "last_updated": datetime.datetime.utcnow()
                     }}
                 )
@@ -1016,7 +1046,8 @@ class MatchSystem:
                     "old_mmr": old_mmr,
                     "new_mmr": new_mmr,
                     "mmr_change": -mmr_loss,  # Negative for loss
-                    "is_win": False
+                    "is_win": False,
+                    "streak": new_streak
                 })
             else:
                 # Look up player's rank in ranks collection
@@ -1038,18 +1069,20 @@ class MatchSystem:
                 else:
                     print(f"No rank record found, using default MMR: {starting_mmr}")
 
-                # Calculate first loss MMR
+                # Calculate first loss MMR - include streak of -1
                 mmr_loss = self.calculate_dynamic_mmr(
                     starting_mmr,
                     losing_team_avg_mmr,
                     winning_team_avg_mmr,
                     1,  # First match
-                    is_win=False
+                    is_win=False,
+                    streak=-1  # First loss, streak of -1
                 )
 
                 new_mmr = max(0, starting_mmr - mmr_loss)  # Don't go below 0
                 print(f"NEW PLAYER {player['name']} FIRST LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
 
+                # Initialize player record with streak information
                 self.players.insert_one({
                     "id": player_id,
                     "name": player["name"],
@@ -1057,6 +1090,9 @@ class MatchSystem:
                     "wins": 0,
                     "losses": 1,
                     "matches": 1,
+                    "current_streak": -1,  # Start with a loss streak of -1
+                    "longest_win_streak": 0,
+                    "longest_loss_streak": -1,
                     "created_at": datetime.datetime.utcnow(),
                     "last_updated": datetime.datetime.utcnow()
                 })
@@ -1067,27 +1103,29 @@ class MatchSystem:
                     "old_mmr": starting_mmr,
                     "new_mmr": new_mmr,
                     "mmr_change": -mmr_loss,  # Negative for loss
-                    "is_win": False
+                    "is_win": False,
+                    "streak": -1
                 })
 
-        # Store the MMR changes and team averages in the match document if match_id is provided
+        # Store the MMR changes and team average MMRs in the match document
         if match_id:
             self.matches.update_one(
                 {"match_id": match_id},
                 {"$set": {
                     "mmr_changes": mmr_changes,
-                    "winning_team_avg_mmr": winning_team_avg_mmr,
-                    "losing_team_avg_mmr": losing_team_avg_mmr
+                    "team1_avg_mmr": winning_team_avg_mmr,
+                    "team2_avg_mmr": losing_team_avg_mmr
                 }}
             )
 
             print(f"Stored MMR changes and team averages for match {match_id}")
 
-    def calculate_dynamic_mmr(self, player_mmr, team_avg_mmr, opponent_avg_mmr, matches_played, is_win=True):
+    def calculate_dynamic_mmr(self, player_mmr, team_avg_mmr, opponent_avg_mmr, matches_played, is_win=True, streak=0):
         """
         Calculate dynamic MMR change based on:
         1. MMR difference between teams
         2. Number of matches played (for decay)
+        3. Win/loss streak (NEW)
 
         Parameters:
         - player_mmr: Current MMR of the player
@@ -1095,6 +1133,7 @@ class MatchSystem:
         - opponent_avg_mmr: Average MMR of the opposing team
         - matches_played: Number of matches the player has played (including the current one)
         - is_win: True if calculating for a win, False for a loss
+        - streak: Current streak value (positive for win streak, negative for loss streak)
 
         Returns:
         - MMR change amount
@@ -1111,6 +1150,11 @@ class MatchSystem:
 
         # Decay settings
         DECAY_RATE = 0.15  # Slightly increased to create faster decay from high initial values
+
+        # NEW: Streak multiplier settings
+        MAX_STREAK_MULTIPLIER = 1.5  # Maximum multiplier for long streaks (50% bonus)
+        STREAK_THRESHOLD = 3  # Number of consecutive wins/losses before streak bonus starts
+        STREAK_SCALING = 0.1  # How quickly the streak multiplier scales (10% per win/loss after threshold)
 
         # Calculate the MMR difference between teams
         # Positive means opponent team has higher MMR, negative means player's team has higher MMR
@@ -1159,41 +1203,30 @@ class MatchSystem:
             # Adjusted to start from match 6 (matches_played - 5)
             decay_multiplier = 1.0 * math.exp(-DECAY_RATE * (matches_played - 5))
 
-        # Calculate final MMR change
+        # Calculate initial MMR change
         mmr_change = base_change * decay_multiplier
 
-        # Ensure the change is within bounds - MIN is applied AFTER decay
+        # NEW: Apply streak bonus/penalty if applicable
+        streak_abs = abs(streak)
+        if streak_abs >= STREAK_THRESHOLD:
+            # Calculate streak multiplier - scales up with streak length
+            # but caps at MAX_STREAK_MULTIPLIER
+            streak_bonus = min(
+                (streak_abs - STREAK_THRESHOLD + 1) * STREAK_SCALING,
+                MAX_STREAK_MULTIPLIER - 1.0
+            )
+
+            # Apply streak multiplier (1.0 + bonus)
+            streak_multiplier = 1.0 + streak_bonus
+
+            # If this is a win during a win streak or a loss during a loss streak,
+            # then apply the multiplier
+            if (is_win and streak > 0) or (not is_win and streak < 0):
+                mmr_change *= streak_multiplier
+                print(f"Streak multiplier applied: {streak_multiplier}x (Streak: {streak})")
+
+        # Ensure the change is within bounds
         mmr_change = max(MIN_MMR_CHANGE, min(MAX_MMR_CHANGE, mmr_change))
 
         # Round to nearest integer
         return round(mmr_change)
-
-    def get_leaderboard(self, limit=10):
-        """Get top players by MMR"""
-        leaderboard = list(self.players.find().sort("mmr", -1).limit(limit))
-        return leaderboard
-
-    def get_player_stats(self, player_id):
-        """Get stats for a specific player"""
-        player = self.players.find_one({"id": player_id})
-
-        # If found, ensure it has global MMR fields
-        if player and "global_mmr" not in player:
-            # Update the player with default global MMR fields
-            self.players.update_one(
-                {"id": player_id},
-                {"$set": {
-                    "global_mmr": 300,
-                    "global_wins": 0,
-                    "global_losses": 0,
-                    "global_matches": 0
-                }}
-            )
-
-            # Update our player object with the new fields
-            player["global_mmr"] = 300
-            player["global_wins"] = 0
-            player["global_losses"] = 0
-            player["global_matches"] = 0
-
-        return player

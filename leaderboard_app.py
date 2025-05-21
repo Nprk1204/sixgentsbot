@@ -291,7 +291,7 @@ def get_leaderboard_by_type(board_type):
     # Calculate skip value for pagination
     skip = (page - 1) * per_page
 
-    # Get players with pagination
+    # Get players with pagination - Add current_streak field
     projection = {
         "_id": 0,
         "id": 1,
@@ -304,7 +304,10 @@ def get_leaderboard_by_type(board_type):
         "global_losses": 1,
         "matches": 1,
         "global_matches": 1,
-        "last_updated": 1
+        "last_updated": 1,
+        "current_streak": 1,  # Add streak fields
+        "longest_win_streak": 1,
+        "longest_loss_streak": 1
     }
 
     top_players = list(players_collection.find(query, projection)
@@ -331,6 +334,21 @@ def get_leaderboard_by_type(board_type):
             player["last_match"] = player["last_updated"].strftime("%Y-%m-%d")
         else:
             player["last_match"] = "Unknown"
+
+        # Format streak for display - add emoji
+        streak = player.get("current_streak", 0)
+        if streak > 0:
+            if streak >= 3:
+                player["streak_display"] = f"🔥 {streak} Win"
+            else:
+                player["streak_display"] = f"{streak} Win"
+        elif streak < 0:
+            if streak <= -3:
+                player["streak_display"] = f"❄️ {abs(streak)} Loss"
+            else:
+                player["streak_display"] = f"{abs(streak)} Loss"
+        else:
+            player["streak_display"] = "—"
 
         # Remove the datetime object before jsonifying
         if "last_updated" in player:
@@ -391,6 +409,29 @@ def get_player(player_id):
         global_matches = player.get("global_matches", 0)
         global_wins = player.get("global_wins", 0)
         player["global_win_rate"] = round((global_wins / global_matches) * 100, 2) if global_matches > 0 else 0
+
+        # Format streaks for display
+        current_streak = player.get("current_streak", 0)
+        longest_win_streak = player.get("longest_win_streak", 0)
+        longest_loss_streak = player.get("longest_loss_streak", 0)
+
+        # Add streak display info with emoji
+        if current_streak > 0:
+            if current_streak >= 3:
+                player["streak_display"] = f"🔥 {current_streak} Win Streak"
+            else:
+                player["streak_display"] = f"{current_streak} Win Streak"
+        elif current_streak < 0:
+            if current_streak <= -3:
+                player["streak_display"] = f"❄️ {abs(current_streak)} Loss Streak"
+            else:
+                player["streak_display"] = f"{abs(current_streak)} Loss Streak"
+        else:
+            player["streak_display"] = "No current streak"
+
+        # Add extra streak stats
+        player["longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
+        player["longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
 
         # Get recent matches for this player - handle potential errors
         try:
@@ -459,6 +500,30 @@ def get_player(player_id):
                 else:
                     match["date"] = "Unknown"
 
+                # Add MMR change info if available
+                for change in match.get("mmr_changes", []):
+                    if change.get("player_id") == player_id:
+                        # Add MMR change and streak info to match data
+                        match["mmr_change"] = change.get("mmr_change", 0)
+                        match["streak"] = change.get("streak", 0)
+
+                        # Format streak with emojis for display
+                        streak = change.get("streak", 0)
+                        if streak > 0:
+                            if streak >= 3:
+                                match["streak_display"] = f"🔥 {streak} Win"
+                            else:
+                                match["streak_display"] = f"{streak} Win"
+                        elif streak < 0:
+                            if streak <= -3:
+                                match["streak_display"] = f"❄️ {abs(streak)} Loss"
+                            else:
+                                match["streak_display"] = f"{abs(streak)} Loss"
+                        else:
+                            match["streak_display"] = "No streak"
+
+                        break
+
                 formatted_matches.append(match)
             except Exception as format_error:
                 print(f"Error formatting match {match.get('match_id', 'unknown')}: {str(format_error)}")
@@ -470,7 +535,6 @@ def get_player(player_id):
 
         # Use Flask's jsonify which properly handles serialization
         return jsonify(player)
-
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()

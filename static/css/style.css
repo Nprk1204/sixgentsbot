@@ -2184,3 +2184,80 @@ img {
         font-size: 0.9rem;
     }
 }
+
+/* Streak styling */
+.streak-win {
+    color: var(--success);
+    font-weight: bold;
+}
+
+.streak-loss {
+    color: var(--danger);
+    font-weight: bold;
+}
+
+.hot-streak {
+    position: relative;
+    animation: pulse 2s infinite;
+}
+
+.cold-streak {
+    position: relative;
+    animation: shake 2s infinite;
+}
+
+@keyframes pulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes shake {
+    0%, 100% {
+        transform: translateX(0);
+    }
+    10%, 30%, 50%, 70%, 90% {
+        transform: translateX(-1px);
+    }
+    20%, 40%, 60%, 80% {
+        transform: translateX(1px);
+    }
+}
+
+/* Streak cards in player profile */
+.streak-card {
+    background-color: var(--dark-medium);
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    transition: all 0.2s ease;
+}
+
+.streak-card.win-streak {
+    border-left: 4px solid var(--success);
+}
+
+.streak-card.loss-streak {
+    border-left: 4px solid var(--danger);
+}
+
+.streak-card .streak-value {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.streak-card.win-streak .streak-value {
+    color: var(--success);
+}
+
+.streak-card.loss-streak .streak-value {
+    color: var(--danger);
+}
