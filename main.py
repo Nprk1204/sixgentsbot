@@ -155,12 +155,13 @@ db = Database(MONGO_URI)
 system_coordinator = SystemCoordinator(db)
 
 
+@bot.event
 async def on_ready():
     print(f"{bot.user.name} is now online with ID: {bot.user.id}")
     print(f"Connected to {len(bot.guilds)} guilds")
 
     try:
-        # Set bot in system coordinator first
+        # Set bot in system coordinator
         system_coordinator.set_bot(bot)
 
         # Start background task to check for ready matches
@@ -168,15 +169,40 @@ async def on_ready():
 
         print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
-        # Sync command tree with Discord - don't clear commands first
-        # bot.tree.clear_commands(guild=None)  # This line is problematic - removing it
+        # First, register all commands explicitly to ensure they're in the tree
+        # This is just an example - your actual commands are already defined in the file
+        # But this ensures they are definitely in the tree
+
+        # Example of explicitly registering a command
+        # (Uncomment if you want to test with just one command)
+        """
+        @bot.tree.command(name="ping", description="Check if the bot is connected")
+        async def ping_cmd(interaction: discord.Interaction):
+            await interaction.response.send_message("Pong! Bot is connected to Discord.")
+        """
+
+        # Sync commands first without guild restriction (global commands)
+        print("Syncing global commands...")
         await bot.tree.sync()
 
-        # Log the commands that were registered
+        # Then sync to each guild specifically for faster updates
+        print("Syncing guild-specific commands...")
+        for guild in bot.guilds:
+            try:
+                await bot.tree.sync(guild=guild)
+                print(f"Synced commands to guild: {guild.name} (ID: {guild.id})")
+            except Exception as guild_error:
+                print(f"Error syncing to guild {guild.name}: {guild_error}")
+
+        # Log all commands that should be available
         commands = bot.tree.get_commands()
-        print(f"Successfully synced {len(commands)} application commands:")
+        print(f"Registered {len(commands)} global application commands:")
         for cmd in commands:
             print(f"- /{cmd.name}")
+
+        # The sync process can take some time to propagate to Discord's systems
+        print("Command synchronization complete. It may take up to an hour for commands to appear in Discord.")
+
     except Exception as e:
         print(f"Error during bot initialization: {e}")
         import traceback
