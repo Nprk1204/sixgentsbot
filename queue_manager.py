@@ -241,19 +241,19 @@ class QueueManager:
         player_id = str(player.id)
         player_mention = player.mention
 
-        # First check if player is in an active match in any stage
+        # Check if player is in any active match
         if player_id in self.player_matches:
             match_id = self.player_matches[player_id]
             match = self.active_matches.get(match_id)
 
             if match:
-                # Get match status and check if it's in voting, selection, or in_progress
+                # Get match status - don't allow leaving if match exists in any state
                 status = match.get('status', '')
-
-                # Don't allow leaving during any active match stage
-                if status in ['voting', 'selection', 'in_progress']:
-                    status_display = status.replace('_', ' ').title()  # Format for display
-                    return f"{player_mention} cannot leave while a match is in {status_display} stage! Please complete the match first."
+                status_display = status.replace('_', ' ').title()  # Format for display
+                return f"{player_mention} cannot leave while in an active match (status: {status_display}). You must complete the match first."
+            else:
+                # If match isn't in active_matches but player is tracked, they're in a match being reported
+                return f"{player_mention} is currently in a match that is being processed. Please wait for match completion."
 
         # Check if player is in this channel's queue
         player_in_queue = False
@@ -303,7 +303,6 @@ class QueueManager:
             return f"Not enough players to start match (need 6, have {len(players)})"
 
         # Generate a unique match ID - make it shorter and more readable
-        # Always use 6 character hexadecimal format
         match_id = str(uuid.uuid4().hex)[:6]
 
         # Determine if this is a global match
@@ -324,6 +323,13 @@ class QueueManager:
 
         # Update in-memory state
         self.active_matches[match_id] = match_data
+
+        # IMPORTANT: Track all players in this match immediately
+        for player in players:
+            player_id = str(player.get('id', ''))
+            if player_id:
+                self.player_matches[player_id] = match_id
+                print(f"Tracking player {player.get('name', 'Unknown')} (ID: {player_id}) in match {match_id}")
 
         # Remove these players from the queue in database
         player_ids = [p.get('id') for p in players]
@@ -421,6 +427,7 @@ class QueueManager:
         """Remove a match (typically when completed)"""
         match = self.active_matches.get(match_id)
         if not match:
+            print(f"Match {match_id} not found in active_matches during removal")
             return False
 
         # Remove from database
@@ -429,6 +436,7 @@ class QueueManager:
         # Update in-memory state
         if match_id in self.active_matches:
             del self.active_matches[match_id]
+            print(f"Removed match {match_id} from active_matches")
 
         # Remove player-match associations
         for player_id, pid in list(self.player_matches.items()):
