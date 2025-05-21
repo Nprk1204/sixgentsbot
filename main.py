@@ -160,6 +160,9 @@ async def on_ready():
     print(f"{bot.user.name} is now online with ID: {bot.user.id}")
     print(f"Connected to {len(bot.guilds)} guilds")
 
+    # Clear existing commands first (to prevent duplicates)
+    bot.tree.clear_commands(guild=None)
+
     # Set bot in system coordinator
     system_coordinator.set_bot(bot)
 
@@ -1004,47 +1007,6 @@ async def add_dummy_players(channel, count):
         system_coordinator.queue_manager.channel_queues[channel_id].append(dummy_data)
 
 
-async def add_dummy_players(channel, count):
-    """Add dummy players to the queue"""
-    channel_id = str(channel.id)
-    is_global = channel.name.lower() == "global"
-
-    # Determine MMR range based on channel
-    if channel.name.lower() == "rank-a":
-        mmr_range = (1600, 2100)
-    elif channel.name.lower() == "rank-b":
-        mmr_range = (1100, 1599)
-    else:  # rank-c or global
-        mmr_range = (600, 1099)
-
-    # Create dummy players and add to queue
-    for i in range(count):
-        # Generate a unique dummy ID
-        dummy_id = f"9000{i + 1}"
-
-        # Generate a random MMR within the range for this channel
-        dummy_mmr = random.randint(mmr_range[0], mmr_range[1])
-
-        # Create dummy player data
-        dummy_data = {
-            "id": dummy_id,
-            "name": f"TestDummy{i + 1}",
-            "mention": f"TestDummy{i + 1}",
-            "channel_id": channel_id,
-            "is_global": is_global,
-            "joined_at": datetime.datetime.utcnow(),
-            "dummy_mmr": dummy_mmr  # Store MMR directly in player data
-        }
-
-        # Add to database
-        system_coordinator.queue_manager.queue_collection.insert_one(dummy_data)
-
-        # Add to in-memory queue
-        if channel_id not in system_coordinator.queue_manager.channel_queues:
-            system_coordinator.queue_manager.channel_queues[channel_id] = []
-
-        system_coordinator.queue_manager.channel_queues[channel_id].append(dummy_data)
-
 
 @bot.tree.command(name="removeactivematches", description="Remove all active matches in this channel (Admin only)")
 async def removeactivematches_slash(interaction: discord.Interaction):
@@ -1108,25 +1070,44 @@ async def removeactivematches_slash(interaction: discord.Interaction):
         # Remove the match
         system_coordinator.queue_manager.remove_match(match_id)
 
-    # Create embed to display results
+    # Create embed to display results - avoiding too many fields
     embed = discord.Embed(
         title="Active Matches Removed",
         description=f"Removed {len(removed_matches)} active match(es) from this channel.",
         color=0xff5555  # Red color
     )
 
-    for i, match in enumerate(removed_matches, 1):
-        embed.add_field(
-            name=f"Match {i}",
-            value=f"ID: `{match['match_id']}`\nStatus: {match['status']}\nPlayers: {match['player_count']}",
-            inline=True
-        )
+    # Instead of adding each match as a separate field, combine them into chunks
+    if removed_matches:
+        match_text = []
+        for i, match in enumerate(removed_matches, 1):
+            match_text.append(
+                f"Match {i}: ID `{match['match_id']}` (Status: {match['status']}, Players: {match['player_count']})")
+
+        # Join all matches into a single chunked field (max 10 per field to avoid value length issues)
+        chunks = []
+        current_chunk = []
+        for line in match_text:
+            current_chunk.append(line)
+            if len(current_chunk) >= 10:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
+
+        if current_chunk:  # Add any remaining items
+            chunks.append("\n".join(current_chunk))
+
+        # Add chunks as fields
+        for i, chunk in enumerate(chunks):
+            embed.add_field(
+                name=f"Matches Removed {i + 1}/{len(chunks)}" if len(chunks) > 1 else "Matches Removed",
+                value=chunk,
+                inline=False
+            )
 
     embed.set_footer(text=f"Executed by {interaction.user.display_name}")
 
     # Send confirmation
     await interaction.response.send_message(embed=embed)
-
 
 @bot.tree.command(name="purgechat", description="Clear chat messages")
 @app_commands.describe(amount_to_delete="Number of messages to delete (1-100)")
@@ -1471,110 +1452,6 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
         text=f"Adjusted by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     await interaction.response.send_message(embed=embed)
-
-
-# 2. Remove Match Command
-@bot.tree.command(name="removeactivematches", description="Remove all active matches in this channel (Admin only)")
-async def removeactivematches_slash(interaction: discord.Interaction):
-    # Check if command is used in an allowed channel
-    if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
-            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-            ephemeral=True
-        )
-        return
-
-    # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
-        return
-
-    channel_id = str(interaction.channel.id)
-
-    # Find all active matches in this channel
-    active_matches = []
-    for match_id, match in system_coordinator.queue_manager.active_matches.items():
-        if match.get('channel_id') == channel_id:
-            active_matches.append(match)
-
-    # If no active matches, inform the user
-    if not active_matches:
-        await interaction.response.send_message("No active matches found in this channel.")
-        return
-
-    # First, cancel any active votings or selections
-    vote_active = system_coordinator.is_voting_active(channel_id)
-    if vote_active:
-        system_coordinator.cancel_voting(channel_id)
-
-    selection_active = system_coordinator.is_selection_active(channel_id)
-    if selection_active:
-        system_coordinator.cancel_selection(channel_id)
-
-    # Store match details for the embed
-    removed_matches = []
-    for match in active_matches:
-        match_id = match.get('match_id')
-        player_count = 0
-
-        # Count players in teams if available
-        team1 = match.get('team1', [])
-        team2 = match.get('team2', [])
-        if team1 or team2:
-            player_count = len(team1) + len(team2)
-        # Otherwise count players directly
-        elif 'players' in match:
-            player_count = len(match.get('players', []))
-
-        removed_matches.append({
-            'match_id': match_id,
-            'player_count': player_count,
-            'status': match.get('status', 'unknown')
-        })
-
-        # Remove the match
-        system_coordinator.queue_manager.remove_match(match_id)
-
-    # Create embed to display results - avoiding too many fields
-    embed = discord.Embed(
-        title="Active Matches Removed",
-        description=f"Removed {len(removed_matches)} active match(es) from this channel.",
-        color=0xff5555  # Red color
-    )
-
-    # Instead of adding each match as a separate field, combine them into chunks
-    if removed_matches:
-        match_text = []
-        for i, match in enumerate(removed_matches, 1):
-            match_text.append(
-                f"Match {i}: ID `{match['match_id']}` (Status: {match['status']}, Players: {match['player_count']})")
-
-        # Join all matches into a single chunked field (max 10 per field to avoid value length issues)
-        chunks = []
-        current_chunk = []
-        for line in match_text:
-            current_chunk.append(line)
-            if len(current_chunk) >= 10:
-                chunks.append("\n".join(current_chunk))
-                current_chunk = []
-
-        if current_chunk:  # Add any remaining items
-            chunks.append("\n".join(current_chunk))
-
-        # Add chunks as fields
-        for i, chunk in enumerate(chunks):
-            embed.add_field(
-                name=f"Matches Removed {i + 1}/{len(chunks)}" if len(chunks) > 1 else "Matches Removed",
-                value=chunk,
-                inline=False
-            )
-
-    embed.set_footer(text=f"Executed by {interaction.user.display_name}")
-
-    # Send confirmation
-    await interaction.response.send_message(embed=embed)
-
 
 # 3. Reset Leaderboard Command
 @bot.tree.command(name="resetleaderboard", description="Reset the leaderboard (Admin only)")
