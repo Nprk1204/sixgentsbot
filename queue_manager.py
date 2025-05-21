@@ -241,19 +241,19 @@ class QueueManager:
         player_id = str(player.id)
         player_mention = player.mention
 
-        # Check if player is in an active match in this channel
+        # First check if player is in an active match in any stage
         if player_id in self.player_matches:
             match_id = self.player_matches[player_id]
             match = self.active_matches.get(match_id)
 
-            if match and match.get('channel_id') == channel_id:
-                # Check match status - don't allow leaving during voting or captain selection
+            if match:
+                # Get match status and check if it's in voting, selection, or in_progress
                 status = match.get('status', '')
-                if status in ['voting', 'selection']:
-                    return f"{player_mention} cannot leave the queue while team selection is in progress!"
 
-                # For matches in other states, we could handle substitution here if needed
-                return f"{player_mention} is in an active match and cannot leave. If you need to leave mid-match, please contact an admin."
+                # Don't allow leaving during any active match stage
+                if status in ['voting', 'selection', 'in_progress']:
+                    status_display = status.replace('_', ' ').title()  # Format for display
+                    return f"{player_mention} cannot leave while a match is in {status_display} stage! Please complete the match first."
 
         # Check if player is in this channel's queue
         player_in_queue = False
