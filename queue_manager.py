@@ -290,51 +290,51 @@ class QueueManager:
         else:
             return f"Error removing {player_mention} from the queue. Please try again."
 
-    async def create_match(self, channel, trigger_player_mention):
-        """Create a match with the first 6 players in queue"""
-        channel_id = str(channel.id)
+    def create_match(self, match_id, team1, team2, channel_id, is_global=False):
+        """Create a completed match entry in the database"""
+        print(
+            f"MatchSystem.create_match called with match_id: {match_id}, channel_id: {channel_id}, is_global: {is_global}")
 
-        # Get the first 6 players from the queue
-        players = []
-        if channel_id in self.channel_queues:
-            players = self.channel_queues[channel_id][:6]
+        # Generate a shorter match ID if needed
+        if not match_id or len(match_id) > 8:
+            match_id = str(uuid.uuid4().hex)[:6]
+            print(f"Generated new short match ID: {match_id}")
 
-        if len(players) < 6:
-            return f"Not enough players to start match (need 6, have {len(players)})"
-
-        # Generate a unique match ID - make it shorter and more readable
-        # Always use 6 character hexadecimal format
-        match_id = str(uuid.uuid4().hex)[:6]
-
-        # Determine if this is a global match
-        is_global = channel.name.lower() == "global"
-
-        # Create an active match
+        # Create match data
         match_data = {
             "match_id": match_id,
+            "team1": team1,
+            "team2": team2,
+            "status": "in_progress",
+            "winner": None,
+            "score": {"team1": 0, "team2": 0},
             "channel_id": channel_id,
-            "players": players,
             "created_at": datetime.datetime.utcnow(),
-            "is_global": is_global,
-            "status": "voting"  # Initial status is voting
+            "completed_at": None,
+            "reported_by": None,
+            "is_global": is_global
         }
 
-        # Insert into database
-        self.active_matches_collection.insert_one(match_data)
+        # Check if this match already exists in the database
+        existing_match = self.matches.find_one({"match_id": match_id})
+        if existing_match:
+            print(f"Match {match_id} already exists in database. Updating it.")
+            # Update the existing match
+            self.matches.update_one(
+                {"match_id": match_id},
+                {"$set": {
+                    "team1": team1,
+                    "team2": team2,
+                    "status": "in_progress",
+                    "is_global": is_global
+                }}
+            )
+        else:
+            # Insert as a new match
+            print(f"Creating new match in database: {match_id}")
+            self.matches.insert_one(match_data)
 
-        # Update in-memory state
-        self.active_matches[match_id] = match_data
-
-        # Remove these players from the queue in database
-        player_ids = [p.get('id') for p in players]
-        self.queue_collection.delete_many({"id": {"$in": player_ids}, "channel_id": channel_id})
-
-        # Update in-memory queue
-        if channel_id in self.channel_queues:
-            # Remove the first 6 players
-            self.channel_queues[channel_id] = self.channel_queues[channel_id][6:]
-
-        # Return the match ID
+        print(f"Match {match_id} successfully created/updated in database")
         return match_id
 
     def get_queue_status(self, channel):

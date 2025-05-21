@@ -466,20 +466,41 @@ class VoteSystem:
         team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
         team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
 
+        # Important: Check if this match already exists in the database
+        existing_match = self.match_system.matches.find_one({"match_id": match_id})
+        if existing_match:
+            print(f"Match {match_id} already exists in database with status: {existing_match.get('status')}")
+        else:
+            print(f"Match {match_id} does not exist in matches collection yet")
+
         # Debug log teams before assignment
         print(f"Assigning balanced teams to match {match_id}")
         print(f"Team 1: {[p.get('name', 'Unknown') for p in team1]}")
         print(f"Team 2: {[p.get('name', 'Unknown') for p in team2]}")
 
-        # Update match with teams - MAKE SURE WE'RE USING THE ORIGINAL MATCH ID
+        # Use the match system to create or update the match record
+        try:
+            db_match_id = self.match_system.create_match(
+                match_id,  # Use the original match ID
+                team1,
+                team2,
+                str(channel.id),
+                is_global=is_global
+            )
+            print(f"Match created/updated in database with ID: {db_match_id}")
+        except Exception as e:
+            print(f"Error creating match in database: {str(e)}")
+            await channel.send(f"Error creating match: {str(e)}")
+            return
+
+        # Update match with teams in queue manager
         self.queue_manager.assign_teams_to_match(match_id, team1, team2)
 
-        # Ensure players are properly tracked in the system
+        # Ensure players are properly tracked
         for player in team1 + team2:
             player_id = str(player.get('id', ''))
             if player_id:
                 self.queue_manager.player_matches[player_id] = match_id
-                print(f"Added player {player.get('name', 'Unknown')} (ID: {player_id}) to match {match_id}")
 
         # Calculate average MMR per team for display
         team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
