@@ -169,16 +169,25 @@ class QueueManager:
 
             if match:
                 match_channel_id = match.get('channel_id')
-                if match_channel_id == channel_id:
-                    return f"{player_mention} is already in an active match in this channel!"
+
+                # Get match status to provide better feedback
+                match_status = match.get('status', '')
+
+                if match_status == "completed":
+                    # If match is completed but player is still tracked, provide report reminder
+                    return f"{player_mention} is in a completed match that needs to be reported! Use `/report {match_id} win` or `/report {match_id} loss` to complete the match."
                 else:
-                    # If match is in another channel, mention that channel
-                    try:
-                        other_channel = self.bot.get_channel(int(match_channel_id))
-                        other_channel_mention = f"<#{match_channel_id}>"
-                        return f"{player_mention} is already in an active match in {other_channel_mention}."
-                    except:
-                        return f"{player_mention} is already in an active match in another channel."
+                    # If match is in any other state (voting, selection, in_progress)
+                    if match_channel_id == channel_id:
+                        return f"{player_mention} is already in an active match in this channel!"
+                    else:
+                        # If match is in another channel, mention that channel
+                        try:
+                            other_channel = self.bot.get_channel(int(match_channel_id))
+                            other_channel_mention = f"<#{match_channel_id}>"
+                            return f"{player_mention} is already in an active match in {other_channel_mention}."
+                        except:
+                            return f"{player_mention} is already in an active match in another channel."
 
         # Check if player is already in any queue
         queued_player = self.queue_collection.find_one({"id": player_id})
@@ -293,7 +302,9 @@ class QueueManager:
         if len(players) < 6:
             return f"Not enough players to start match (need 6, have {len(players)})"
 
-        # Generate a unique match ID
+        # Generate a unique match ID - make it shorter and more readable
+        # Use a specific format that's easy to read and consistent
+        # Format: 8 character hexadecimal
         match_id = str(uuid.uuid4())[:8]
 
         # Determine if this is a global match
@@ -324,13 +335,8 @@ class QueueManager:
             # Remove the first 6 players
             self.channel_queues[channel_id] = self.channel_queues[channel_id][6:]
 
-        # Start the voting process
-        vote_system = self.vote_systems.get(channel_id)
-        if vote_system:
-            self.bot.loop.create_task(vote_system.start_vote(channel))
-
-        # Return a message about the match starting
-        return f"{trigger_player_mention} has joined the queue! Queue is now full!\n\nStarting team selection vote..."
+        # Return the match ID
+        return match_id
 
     def get_queue_status(self, channel):
         """Get the status of a channel's queue and active matches"""

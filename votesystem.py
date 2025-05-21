@@ -107,7 +107,13 @@ class VoteSystem:
         }
 
         # Get mentions of match players
-        player_mentions = [p.get('mention', p.get('name', 'Unknown')) for p in players]
+        player_mentions = []
+        for p in players:
+            mention = p.get('mention', p.get('name', 'Unknown'))
+            # Add [BOT] tag for dummy players
+            if p.get('id', '').startswith('9000'):
+                mention += " [BOT]"
+            player_mentions.append(mention)
 
         # Create and send vote message with buttons
         embed = discord.Embed(
@@ -429,14 +435,26 @@ class VoteSystem:
                     team2_mmr += mmr
 
         # Format team mentions
-        team1_mentions = [player.get('mention', player.get('name', 'Unknown')) for player in team1]
-        team2_mentions = [player.get('mention', player.get('name', 'Unknown')) for player in team2]
+        team1_mentions = []
+        team2_mentions = []
+
+        for player in team1:
+            mention = player.get('mention', player.get('name', 'Unknown'))
+            if player.get('id', '').startswith('9000'):
+                mention += " [BOT]"
+            team1_mentions.append(mention)
+
+        for player in team2:
+            mention = player.get('mention', player.get('name', 'Unknown'))
+            if player.get('id', '').startswith('9000'):
+                mention += " [BOT]"
+            team2_mentions.append(mention)
 
         # Calculate average MMR per team for display
         team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
         team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
 
-        # Update match with teams
+        # Update match with teams - making sure to preserve the same match_id
         self.queue_manager.assign_teams_to_match(match_id, team1, team2)
 
         # Create an embed for team announcement

@@ -932,13 +932,11 @@ async def forcestart_slash(interaction: discord.Interaction):
     # Start the voting process for this match
     channel_name = interaction.channel.name.lower()
     if channel_name in system_coordinator.vote_systems:
-        await system_coordinator.vote_systems[channel_name].start_vote(interaction.channel)
-        await interaction.followup.send("Force starting team selection with the following players:")
-
+        # Just send one complete message instead of multiple
         # Create an embed showing the players in the match
         embed = discord.Embed(
             title="Match Players",
-            description=f"Match ID: `{match_id}`",
+            description=f"Match ID: `{match_id}`\n\nForce starting team selection with the following players:",
             color=0x3498db
         )
 
@@ -956,9 +954,54 @@ async def forcestart_slash(interaction: discord.Interaction):
             inline=False
         )
 
-        await interaction.channel.send(embed=embed)
+        await interaction.followup.send(embed=embed)
+
+        # Now start the vote system - without additional messages
+        await system_coordinator.vote_systems[channel_name].start_vote(interaction.channel)
     else:
         await interaction.followup.send("Error: No vote system found for this channel.")
+
+
+async def add_dummy_players(channel, count):
+    """Add dummy players to the queue"""
+    channel_id = str(channel.id)
+    is_global = channel.name.lower() == "global"
+
+    # Determine MMR range based on channel
+    if channel.name.lower() == "rank-a":
+        mmr_range = (1600, 2100)
+    elif channel.name.lower() == "rank-b":
+        mmr_range = (1100, 1599)
+    else:  # rank-c or global
+        mmr_range = (600, 1099)
+
+    # Create dummy players and add to queue
+    for i in range(count):
+        # Generate a unique dummy ID
+        dummy_id = f"9000{i + 1}"
+
+        # Generate a random MMR within the range for this channel
+        dummy_mmr = random.randint(mmr_range[0], mmr_range[1])
+
+        # Create dummy player data
+        dummy_data = {
+            "id": dummy_id,
+            "name": f"TestDummy{i + 1}",
+            "mention": f"TestDummy{i + 1}",
+            "channel_id": channel_id,
+            "is_global": is_global,
+            "joined_at": datetime.datetime.utcnow(),
+            "dummy_mmr": dummy_mmr  # Store MMR directly in player data
+        }
+
+        # Add to database
+        system_coordinator.queue_manager.queue_collection.insert_one(dummy_data)
+
+        # Add to in-memory queue
+        if channel_id not in system_coordinator.queue_manager.channel_queues:
+            system_coordinator.queue_manager.channel_queues[channel_id] = []
+
+        system_coordinator.queue_manager.channel_queues[channel_id].append(dummy_data)
 
 
 async def add_dummy_players(channel, count):
@@ -1431,11 +1474,8 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
 
 
 # 2. Remove Match Command
-@bot.tree.command(name="removematch", description="Remove the results of a match (Admin only)")
-@app_commands.describe(
-    match_id="The ID of the match to remove"
-)
-async def removematch_slash(interaction: discord.Interaction, match_id: str):
+@bot.tree.command(name="removeactivematches", description="Remove all active matches in this channel (Admin only)")
+async def removeactivematches_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
@@ -1450,112 +1490,90 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str):
                                                 ephemeral=True)
         return
 
-    # Defer response since this might take some time
-    await interaction.response.defer()
+    channel_id = str(interaction.channel.id)
 
-    # Look up the match
-    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+    # Find all active matches in this channel
+    active_matches = []
+    for match_id, match in system_coordinator.queue_manager.active_matches.items():
+        if match.get('channel_id') == channel_id:
+            active_matches.append(match)
 
-    if not match:
-        await interaction.followup.send(f"Match with ID `{match_id}` not found.")
+    # If no active matches, inform the user
+    if not active_matches:
+        await interaction.response.send_message("No active matches found in this channel.")
         return
 
-    # Check if the match is completed
-    if match.get("status") != "completed":
-        await interaction.followup.send(f"Match with ID `{match_id}` is not completed and cannot be removed.")
-        return
+    # First, cancel any active votings or selections
+    vote_active = system_coordinator.is_voting_active(channel_id)
+    if vote_active:
+        system_coordinator.cancel_voting(channel_id)
 
-    # Store match details for confirmation
-    winner = match.get("winner")
-    team1 = match.get("team1", [])
-    team2 = match.get("team2", [])
-    is_global = match.get("is_global", False)
-    mmr_changes = match.get("mmr_changes", [])
+    selection_active = system_coordinator.is_selection_active(channel_id)
+    if selection_active:
+        system_coordinator.cancel_selection(channel_id)
 
-    if not mmr_changes:
-        await interaction.followup.send(
-            f"Match with ID `{match_id}` has no MMR changes recorded. Cannot safely remove it.")
-        return
+    # Store match details for the embed
+    removed_matches = []
+    for match in active_matches:
+        match_id = match.get('match_id')
+        player_count = 0
 
-    # Reverse MMR changes for each player
-    for change in mmr_changes:
-        player_id = change.get("player_id")
-        old_mmr = change.get("old_mmr")
-        is_win = change.get("is_win")
-        is_global_match = change.get("is_global", is_global)
+        # Count players in teams if available
+        team1 = match.get('team1', [])
+        team2 = match.get('team2', [])
+        if team1 or team2:
+            player_count = len(team1) + len(team2)
+        # Otherwise count players directly
+        elif 'players' in match:
+            player_count = len(match.get('players', []))
 
-        if not player_id or old_mmr is None:
-            continue
+        removed_matches.append({
+            'match_id': match_id,
+            'player_count': player_count,
+            'status': match.get('status', 'unknown')
+        })
 
-        # Update player record
-        player = system_coordinator.match_system.players.find_one({"id": player_id})
+        # Remove the match
+        system_coordinator.queue_manager.remove_match(match_id)
 
-        if player:
-            if is_global_match:
-                # Update global stats
-                system_coordinator.match_system.players.update_one(
-                    {"id": player_id},
-                    {"$set": {"global_mmr": old_mmr},
-                     "$inc": {
-                         "global_matches": -1,
-                         "global_wins": -1 if is_win else 0,
-                         "global_losses": 0 if is_win else -1
-                     }}
-                )
-            else:
-                # Update ranked stats
-                system_coordinator.match_system.players.update_one(
-                    {"id": player_id},
-                    {"$set": {"mmr": old_mmr},
-                     "$inc": {
-                         "matches": -1,
-                         "wins": -1 if is_win else 0,
-                         "losses": 0 if is_win else -1
-                     }}
-                )
-
-    # Remove the match from the database
-    system_coordinator.match_system.matches.delete_one({"match_id": match_id})
-
-    # Create embed response
+    # Create embed to display results - avoiding too many fields
     embed = discord.Embed(
-        title="Match Removed",
-        description=f"Match ID: `{match_id}`",
-        color=0xff0000
+        title="Active Matches Removed",
+        description=f"Removed {len(removed_matches)} active match(es) from this channel.",
+        color=0xff5555  # Red color
     )
 
-    # Format team names
-    team1_names = [p.get("name", "Unknown") for p in team1]
-    team2_names = [p.get("name", "Unknown") for p in team2]
+    # Instead of adding each match as a separate field, combine them into chunks
+    if removed_matches:
+        match_text = []
+        for i, match in enumerate(removed_matches, 1):
+            match_text.append(
+                f"Match {i}: ID `{match['match_id']}` (Status: {match['status']}, Players: {match['player_count']})")
 
-    embed.add_field(
-        name="Team 1" + (" (Winner)" if winner == 1 else ""),
-        value=", ".join(team1_names) if team1_names else "Unknown",
-        inline=False
-    )
+        # Join all matches into a single chunked field (max 10 per field to avoid value length issues)
+        chunks = []
+        current_chunk = []
+        for line in match_text:
+            current_chunk.append(line)
+            if len(current_chunk) >= 10:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = []
 
-    embed.add_field(
-        name="Team 2" + (" (Winner)" if winner == 2 else ""),
-        value=", ".join(team2_names) if team2_names else "Unknown",
-        inline=False
-    )
+        if current_chunk:  # Add any remaining items
+            chunks.append("\n".join(current_chunk))
 
-    embed.add_field(
-        name="Match Type",
-        value="Global" if is_global else "Ranked",
-        inline=True
-    )
+        # Add chunks as fields
+        for i, chunk in enumerate(chunks):
+            embed.add_field(
+                name=f"Matches Removed {i + 1}/{len(chunks)}" if len(chunks) > 1 else "Matches Removed",
+                value=chunk,
+                inline=False
+            )
 
-    embed.add_field(
-        name="MMR Changes",
-        value="All MMR changes have been reversed",
-        inline=True
-    )
+    embed.set_footer(text=f"Executed by {interaction.user.display_name}")
 
-    embed.set_footer(
-        text=f"Removed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
-    await interaction.followup.send(embed=embed)
+    # Send confirmation
+    await interaction.response.send_message(embed=embed)
 
 
 # 3. Reset Leaderboard Command
