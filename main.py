@@ -1269,14 +1269,16 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         'resetleaderboard': 'Reset the leaderboard (Admin only)',
         'status': 'Shows the current queue status',
         'sub': 'Substitute players in an active match',
-        'ping': 'Check if the bot is connected'
+        'ping': 'Check if the bot is connected',
+        'streak': 'Check your current streak or another player\'s streak',
+        'topstreaks': 'Show players with the highest win or loss streaks (Admin only)'
     }
 
     # Group commands by category
     queue_commands = ['queue', 'leave', 'status']
-    match_commands = ['report', 'leaderboard', 'rank', 'sub']
+    match_commands = ['report', 'leaderboard', 'rank', 'sub', 'streak']
     admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'removeactivematches',
-                     'removematch', 'resetleaderboard', 'purgechat']
+                     'removematch', 'resetleaderboard', 'purgechat', 'topstreaks']
     utility_commands = ['help', 'ping']
 
     # Add command fields grouped by category
@@ -1313,7 +1315,22 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
             "3. Vote by clicking on the team selection buttons\n"
             "4. Teams will be created based on the vote results\n"
             "5. After the match, report the results with `/report <match_id> win` or `/report <match_id> loss`\n"
-            "6. Check the leaderboard with `/leaderboard`"
+            "6. Check the leaderboard with `/leaderboard` or view your stats with `/rank`\n"
+            "7. Track your win/loss streaks with `/streak` command"
+        ),
+        inline=False
+    )
+
+    # Add "Streak System" section
+    embed.add_field(
+        name="🔥 Streak System:",
+        value=(
+            "**NEW!** 6 Mans now has a dynamic streak system that impacts MMR gains and losses!\n\n"
+            "• Win streaks of 3+ games give **bonus MMR** with 🔥 fire indicator\n"
+            "• Loss streaks of 3+ games have **MMR penalties** with ❄️ snowflake indicator\n"
+            "• The longer your streak, the bigger the impact (up to +50%)\n"
+            "• Check your streak status with `/streak`\n"
+            "• Admins can view top streaks with `/topstreaks`"
         ),
         inline=False
     )
