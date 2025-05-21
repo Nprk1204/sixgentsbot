@@ -839,19 +839,41 @@ async def clearqueue_slash(interaction: discord.Interaction):
     # Get current queue status
     status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
     queue_count = status_data['queue_count']
+    queue_players = status_data['queue_players']
+
+    # If there are no players in the queue
+    if queue_count == 0:
+        await interaction.response.send_message("Queue is already empty!")
+        return
+
+    # Create an embed with the players being removed
+    player_mentions = [player['mention'] for player in queue_players]
+
+    embed = discord.Embed(
+        title="Queue Cleared",
+        description=f"Removed {queue_count} player(s) from the queue:",
+        color=0xff9900  # Orange color
+    )
+
+    if player_mentions:
+        embed.add_field(name="Players Removed", value=", ".join(player_mentions), inline=False)
+
+    embed.set_footer(text=f"Cleared by {interaction.user.display_name}")
 
     # Clear players from this channel's queue
     channel_id = str(interaction.channel.id)
     system_coordinator.queue_manager.queue_collection.delete_many({"channel_id": channel_id})
 
+    # Make sure to update the in-memory state too
+    if channel_id in system_coordinator.queue_manager.channel_queues:
+        system_coordinator.queue_manager.channel_queues[channel_id] = []
+
     # Send confirmation
-    if queue_count == 0:
-        await interaction.response.send_message("Queue was already empty!")
-    else:
-        await interaction.response.send_message(f"✅ Queue cleared! Removed {queue_count} player(s) from the queue.")
+    await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="forcestart", description="Force start the team selection process (Admin only)")
+@bot.tree.command(name="forcestart",
+                  description="Force start the team selection process with dummy players if needed (Admin only)")
 async def forcestart_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
@@ -877,21 +899,32 @@ async def forcestart_slash(interaction: discord.Interaction):
         await interaction.response.send_message("A team selection is already in progress in this channel!")
         return
 
+    # Defer response as this might take some time
+    await interaction.response.defer()
+
     # Get players from queue
     status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
     queue_count = status_data['queue_count']
+    queue_players = status_data['queue_players'].copy()  # Make a copy of the list to avoid modifying original
 
+    # If queue is empty, we need to add 6 dummy players
     if queue_count == 0:
-        await interaction.response.send_message("Can't force start: Queue is empty!")
-        return
-
-    # If fewer than 6 players, prompt to add dummy players
-    if queue_count < 6:
-        await interaction.response.send_message(
-            f"There are only {queue_count}/6 players in the queue. Would you like to add {6 - queue_count} dummy players to fill it?",
-            ephemeral=True
-        )
-        return
+        await interaction.followup.send("Queue is empty. Adding 6 dummy players...")
+        await add_dummy_players(interaction.channel, 6)
+        # Update queue status after adding dummies
+        status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
+        queue_count = status_data['queue_count']
+        queue_players = status_data['queue_players'].copy()
+    # If fewer than 6 players, add dummies to fill
+    elif queue_count < 6:
+        dummies_needed = 6 - queue_count
+        await interaction.followup.send(
+            f"Only {queue_count}/6 players in queue. Adding {dummies_needed} dummy players...")
+        await add_dummy_players(interaction.channel, dummies_needed)
+        # Update queue status after adding dummies
+        status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
+        queue_count = status_data['queue_count']
+        queue_players = status_data['queue_players'].copy()
 
     # Force start by creating a match and starting vote
     match_id = await system_coordinator.queue_manager.create_match(interaction.channel, interaction.user.mention)
@@ -900,14 +933,78 @@ async def forcestart_slash(interaction: discord.Interaction):
     channel_name = interaction.channel.name.lower()
     if channel_name in system_coordinator.vote_systems:
         await system_coordinator.vote_systems[channel_name].start_vote(interaction.channel)
-        await interaction.response.send_message("Force starting team selection!")
+        await interaction.followup.send("Force starting team selection with the following players:")
+
+        # Create an embed showing the players in the match
+        embed = discord.Embed(
+            title="Match Players",
+            description=f"Match ID: `{match_id}`",
+            color=0x3498db
+        )
+
+        # List players, indicating which ones are dummies
+        player_list = []
+        for player in queue_players[:6]:  # Take the first 6 players
+            player_id = player.get('id', '')
+            player_mention = player.get('mention', player.get('name', 'Unknown'))
+            is_dummy = player_id.startswith('9000')
+            player_list.append(f"{player_mention}{' [BOT]' if is_dummy else ''}")
+
+        embed.add_field(
+            name="Players",
+            value="\n".join(player_list),
+            inline=False
+        )
+
+        await interaction.channel.send(embed=embed)
     else:
-        await interaction.response.send_message("Error: No vote system found for this channel.")
+        await interaction.followup.send("Error: No vote system found for this channel.")
 
 
-@bot.tree.command(name="forcestop",
-                  description="Force stop any active votes or selections and clear the queue (Admin only)")
-async def forcestop_slash(interaction: discord.Interaction):
+async def add_dummy_players(channel, count):
+    """Add dummy players to the queue"""
+    channel_id = str(channel.id)
+    is_global = channel.name.lower() == "global"
+
+    # Determine MMR range based on channel
+    if channel.name.lower() == "rank-a":
+        mmr_range = (1600, 2100)
+    elif channel.name.lower() == "rank-b":
+        mmr_range = (1100, 1599)
+    else:  # rank-c or global
+        mmr_range = (600, 1099)
+
+    # Create dummy players and add to queue
+    for i in range(count):
+        # Generate a unique dummy ID
+        dummy_id = f"9000{i + 1}"
+
+        # Generate a random MMR within the range for this channel
+        dummy_mmr = random.randint(mmr_range[0], mmr_range[1])
+
+        # Create dummy player data
+        dummy_data = {
+            "id": dummy_id,
+            "name": f"TestDummy{i + 1}",
+            "mention": f"TestDummy{i + 1}",
+            "channel_id": channel_id,
+            "is_global": is_global,
+            "joined_at": datetime.datetime.utcnow(),
+            "dummy_mmr": dummy_mmr  # Store MMR directly in player data
+        }
+
+        # Add to database
+        system_coordinator.queue_manager.queue_collection.insert_one(dummy_data)
+
+        # Add to in-memory queue
+        if channel_id not in system_coordinator.queue_manager.channel_queues:
+            system_coordinator.queue_manager.channel_queues[channel_id] = []
+
+        system_coordinator.queue_manager.channel_queues[channel_id].append(dummy_data)
+
+
+@bot.tree.command(name="removeactivematches", description="Remove all active matches in this channel (Admin only)")
+async def removeactivematches_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
@@ -922,40 +1019,69 @@ async def forcestop_slash(interaction: discord.Interaction):
                                                 ephemeral=True)
         return
 
-    # Get current players in queue
     channel_id = str(interaction.channel.id)
-    queue_count = system_coordinator.queue_manager.get_queue_status(interaction.channel)['queue_count']
 
-    # Cancel any active votes
+    # Find all active matches in this channel
+    active_matches = []
+    for match_id, match in system_coordinator.queue_manager.active_matches.items():
+        if match.get('channel_id') == channel_id:
+            active_matches.append(match)
+
+    # If no active matches, inform the user
+    if not active_matches:
+        await interaction.response.send_message("No active matches found in this channel.")
+        return
+
+    # First, cancel any active votings or selections
     vote_active = system_coordinator.is_voting_active(channel_id)
     if vote_active:
         system_coordinator.cancel_voting(channel_id)
 
-    # Cancel any active selections
     selection_active = system_coordinator.is_selection_active(channel_id)
     if selection_active:
         system_coordinator.cancel_selection(channel_id)
 
-    # Clear the queue collection
-    system_coordinator.queue_manager.queue_collection.delete_many({"channel_id": channel_id})
+    # Store match details for the embed
+    removed_matches = []
+    for match in active_matches:
+        match_id = match.get('match_id')
+        player_count = 0
 
-    # Create a response message
+        # Count players in teams if available
+        team1 = match.get('team1', [])
+        team2 = match.get('team2', [])
+        if team1 or team2:
+            player_count = len(team1) + len(team2)
+        # Otherwise count players directly
+        elif 'players' in match:
+            player_count = len(match.get('players', []))
+
+        removed_matches.append({
+            'match_id': match_id,
+            'player_count': player_count,
+            'status': match.get('status', 'unknown')
+        })
+
+        # Remove the match
+        system_coordinator.queue_manager.remove_match(match_id)
+
+    # Create embed to display results
     embed = discord.Embed(
-        title="⚠️ Force Stop Executed",
-        color=0xff9900
+        title="Active Matches Removed",
+        description=f"Removed {len(removed_matches)} active match(es) from this channel.",
+        color=0xff5555  # Red color
     )
 
-    # Add appropriate fields based on what was stopped
-    if vote_active:
-        embed.add_field(name="Vote Canceled", value="Team selection voting has been canceled.", inline=False)
+    for i, match in enumerate(removed_matches, 1):
+        embed.add_field(
+            name=f"Match {i}",
+            value=f"ID: `{match['match_id']}`\nStatus: {match['status']}\nPlayers: {match['player_count']}",
+            inline=True
+        )
 
-    if selection_active:
-        embed.add_field(name="Team Selection Canceled", value="Captain selection process has been canceled.",
-                        inline=False)
-
-    embed.add_field(name="Queue Cleared", value=f"Removed {queue_count} player(s) from the queue.", inline=False)
     embed.set_footer(text=f"Executed by {interaction.user.display_name}")
 
+    # Send confirmation
     await interaction.response.send_message(embed=embed)
 
 
@@ -1038,9 +1164,9 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     commands_dict = {
         'adjustmmr': 'Admin command to adjust a player\'s MMR',
         'adminreport': 'Admin command to report match results',
-        'clearqueue': 'Clear all players from the queue (Admin only)',
-        'forcestart': 'Force start the team selection process (Admin only)',
-        'forcestop': 'Force stop active votes/selections and clear the queue',
+        'clearqueue': 'Clear all players from the current queue (Admin only)',
+        'forcestart': 'Force start a match with dummy players if needed (Admin only)',
+        'removeactivematches': 'Remove all active matches in the current channel (Admin only)',
         'help': 'Display help information',
         'leaderboard': 'Shows a link to the leaderboard website',
         'queue': 'Join the queue for 6 mans',
@@ -1058,8 +1184,8 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     # Group commands by category
     queue_commands = ['queue', 'leave', 'status']
     match_commands = ['report', 'leaderboard', 'rank', 'sub']
-    admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'forcestop', 'removematch',
-                      'resetleaderboard', 'purgechat']
+    admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'removeactivematches',
+                     'removematch', 'resetleaderboard', 'purgechat']
     utility_commands = ['help', 'ping']
 
     # Add command fields grouped by category
