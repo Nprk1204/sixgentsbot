@@ -1955,9 +1955,9 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 
     await interaction.response.send_message(embed=embed)
 
-    @bot.tree.command(name="streak", description="Check your current streak or another player's streak")
-    @app_commands.describe(member="The member whose streak you want to check (optional)")
-    async def streak_slash(interaction: discord.Interaction, member: discord.Member = None):
+@bot.tree.command(name="streak", description="Check your current streak or another player's streak")
+@app_commands.describe(member="The member whose streak you want to check (optional)")
+async def streak_slash(interaction: discord.Interaction, member: discord.Member = None):
         # Check if command is used in an allowed channel
         if not is_command_channel(interaction.channel):
             await interaction.response.send_message(
@@ -2077,18 +2077,18 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 
         await interaction.response.send_message(embed=embed)
 
-        @bot.tree.command(name="topstreaks",
+@bot.tree.command(name="topstreaks",
                           description="Show players with the highest win or loss streaks (Admin only)")
-        @app_commands.describe(
-            streak_type="Type of streak to view",
-            limit="Number of players to show (1-25)"
-        )
-        @app_commands.choices(streak_type=[
+@app_commands.describe(
+        streak_type="Type of streak to view",
+        limit="Number of players to show (1-25)"
+    )
+@app_commands.choices(streak_type=[
             app_commands.Choice(name="Win Streaks", value="win"),
             app_commands.Choice(name="Loss Streaks", value="loss"),
             app_commands.Choice(name="Current Streaks", value="current")
         ])
-        async def topstreaks_slash(interaction: discord.Interaction, streak_type: str, limit: int = 10):
+async def topstreaks_slash(interaction: discord.Interaction, streak_type: str, limit: int = 10):
             # Check if command is used in an allowed channel
             if not is_command_channel(interaction.channel):
                 await interaction.response.send_message(
@@ -2215,16 +2215,16 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
             except Exception as e:
                 await interaction.followup.send(f"Error retrieving streak data: {str(e)}")
 
-        @bot.tree.command(name="resetstreak", description="Reset a player's streak (Admin only)")
-        @app_commands.describe(
+@bot.tree.command(name="resetstreak", description="Reset a player's streak (Admin only)")
+@app_commands.describe(
             member="The member whose streak to reset",
             reset_type="Type of streak to reset"
         )
-        @app_commands.choices(reset_type=[
+@app_commands.choices(reset_type=[
             app_commands.Choice(name="Current Streak Only", value="current"),
             app_commands.Choice(name="All Streak Records", value="all")
         ])
-        async def resetstreak_slash(interaction: discord.Interaction, member: discord.Member, reset_type: str):
+async def resetstreak_slash(interaction: discord.Interaction, member: discord.Member, reset_type: str):
             # Check if command is used in an allowed channel
             if not is_command_channel(interaction.channel):
                 await interaction.response.send_message(
@@ -2288,8 +2288,8 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
                 await interaction.response.send_message(
                     f"Failed to reset streak for {member.mention}. No changes were made.")
 
-        @bot.tree.command(name="streakstats", description="Show server-wide streak statistics (Admin only)")
-        async def streakstats_slash(interaction: discord.Interaction):
+@bot.tree.command(name="streakstats", description="Show server-wide streak statistics (Admin only)")
+async def streakstats_slash(interaction: discord.Interaction):
             # Check if command is used in an allowed channel
             if not is_command_channel(interaction.channel):
                 await interaction.response.send_message(
@@ -2437,8 +2437,8 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
             except Exception as e:
                 await interaction.followup.send(f"Error retrieving streak statistics: {str(e)}")
 
-        # Helper function for streak stats by rank
-        async def get_rank_stats(players_collection, min_mmr, max_mmr=None):
+        # Helper function for streak stats by ra
+async def get_rank_stats(players_collection, min_mmr, max_mmr=None):
             """Get streak statistics for a specific MMR range"""
             # Build query based on MMR range
             if max_mmr:
