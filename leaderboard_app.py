@@ -437,12 +437,12 @@ def get_player(player_id):
         global_wins = player.get("global_wins", 0)
         player["global_win_rate"] = round((global_wins / global_matches) * 100, 2) if global_matches > 0 else 0
 
-        # Format streaks for display
+        # Format streaks for display - RANKED STREAKS
         current_streak = player.get("current_streak", 0)
         longest_win_streak = player.get("longest_win_streak", 0)
         longest_loss_streak = player.get("longest_loss_streak", 0)
 
-        # Add streak display info with emoji
+        # Add ranked streak display info with emoji
         if current_streak > 0:
             if current_streak >= 3:
                 player["streak_display"] = f"🔥 {current_streak} Win Streak"
@@ -456,9 +456,32 @@ def get_player(player_id):
         else:
             player["streak_display"] = "No current streak"
 
-        # Add extra streak stats
+        # Add extra ranked streak stats
         player["longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
         player["longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
+
+        # Format streaks for display - GLOBAL STREAKS
+        global_current_streak = player.get("global_current_streak", 0)
+        global_longest_win_streak = player.get("global_longest_win_streak", 0)
+        global_longest_loss_streak = player.get("global_longest_loss_streak", 0)
+
+        # Add global streak display info with emoji
+        if global_current_streak > 0:
+            if global_current_streak >= 3:
+                player["global_streak_display"] = f"🔥 {global_current_streak} Win Streak"
+            else:
+                player["global_streak_display"] = f"{global_current_streak} Win Streak"
+        elif global_current_streak < 0:
+            if global_current_streak <= -3:
+                player["global_streak_display"] = f"❄️ {abs(global_current_streak)} Loss Streak"
+            else:
+                player["global_streak_display"] = f"{abs(global_current_streak)} Loss Streak"
+        else:
+            player["global_streak_display"] = "No current streak"
+
+        # Add extra global streak stats
+        player["global_longest_win_streak_display"] = f"{global_longest_win_streak} Wins" if global_longest_win_streak > 0 else "None"
+        player["global_longest_loss_streak_display"] = f"{abs(global_longest_loss_streak)} Losses" if global_longest_loss_streak < 0 else "None"
 
         # Get recent matches for this player - handle potential errors
         try:
