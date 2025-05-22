@@ -193,21 +193,20 @@
 
         players.forEach((player, index) => {
             const rank = startIndex + index + 1;
-            let medalClass = '';
-
-            // Add medal styling for top 3 positions
-            if (rank === 1) {
-                medalClass = 'medal-1';
-            } else if (rank === 2) {
-                medalClass = 'medal-2';
-            } else if (rank === 3) {
-                medalClass = 'medal-3';
-            }
 
             // Create the player row with grid layout
             const playerRow = document.createElement('div');
             playerRow.className = 'player-row';
             playerRow.dataset.playerId = player.id;
+
+            // Add special rank classes for top 3
+            if (rank === 1) {
+                playerRow.classList.add('rank-1');
+            } else if (rank === 2) {
+                playerRow.classList.add('rank-2');
+            } else if (rank === 3) {
+                playerRow.classList.add('rank-3');
+            }
 
             // Format win-loss record as single string
             const winLossRecord = `${player.wins || 0}-${player.losses || 0}`;
@@ -215,7 +214,7 @@
             // Create individual column divs for better alignment
             playerRow.innerHTML = `
                 <div class="rank-column">
-                    <div class="rank ${medalClass}">${rank}</div>
+                    <div class="rank">${rank}</div>
                 </div>
                 <div class="player-name-column">
                     ${player.name}
