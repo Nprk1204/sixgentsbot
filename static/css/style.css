@@ -340,9 +340,17 @@ img {
 }
 
 /* Leaderboard */
+.leaderboard {
+    width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border);
+}
+
 .leaderboard-header {
     display: grid;
-    grid-template-columns: 1fr 3fr 2fr 2fr 2fr 2fr;
+    grid-template-columns: 80px 1fr 120px 120px 100px 120px;
     background-color: rgba(0, 0, 0, 0.2);
     padding: 0.75rem 1rem;
     font-weight: 600;
@@ -351,16 +359,18 @@ img {
     letter-spacing: 0.05em;
     border-bottom: 1px solid var(--border);
     align-items: center;
+    gap: 1rem;
 }
 
 .player-row {
     display: grid;
-    grid-template-columns: 1fr 3fr 2fr 2fr 2fr 2fr;
+    grid-template-columns: 80px 1fr 120px 120px 100px 120px;
     padding: 0.75rem 1rem;
     align-items: center;
     border-bottom: 1px solid var(--border);
     transition: background-color 0.2s ease;
     cursor: pointer;
+    gap: 1rem;
 }
 
 .player-row:hover {
@@ -369,6 +379,62 @@ img {
 
 .player-row:last-child {
     border-bottom: none;
+}
+
+/* Individual column styling for better alignment */
+.rank-column {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+.player-name-column {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mmr-column {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.win-rate-column {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.record-column {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.streak-column {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Header column alignment */
+.leaderboard-header > div:first-child {
+    justify-self: start;
+}
+
+.leaderboard-header > div:nth-child(2) {
+    justify-self: start;
+}
+
+.leaderboard-header > div:nth-child(3),
+.leaderboard-header > div:nth-child(4),
+.leaderboard-header > div:nth-child(5),
+.leaderboard-header > div:nth-child(6) {
+    justify-self: center;
 }
 
 .rank-badge {
@@ -404,7 +470,7 @@ img {
   color: var(--success);
 }
 
-/* Custom styles for medal ranks */
+/* Rank styling - now just shows leaderboard position */
 .rank {
     width: 35px;
     height: 35px;
@@ -582,39 +648,57 @@ img {
     font-weight: 500;
 }
 
+/* Responsive adjustments for tablets */
+@media (max-width: 992px) {
+    .leaderboard-header,
+    .player-row {
+        grid-template-columns: 70px 1fr 100px 100px 90px 100px;
+        padding: 0.6rem 0.8rem;
+        gap: 0.8rem;
+    }
+
+    .rank {
+        width: 30px;
+        height: 30px;
+        font-size: 0.8rem;
+    }
+}
+
 /* Responsive adjustments for mobile */
 @media (max-width: 768px) {
     .leaderboard-header,
     .player-row {
-        grid-template-columns: 0.8fr 2.5fr 1.5fr 1.5fr 1.2fr 1.5fr;
+        grid-template-columns: 60px 1fr 80px 80px 70px 80px;
         font-size: 0.75rem;
-        padding: 0.5rem 0.75rem;
+        padding: 0.5rem 0.6rem;
+        gap: 0.6rem;
     }
 
     .rank {
         width: 28px;
         height: 28px;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
     }
 }
 
+/* Very small screens */
 @media (max-width: 576px) {
     .leaderboard-header,
     .player-row {
-        grid-template-columns: 0.6fr 2fr 1.2fr 1.2fr 1fr 1.2fr;
+        grid-template-columns: 50px 1fr 70px 70px 60px 70px;
         font-size: 0.7rem;
         padding: 0.4rem 0.5rem;
+        gap: 0.4rem;
     }
 
     .rank {
         width: 25px;
         height: 25px;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
     }
 
-    /* Hide streak column on very small screens if needed */
-    .hide-on-small {
-        display: none;
+    .player-name-column {
+        font-size: 0.8rem;
     }
 }
 
