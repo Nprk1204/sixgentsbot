@@ -6,21 +6,21 @@
 <div class="content-container">
     <div class="content-header">
         <div class="leaderboard-nav mb-4">
-    <ul class="nav nav-pills">
-        <li class="nav-item">
-            <a class="nav-link {% if board_type == 'global' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='global') }}">Global</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link {% if board_type == 'rank-a' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-a') }}">Rank A</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link {% if board_type == 'rank-b' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-b') }}">Rank B</a>
-        </li>
-        <li class="nav-item">
-            <a class="nav-link {% if board_type == 'rank-c' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-c') }}">Rank C</a>
-        </li>
-    </ul>
-</div>
+            <ul class="nav nav-pills">
+                <li class="nav-item">
+                    <a class="nav-link {% if board_type == 'global' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='global') }}">Global</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if board_type == 'rank-a' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-a') }}">Rank A</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if board_type == 'rank-b' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-b') }}">Rank B</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if board_type == 'rank-c' %}active{% endif %}" href="{{ url_for('leaderboard_by_type', board_type='rank-c') }}">Rank C</a>
+                </li>
+            </ul>
+        </div>
         <h2>Player Leaderboard</h2>
         <button id="refreshButton" class="btn btn-primary">
             <i class="fas fa-sync-alt me-2"></i> Refresh
@@ -49,14 +49,13 @@
 
     <!-- Leaderboard -->
     <div class="leaderboard">
-        <div class="leaderboard-header row">
-            <div class="col-1">#</div>
-            <div class="col-1">Rank</div>
-            <div class="col-3">Player</div>
-            <div class="col-2">MMR</div>
-            <div class="col-2">Win Rate</div>
-            <div class="col-1">W-L</div>
-            <div class="col-2">Streak</div>
+        <div class="leaderboard-header">
+            <div>Rank</div>
+            <div>Player</div>
+            <div>MMR</div>
+            <div>Win Rate</div>
+            <div>W-L</div>
+            <div>Streak</div>
         </div>
 
         <div id="leaderboardContent">
@@ -139,23 +138,23 @@
     });
 
     function loadLeaderboard(page) {
-    const leaderboardContent = document.getElementById('leaderboardContent');
-    leaderboardContent.innerHTML = `
-        <div class="text-center py-5">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Loading...</span>
+        const leaderboardContent = document.getElementById('leaderboardContent');
+        leaderboardContent.innerHTML = `
+            <div class="text-center py-5">
+                <div class="spinner-border text-light" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p class="mt-3">Loading leaderboard data...</p>
             </div>
-            <p class="mt-3">Loading leaderboard data...</p>
-        </div>
-    `;
+        `;
 
-    // Get the current board type from the active nav link
-    const activeLink = document.querySelector('.nav-link.active');
-    const boardType = activeLink ? activeLink.getAttribute('href').split('/').pop() : 'all';
+        // Get the current board type from the active nav link
+        const activeLink = document.querySelector('.nav-link.active');
+        const boardType = activeLink ? activeLink.getAttribute('href').split('/').pop() : 'global';
 
-    fetch(`/api/leaderboard/${boardType}?page=${page}&per_page=${perPage}`)
-        .then(response => response.json())
-        .then(data => {
+        fetch(`/api/leaderboard/${boardType}?page=${page}&per_page=${perPage}`)
+            .then(response => response.json())
+            .then(data => {
                 leaderboardContent.innerHTML = '';
 
                 // If the new API structure is used (with pagination)
@@ -189,297 +188,297 @@
             });
     }
 
-    function showPlayerDetails(playerId) {
-    const modalContent = document.getElementById('playerModalContent');
-    modalContent.innerHTML = `
-        <div class="text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p>Loading player data...</p>
-        </div>
-    `;
+    function displayPlayers(players, startIndex) {
+        const leaderboardContent = document.getElementById('leaderboardContent');
 
-    playerModal.show();
+        players.forEach((player, index) => {
+            const rank = startIndex + index + 1;
+            let medalClass = '';
 
-    fetch(`/api/player/${playerId}`)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error ${response.status}`);
-            }
-            return response.json();
-        })
-        .then(player => {
-            if (player.error) {
-                modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
-                return;
+            // Add medal styling for top 3 positions
+            if (rank === 1) {
+                medalClass = 'medal-1';
+            } else if (rank === 2) {
+                medalClass = 'medal-2';
+            } else if (rank === 3) {
+                medalClass = 'medal-3';
             }
 
-            // Update the modal title with player name
-            const modalTitle = document.getElementById('playerModalLabel');
-            if (modalTitle) {
-                modalTitle.textContent = player.name || 'Player Details';
-            }
+            // Create the player row with grid layout
+            const playerRow = document.createElement('div');
+            playerRow.className = 'player-row';
+            playerRow.dataset.playerId = player.id;
 
-            // Create the tabs with streak information
-            let content = `
-                <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
-                                data-bs-target="#ranked-stats" type="button" role="tab"
-                                aria-controls="ranked-stats" aria-selected="true">
-                            Ranked Stats
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="global-tab" data-bs-toggle="tab"
-                                data-bs-target="#global-stats" type="button" role="tab"
-                                aria-controls="global-stats" aria-selected="false">
-                            Global Stats
-                        </button>
-                    </li>
-                </ul>
+            // Format win-loss record as single string
+            const winLossRecord = `${player.wins || 0}-${player.losses || 0}`;
 
-                <div class="tab-content" id="playerStatsContent">
-                    <!-- Ranked Stats Tab -->
-                    <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
-                        <!-- RANKED TAB CONTENT -->
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <div class="mmr-display">
-                                            <h4 class="mmr-label">MMR</h4>
-                                            <div class="mmr-value">${player.mmr || 0}</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-8">
-                                        <div class="stats-grid">
-                                            <div class="stat-item">
-                                                <h5>Win Rate</h5>
-                                                <span class="stat-value">${player.win_rate || 0}%</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Record</h5>
-                                                <span class="stat-value">${player.wins || 0}-${player.losses || 0}</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Matches</h5>
-                                                <span class="stat-value">${player.matches || 0}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- NEW: Add streak card -->
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-header">
-                                <h5 class="mb-0">Streaks</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <div class="stat-item">
-                                            <h5>Current Streak</h5>
-                                            <span class="stat-value">${player.streak_display || 'None'}</span>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="stat-item">
-                                            <h5>Best Win Streak</h5>
-                                            <span class="stat-value">${player.longest_win_streak_display || 'None'}</span>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="stat-item">
-                                            <h5>Worst Loss Streak</h5>
-                                            <span class="stat-value">${player.longest_loss_streak_display || 'None'}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-            `;
-
-            // Display recent ranked matches if available
-            const hasMatches = player.recent_matches && player.recent_matches.length > 0;
-            const rankedMatches = hasMatches ? player.recent_matches.filter(match => !match.is_global) : [];
-
-            if (rankedMatches.length > 0) {
-                content += `
-                    <h4 class="section-header">Recent Ranked Matches</h4>
-                    <div class="table-responsive">
-                        <table class="table table-dark table-striped match-table">
-                            <thead>
-                                <tr>
-                                    <th style="width:120px">Date</th>
-                                    <th style="width:90px;text-align:center">Result</th>
-                                    <th style="width:120px">MMR Change</th>
-                                    <th style="width:120px">Streak</th>
-                                    <th>Teams</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                `;
-
-                rankedMatches.forEach(match => {
-                    // Safely format teams with error checking
-                    let team1Names = '';
-                    let team2Names = '';
-
-                    try {
-                        team1Names = match.team1 && Array.isArray(match.team1) ?
-                            match.team1.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
-
-                        team2Names = match.team2 && Array.isArray(match.team2) ?
-                            match.team2.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
-                    } catch (e) {
-                        console.error("Error formatting teams:", e);
-                        team1Names = 'Error loading team';
-                        team2Names = 'Error loading team';
-                    }
-
-                    // Determine result class
-                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
-                    let resultBadge = match.player_result === 'Win' ?
-                        '<span class="badge bg-success">Win</span>' :
-                        '<span class="badge bg-danger">Loss</span>';
-
-                    // Format MMR change
-                    let mmrChange = match.mmr_change || 0;
-                    let mmrChangeClass = mmrChange >= 0 ? 'text-success' : 'text-danger';
-                    let mmrChangeDisplay = mmrChange >= 0 ? `+${mmrChange}` : `${mmrChange}`;
-
-                    content += `
-                        <tr>
-                            <td style="vertical-align:middle">${match.date || 'Unknown'}</td>
-                            <td style="text-align:center;vertical-align:middle">${resultBadge}</td>
-                            <td style="vertical-align:middle" class="${mmrChangeClass}">${mmrChangeDisplay}</td>
-                            <td style="vertical-align:middle">${match.streak_display || '—'}</td>
-                            <td style="vertical-align:middle">
-                                <span style="display:inline-block;margin-right:5px">${team1Names}</span>
-                                <span class="badge bg-dark mx-2">vs</span>
-                                <span style="display:inline-block;margin-left:5px">${team2Names}</span>
-                            </td>
-                        </tr>
-                    `;
-                });
-
-                content += `
-                            </tbody>
-                        </table>
-                    </div>
-                `;
-            } else {
-                content += `<p class="text-muted">No recent ranked matches found.</p>`;
-            }
-
-            // Close ranked stats tab and begin global stats tab
-            content += `
-                    </div>
-
-                    <!-- Global Stats Tab -->
-                    <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
-                        <!-- GLOBAL TAB CONTENT (similar to above but for global stats) -->
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <div class="mmr-display global">
-                                            <h4 class="mmr-label">Global MMR</h4>
-                                            <div class="mmr-value">${player.global_mmr || 300}</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-8">
-                                        <div class="stats-grid">
-                                            <div class="stat-item">
-                                                <h5>Win Rate</h5>
-                                                <span class="stat-value">${player.global_win_rate || 0}%</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Record</h5>
-                                                <span class="stat-value">${player.global_wins || 0}-${player.global_losses || 0}</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Matches</h5>
-                                                <span class="stat-value">${player.global_matches || 0}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-            `;
-
-            // Rest of global content (similar to ranked but with global matches)...
-            content += `
-                    </div>
+            // Create individual column divs for better alignment
+            playerRow.innerHTML = `
+                <div class="rank-column">
+                    <div class="rank ${medalClass}">${rank}</div>
+                </div>
+                <div class="player-name-column">
+                    ${player.name}
+                </div>
+                <div class="mmr-column">
+                    <span class="mmr-value">${player.mmr_display || player.mmr || 0}</span>
+                </div>
+                <div class="win-rate-column">
+                    <span class="win-rate">${player.win_rate || 0}%</span>
+                </div>
+                <div class="record-column">
+                    <span class="win-loss-record">${winLossRecord}</span>
+                </div>
+                <div class="streak-column">
+                    <span class="streak-display">${player.streak_display || '—'}</span>
                 </div>
             `;
 
-            modalContent.innerHTML = content;
-        })
-        .catch(error => {
-            console.error('Error fetching player details:', error);
-            modalContent.innerHTML = `
-                <div class="alert alert-danger">
-                    <p><strong>Error loading player data:</strong> ${error.message}</p>
-                    <p>Please try again later or contact an administrator if the problem persists.</p>
-                </div>`;
+            // Add click event to show player details
+            playerRow.addEventListener('click', function() {
+                showPlayerDetails(player.id);
+            });
+
+            leaderboardContent.appendChild(playerRow);
         });
-}
+    }
 
-    function displayPlayers(players, startIndex) {
-    const leaderboardContent = document.getElementById('leaderboardContent');
-
-    players.forEach((player, index) => {
-        const rank = startIndex + index + 1;
-        let medalClass = '';
-
-        if (rank === 1) {
-            medalClass = 'medal-1';
-        } else if (rank === 2) {
-            medalClass = 'medal-2';
-        } else if (rank === 3) {
-            medalClass = 'medal-3';
-        }
-
-        // Determine rank based on MMR
-        let rankDisplay = '';
-        let rankClass = '';
-
-        if (player.mmr_display >= 1600) {
-            rankDisplay = 'A';
-            rankClass = 'rank-a';
-        } else if (player.mmr_display >= 1100) {
-            rankDisplay = 'B';
-            rankClass = 'rank-b';
-        } else {
-            rankDisplay = 'C';
-            rankClass = 'rank-c';
-        }
-
-        const playerRow = document.createElement('div');
-        playerRow.className = 'player-row row align-items-center';
-        playerRow.dataset.playerId = player.id;
-        playerRow.innerHTML = `
-            <div class="col-1"><div class="rank ${medalClass}">${rank}</div></div>
-            <div class="col-1"><div class="rank-badge ${rankClass}">${rankDisplay}</div></div>
-            <div class="col-3">${player.name}</div>
-            <div class="col-2"><span class="mmr">${player.mmr_display}</span></div>
-            <div class="col-2"><span class="win-rate">${player.win_rate}%</span></div>
-            <div class="col-1">${player.wins || 0}-${player.losses || 0}</div>
-            <div class="col-2">${player.streak_display || '—'}</div>
+    function showPlayerDetails(playerId) {
+        const modalContent = document.getElementById('playerModalContent');
+        modalContent.innerHTML = `
+            <div class="text-center">
+                <div class="spinner-border text-light" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p>Loading player data...</p>
+            </div>
         `;
 
-        playerRow.addEventListener('click', function() {
-            showPlayerDetails(player.id);
-        });
+        playerModal.show();
 
-        leaderboardContent.appendChild(playerRow);
-    });
+        fetch(`/api/player/${playerId}`)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(player => {
+                if (player.error) {
+                    modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
+                    return;
+                }
+
+                // Update the modal title with player name
+                const modalTitle = document.getElementById('playerModalLabel');
+                if (modalTitle) {
+                    modalTitle.textContent = player.name || 'Player Details';
+                }
+
+                // Create the tabs with streak information
+                let content = `
+                    <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
+                                    data-bs-target="#ranked-stats" type="button" role="tab"
+                                    aria-controls="ranked-stats" aria-selected="true">
+                                Ranked Stats
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="global-tab" data-bs-toggle="tab"
+                                    data-bs-target="#global-stats" type="button" role="tab"
+                                    aria-controls="global-stats" aria-selected="false">
+                                Global Stats
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content" id="playerStatsContent">
+                        <!-- Ranked Stats Tab -->
+                        <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
+                            <!-- RANKED TAB CONTENT -->
+                            <div class="card bg-dark-medium mb-4">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="mmr-display">
+                                                <h4 class="mmr-label">MMR</h4>
+                                                <div class="mmr-value">${player.mmr || 0}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-8">
+                                            <div class="stats-grid">
+                                                <div class="stat-item">
+                                                    <h5>Win Rate</h5>
+                                                    <span class="stat-value">${player.win_rate || 0}%</span>
+                                                </div>
+                                                <div class="stat-item">
+                                                    <h5>Record</h5>
+                                                    <span class="stat-value">${player.wins || 0}-${player.losses || 0}</span>
+                                                </div>
+                                                <div class="stat-item">
+                                                    <h5>Matches</h5>
+                                                    <span class="stat-value">${player.matches || 0}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- NEW: Add streak card -->
+                            <div class="card bg-dark-medium mb-4">
+                                <div class="card-header">
+                                    <h5 class="mb-0">Streaks</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="stat-item">
+                                                <h5>Current Streak</h5>
+                                                <span class="stat-value">${player.streak_display || 'None'}</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="stat-item">
+                                                <h5>Best Win Streak</h5>
+                                                <span class="stat-value">${player.longest_win_streak_display || 'None'}</span>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <div class="stat-item">
+                                                <h5>Worst Loss Streak</h5>
+                                                <span class="stat-value">${player.longest_loss_streak_display || 'None'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                `;
+
+                // Display recent ranked matches if available
+                const hasMatches = player.recent_matches && player.recent_matches.length > 0;
+                const rankedMatches = hasMatches ? player.recent_matches.filter(match => !match.is_global) : [];
+
+                if (rankedMatches.length > 0) {
+                    content += `
+                        <h4 class="section-header">Recent Ranked Matches</h4>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-striped match-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:120px">Date</th>
+                                        <th style="width:90px;text-align:center">Result</th>
+                                        <th style="width:120px">MMR Change</th>
+                                        <th style="width:120px">Streak</th>
+                                        <th>Teams</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                    `;
+
+                    rankedMatches.forEach(match => {
+                        // Safely format teams with error checking
+                        let team1Names = '';
+                        let team2Names = '';
+
+                        try {
+                            team1Names = match.team1 && Array.isArray(match.team1) ?
+                                match.team1.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
+
+                            team2Names = match.team2 && Array.isArray(match.team2) ?
+                                match.team2.map(p => p.name || 'Unknown').join(', ') : 'Unknown Team';
+                        } catch (e) {
+                            console.error("Error formatting teams:", e);
+                            team1Names = 'Error loading team';
+                            team2Names = 'Error loading team';
+                        }
+
+                        // Determine result class
+                        let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
+                        let resultBadge = match.player_result === 'Win' ?
+                            '<span class="badge bg-success">Win</span>' :
+                            '<span class="badge bg-danger">Loss</span>';
+
+                        // Format MMR change
+                        let mmrChange = match.mmr_change || 0;
+                        let mmrChangeClass = mmrChange >= 0 ? 'text-success' : 'text-danger';
+                        let mmrChangeDisplay = mmrChange >= 0 ? `+${mmrChange}` : `${mmrChange}`;
+
+                        content += `
+                            <tr>
+                                <td style="vertical-align:middle">${match.date || 'Unknown'}</td>
+                                <td style="text-align:center;vertical-align:middle">${resultBadge}</td>
+                                <td style="vertical-align:middle" class="${mmrChangeClass}">${mmrChangeDisplay}</td>
+                                <td style="vertical-align:middle">${match.streak_display || '—'}</td>
+                                <td style="vertical-align:middle">
+                                    <span style="display:inline-block;margin-right:5px">${team1Names}</span>
+                                    <span class="badge bg-dark mx-2">vs</span>
+                                    <span style="display:inline-block;margin-left:5px">${team2Names}</span>
+                                </td>
+                            </tr>
+                        `;
+                    });
+
+                    content += `
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                } else {
+                    content += `<p class="text-muted">No recent ranked matches found.</p>`;
+                }
+
+                // Close ranked stats tab and begin global stats tab
+                content += `
+                        </div>
+
+                        <!-- Global Stats Tab -->
+                        <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
+                            <!-- GLOBAL TAB CONTENT -->
+                            <div class="card bg-dark-medium mb-4">
+                                <div class="card-body">
+                                    <div class="row">
+                                        <div class="col-md-4">
+                                            <div class="mmr-display global">
+                                                <h4 class="mmr-label">Global MMR</h4>
+                                                <div class="mmr-value">${player.global_mmr || 300}</div>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-8">
+                                            <div class="stats-grid">
+                                                <div class="stat-item">
+                                                    <h5>Win Rate</h5>
+                                                    <span class="stat-value">${player.global_win_rate || 0}%</span>
+                                                </div>
+                                                <div class="stat-item">
+                                                    <h5>Record</h5>
+                                                    <span class="stat-value">${player.global_wins || 0}-${player.global_losses || 0}</span>
+                                                </div>
+                                                <div class="stat-item">
+                                                    <h5>Matches</h5>
+                                                    <span class="stat-value">${player.global_matches || 0}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                modalContent.innerHTML = content;
+            })
+            .catch(error => {
+                console.error('Error fetching player details:', error);
+                modalContent.innerHTML = `
+                    <div class="alert alert-danger">
+                        <p><strong>Error loading player data:</strong> ${error.message}</p>
+                        <p>Please try again later or contact an administrator if the problem persists.</p>
+                    </div>`;
+            });
     }
 
     function updatePagination(currentPage, totalPages) {
