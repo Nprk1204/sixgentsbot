@@ -536,19 +536,16 @@ img {
 
 .rank.medal-1 {
     background: radial-gradient(circle, #ffd700 0%, #c9a81b 100%);
-    color: var(--dark);
     box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
 }
 
 .rank.medal-2 {
     background: radial-gradient(circle, #c0c0c0 0%, #a0a0a0 100%);
-    color: var(--dark);
     box-shadow: 0 0 10px rgba(192, 192, 192, 0.5);
 }
 
 .rank.medal-3 {
     background: radial-gradient(circle, #cd7f32 0%, #a05a2c 100%);
-    color: var(--dark);
     box-shadow: 0 0 10px rgba(205, 127, 50, 0.5);
 }
 
