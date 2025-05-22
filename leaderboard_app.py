@@ -225,13 +225,19 @@ def home():
 @app.route('/leaderboard')
 @cached(timeout=60)
 def leaderboard():
-    """Display the main leaderboard page"""
-    return render_template('leaderboard.html', board_type='all')
+    """Display the main leaderboard page - default to global"""
+    return render_template('leaderboard.html', board_type='global')
+
 
 @app.route('/leaderboard/<board_type>')
 @cached(timeout=60)
 def leaderboard_by_type(board_type):
     """Display the leaderboard page for a specific type"""
+    # Validate board_type
+    valid_types = ['global', 'rank-a', 'rank-b', 'rank-c', 'all']
+    if board_type not in valid_types:
+        board_type = 'global'  # Default to global for invalid types
+
     return render_template('leaderboard.html', board_type=board_type)
 
 
@@ -244,12 +250,10 @@ def rank_check():
     return render_template('rank_check.html', roles=roles)
 
 
-@app.route('/api/leaderboard')
 @cached(timeout=60)
 def get_leaderboard():
-    """API endpoint to get leaderboard data with pagination"""
-    return get_leaderboard_by_type('all')
-
+    """API endpoint to get leaderboard data with pagination - default to global"""
+    return get_leaderboard_by_type('global')
 
 @app.route('/api/leaderboard/<board_type>')
 @cached(timeout=60)
@@ -282,8 +286,11 @@ def get_leaderboard_by_type(board_type):
         # For Rank C, filter players with MMR < 1100
         query = {"mmr": {"$lt": 1100}, "matches": {"$gt": 0}}
     elif board_type != "all":
-        # Invalid board type, fallback to all
-        board_type = "all"
+        # Invalid board type, fallback to global
+        board_type = "global"
+        query = {"global_matches": {"$gt": 0}}
+        sort_field = "global_mmr"
+        mmr_field = "global_mmr"
 
     # Get total count for pagination info
     total_players = players_collection.count_documents(query)
@@ -307,7 +314,10 @@ def get_leaderboard_by_type(board_type):
         "last_updated": 1,
         "current_streak": 1,  # Add streak fields
         "longest_win_streak": 1,
-        "longest_loss_streak": 1
+        "longest_loss_streak": 1,
+        "global_current_streak": 1,  # Add global streak fields
+        "global_longest_win_streak": 1,
+        "global_longest_loss_streak": 1
     }
 
     top_players = list(players_collection.find(query, projection)
@@ -319,11 +329,17 @@ def get_leaderboard_by_type(board_type):
         if board_type == "global":
             matches = player.get("global_matches", 0)
             wins = player.get("global_wins", 0)
+            current_streak = player.get("global_current_streak", 0)
+            longest_win_streak = player.get("global_longest_win_streak", 0)
+            longest_loss_streak = player.get("global_longest_loss_streak", 0)
             # Add this field to standardize what's displayed
             player["mmr_display"] = player.get(mmr_field, 0)
         else:
             matches = player.get("matches", 0)
             wins = player.get("wins", 0)
+            current_streak = player.get("current_streak", 0)
+            longest_win_streak = player.get("longest_win_streak", 0)
+            longest_loss_streak = player.get("longest_loss_streak", 0)
             player["mmr_display"] = player.get(mmr_field, 0)
 
         # Calculate win rate
@@ -335,20 +351,31 @@ def get_leaderboard_by_type(board_type):
         else:
             player["last_match"] = "Unknown"
 
-        # Format streak for display - add emoji
-        streak = player.get("current_streak", 0)
-        if streak > 0:
-            if streak >= 3:
-                player["streak_display"] = f"🔥 {streak} Win"
+        # Format streak for display - add emoji and enhanced styling for global
+        if current_streak > 0:
+            if current_streak >= 3:
+                if board_type == "global":
+                    player["streak_display"] = f"🔥 {current_streak} Win"
+                else:
+                    player["streak_display"] = f"🔥 {current_streak} Win"
             else:
-                player["streak_display"] = f"{streak} Win"
-        elif streak < 0:
-            if streak <= -3:
-                player["streak_display"] = f"❄️ {abs(streak)} Loss"
+                player["streak_display"] = f"{current_streak} Win"
+        elif current_streak < 0:
+            if current_streak <= -3:
+                if board_type == "global":
+                    player["streak_display"] = f"❄️ {abs(current_streak)} Loss"
+                else:
+                    player["streak_display"] = f"❄️ {abs(current_streak)} Loss"
             else:
-                player["streak_display"] = f"{abs(streak)} Loss"
+                player["streak_display"] = f"{abs(current_streak)} Loss"
         else:
             player["streak_display"] = "—"
+
+        # Add enhanced streak displays for global stats
+        if board_type == "global":
+            player["global_streak_display"] = player["streak_display"]
+            player["global_longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
+            player["global_longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
 
         # Remove the datetime object before jsonifying
         if "last_updated" in player:
