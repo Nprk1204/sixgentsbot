@@ -2155,7 +2155,7 @@ img {
 }
 
 .mmr-value {
-    font-size: 0.95rem;
+    font-size: 1.0rem;
     font-weight: 700;
     color: var(--primary);
 }
