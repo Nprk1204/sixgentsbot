@@ -586,7 +586,7 @@ img {
     box-shadow: 0 4px 12px rgba(0, 168, 255, 0.2);
 }
 
-/* Enhanced streak cards for global */
+/* Enhanced streak cards for global - NO top line */
 .global-streak-card {
     background-color: var(--dark-medium);
     border: 1px solid var(--border);
@@ -595,14 +595,9 @@ img {
     position: relative;
 }
 
+/* Remove the top line completely */
 .global-streak-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--primary);
+    display: none;
 }
 
 .global-streak-card .card-header {
@@ -1614,7 +1609,8 @@ img {
     min-height: 120px;
 }
 
-.mmr-display::before {
+.mmr-display::before,
+.mmr-display.global::before{
     content: '';
     position: absolute;
     top: 0;
@@ -2152,56 +2148,4 @@ img {
 
 .animate-pulse {
     animation: pulse 2s infinite;
-}
-
-/* Complete Global Stats Override - Make identical to Ranked */
-#global-stats *,
-#global-stats .card,
-#global-stats .card-header,
-#global-stats .card-body,
-#global-stats .mmr-display,
-#global-stats .stat-item,
-.global-stats-enhanced,
-.global-stats-enhanced *,
-.global-streak-card,
-.global-streak-card *,
-.global-match-table,
-.global-match-table *,
-.global-section-header {
-    background-image: none !important;
-    background: none !important;
-    -webkit-background-clip: unset !important;
-    -webkit-text-fill-color: unset !important;
-}
-
-#global-stats .mmr-value,
-#global-stats .stat-value,
-.mmr-display.global .mmr-value {
-    color: var(--primary) !important;
-    background: none !important;
-    background-image: none !important;
-}
-
-#global-stats .card,
-#global-stats .card-header {
-    background-color: var(--dark-medium) !important;
-    border-color: var(--border) !important;
-}
-
-#global-stats .mmr-display::before,
-.mmr-display.global::before {
-    background: var(--primary) !important;
-    background-image: none !important;
-}
-
-#global-stats h4,
-#global-stats .section-header,
-.global-section-header {
-    color: var(--primary) !important;
-}
-
-/* Force all global elements to use primary blue color */
-#global-stats {
-    --secondary: var(--primary);
-    --accent: var(--primary);
 }
