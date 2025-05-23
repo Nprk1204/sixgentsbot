@@ -571,7 +571,7 @@ img {
 }
 
 .global-stats-enhanced .mmr-display.global::before {
-    background: var(--primary);
+    display: none;
 }
 
 .global-stats-enhanced .stat-item {
