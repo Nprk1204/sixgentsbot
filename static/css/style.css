@@ -1621,11 +1621,6 @@ img {
     background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
 }
 
-.mmr-display.global::before {
-    background: var(--secondary);
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
-}
-
 .mmr-label {
     font-size: 1rem;
     margin-bottom: 10px;
