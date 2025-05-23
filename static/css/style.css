@@ -561,29 +561,29 @@ img {
 
 /* Improved global stats styling to match ranked stats */
 .global-stats-enhanced {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.1) 0%, rgba(167, 66, 255, 0.1) 100%);
-    border-left: 4px solid var(--secondary);
+    background-color: var(--dark-medium);
+    border-left: 4px solid var(--primary);
 }
 
 .global-stats-enhanced .mmr-display.global {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.15) 0%, rgba(167, 66, 255, 0.15) 100%);
-    border: 1px solid rgba(255, 126, 49, 0.3);
+    background-color: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border);
 }
 
 .global-stats-enhanced .mmr-display.global::before {
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
+    background: var(--primary);
 }
 
 .global-stats-enhanced .stat-item {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.08) 0%, rgba(167, 66, 255, 0.08) 100%);
-    border: 1px solid rgba(255, 126, 49, 0.2);
+    background-color: rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--border);
 }
 
 .global-stats-enhanced .stat-item:hover {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.15) 0%, rgba(167, 66, 255, 0.15) 100%);
-    border-color: rgba(255, 126, 49, 0.4);
+    background-color: rgba(0, 0, 0, 0.25);
+    border-color: var(--primary);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(255, 126, 49, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 168, 255, 0.2);
 }
 
 /* Enhanced streak cards for global */
