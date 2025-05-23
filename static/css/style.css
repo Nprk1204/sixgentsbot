@@ -588,8 +588,8 @@ img {
 
 /* Enhanced streak cards for global */
 .global-streak-card {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.1) 0%, rgba(167, 66, 255, 0.1) 100%);
-    border: 1px solid rgba(255, 126, 49, 0.3);
+    background-color: var(--dark-medium);
+    border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
     position: relative;
@@ -602,69 +602,60 @@ img {
     left: 0;
     right: 0;
     height: 3px;
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
+    background: var(--primary);
 }
 
 .global-streak-card .card-header {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.2) 0%, rgba(167, 66, 255, 0.2) 100%);
-    border-bottom: 1px solid rgba(255, 126, 49, 0.3);
+    background-color: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--border);
 }
 
 /* Enhanced match tables for global */
 .global-match-table {
-    border: 1px solid rgba(255, 126, 49, 0.3);
+    border: 1px solid var(--border);
     border-radius: 10px;
     overflow: hidden;
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.05) 0%, rgba(167, 66, 255, 0.05) 100%);
+    background-color: var(--dark-medium);
 }
 
 .global-match-table th {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.2) 0%, rgba(167, 66, 255, 0.2) 100%);
-    border-bottom: 1px solid rgba(255, 126, 49, 0.3);
+    background-color: rgba(0, 0, 0, 0.2);
+    border-bottom: 1px solid var(--border);
 }
 
 .global-match-table tr:hover {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.1) 0%, rgba(167, 66, 255, 0.1) 100%);
+    background-color: rgba(0, 168, 255, 0.1);
 }
 
 /* Enhanced section headers for global */
 .global-section-header {
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--primary);
     position: relative;
 }
 
 .global-section-header::before {
-    background: linear-gradient(180deg, var(--secondary) 0%, var(--accent) 100%);
+    background: var(--primary);
 }
 
 /* Global tab styling enhancement */
 #global-tab.active {
-    background: linear-gradient(135deg, rgba(255, 126, 49, 0.2) 0%, rgba(167, 66, 255, 0.2) 100%);
-    border-color: var(--secondary);
+    background-color: rgba(0, 168, 255, 0.2);
+    border-color: var(--primary);
 }
 
 #global-tab.active::after {
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
+    background: var(--primary);
 }
 
 /* Improved global MMR value styling */
 .mmr-display.global .mmr-value {
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--primary);
     font-weight: 700;
 }
 
 /* Global stats grid enhancements */
 .global-stats-grid .stat-value {
-    background: linear-gradient(90deg, var(--secondary) 0%, var(--accent) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: var(--primary);
 }
 
 /* Navigation pills enhancement - make Global active by default */
