@@ -193,14 +193,19 @@
 
 {% block extra_js %}
 <script>
+// Set up variables that can be used safely in JavaScript
+var userLoggedIn = {{ 'true' if user else 'false' }};
+var hasRankData = {{ 'true' if rank_data else 'false' }};
+
+// Convert string to boolean
+userLoggedIn = userLoggedIn === 'true';
+hasRankData = hasRankData === 'true';
+
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize elements with null-checking
     const checkRankButton = document.getElementById('verifyRankButton');
     const resultModal = document.getElementById('resultModal') ?
         new bootstrap.Modal(document.getElementById('resultModal')) : null;
-
-    // Check if user is logged in via profile system
-    const isLoggedIn = {% if user %}true{% else %}false{% endif %};
 
     // Only attach event handlers if elements exist
     if (checkRankButton) {
@@ -233,20 +238,19 @@ document.addEventListener('DOMContentLoaded', function() {
             // Show loading state if verificationResult exists
             const resultDiv = document.getElementById('verificationResult');
             if (resultDiv) {
-                resultDiv.innerHTML = `
-                    <div class="text-center py-3">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                        <p class="mt-2">Verifying your rank...</p>
-                    </div>
-                `;
+                resultDiv.innerHTML =
+                    '<div class="text-center py-3">' +
+                        '<div class="spinner-border text-primary" role="status">' +
+                            '<span class="visually-hidden">Loading...</span>' +
+                        '</div>' +
+                        '<p class="mt-2">Verifying your rank...</p>' +
+                    '</div>';
             }
 
             // Choose API endpoint based on login status
             let apiUrl, requestMethod, requestData;
 
-            if (isLoggedIn) {
+            if (userLoggedIn) {
                 // Use profile API endpoint for logged-in users
                 apiUrl = '/api/profile/rank-check';
                 requestMethod = 'POST';
@@ -256,7 +260,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 };
             } else {
                 // Use legacy API endpoint for non-logged-in users
-                apiUrl = `/api/rank-check?manual_tier=${encodeURIComponent(rankTier)}&discord_username=${encodeURIComponent(discordUsername)}&manual_mmr=${encodeURIComponent(rankMMR)}`;
+                apiUrl = '/api/rank-check?manual_tier=' + encodeURIComponent(rankTier) +
+                        '&discord_username=' + encodeURIComponent(discordUsername) +
+                        '&manual_mmr=' + encodeURIComponent(rankMMR);
                 requestMethod = 'GET';
                 requestData = null;
             }
@@ -272,13 +278,13 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             fetch(apiUrl, fetchOptions)
-                .then(response => {
+                .then(function(response) {
                     if (!response.ok) {
-                        throw new Error(`Server responded with status: ${response.status}`);
+                        throw new Error('Server responded with status: ' + response.status);
                     }
                     return response.json();
                 })
-                .then(data => {
+                .then(function(data) {
                     console.log("Server response:", data);
 
                     if (data.success) {
@@ -291,8 +297,8 @@ document.addEventListener('DOMContentLoaded', function() {
                             rank: rankName,
                             tier: rankTier,
                             mmr: data.mmr || rankMMR,
-                            discord_updated: data.role_assignment?.success || false,
-                            role_message: data.role_assignment?.message || "Role status unknown",
+                            discord_updated: data.role_assignment ? data.role_assignment.success : false,
+                            role_message: data.role_assignment ? data.role_assignment.message : "Role status unknown",
                             verified_at: now,
                             rankValue: rankValue
                         };
@@ -314,8 +320,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         }
 
                         // If logged in, offer page reload to see updated status
-                        if (isLoggedIn) {
-                            setTimeout(() => {
+                        if (userLoggedIn) {
+                            setTimeout(function() {
                                 if (confirm('Verification successful! Would you like to reload the page to see your updated status?')) {
                                     window.location.reload();
                                 }
@@ -325,7 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         handleVerificationError(data.message || "Verification failed", checkRankButton, resultDiv);
                     }
                 })
-                .catch(error => {
+                .catch(function(error) {
                     console.error('Error:', error);
                     handleVerificationError("Server error: " + error.message, checkRankButton, resultDiv);
                 });
@@ -341,7 +347,7 @@ document.addEventListener('DOMContentLoaded', function() {
         checkResetStatus();
 
         // Load saved rank data if available (for non-logged-in users)
-        if (!isLoggedIn) {
+        if (!userLoggedIn) {
             loadSavedRankData();
         }
     }
@@ -368,37 +374,36 @@ function displayVerifiedRank(data, resultDiv) {
     // Create alert for Discord role status
     let discordAlert = '';
     if (data.discord_updated) {
-        discordAlert = `
-            <div class="alert alert-success mt-3">
-                <i class="fab fa-discord me-2"></i> Discord role assigned successfully!
-            </div>`;
+        discordAlert =
+            '<div class="alert alert-success mt-3">' +
+                '<i class="fab fa-discord me-2"></i> Discord role assigned successfully!' +
+            '</div>';
     } else {
-        discordAlert = `
-            <div class="alert alert-warning mt-3">
-                <i class="fab fa-discord me-2"></i> ${data.role_message || "Could not assign Discord role automatically. Please contact an admin."}
-            </div>`;
+        discordAlert =
+            '<div class="alert alert-warning mt-3">' +
+                '<i class="fab fa-discord me-2"></i> ' + (data.role_message || "Could not assign Discord role automatically. Please contact an admin.") +
+            '</div>';
     }
 
     // Build the HTML
-    resultDiv.innerHTML = `
-        <div class="alert alert-success mb-3">
-            <i class="fas fa-check-circle me-2"></i> Rank verification successful!
-        </div>
+    resultDiv.innerHTML =
+        '<div class="alert alert-success mb-3">' +
+            '<i class="fas fa-check-circle me-2"></i> Rank verification successful!' +
+        '</div>' +
 
-        <div class="rank-card">
-            <div class="rank-header ${rankColorClass}">
-                <i class="${rankIcon} fa-2x"></i>
-            </div>
-            <div class="rank-body">
-                <h5 class="rank-title">${data.tier}</h5>
-                <p class="rank-description">${data.rank}</p>
-                <p class="rank-mmr">Starting MMR: ${data.mmr}</p>
-                <span class="badge ${badgeClass}">${data.tier} Role</span>
-            </div>
-        </div>
+        '<div class="rank-card">' +
+            '<div class="rank-header ' + rankColorClass + '">' +
+                '<i class="' + rankIcon + ' fa-2x"></i>' +
+            '</div>' +
+            '<div class="rank-body">' +
+                '<h5 class="rank-title">' + data.tier + '</h5>' +
+                '<p class="rank-description">' + data.rank + '</p>' +
+                '<p class="rank-mmr">Starting MMR: ' + data.mmr + '</p>' +
+                '<span class="badge ' + badgeClass + '">' + data.tier + ' Role</span>' +
+            '</div>' +
+        '</div>' +
 
-        ${discordAlert}
-    `;
+        discordAlert;
 }
 
 function handleVerificationError(message, button, resultDiv) {
@@ -412,12 +417,11 @@ function handleVerificationError(message, button, resultDiv) {
 
     // Show error message
     if (resultDiv) {
-        resultDiv.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-circle me-2"></i> Error: ${message}
-            </div>
-            <p class="mt-3">Please try again or contact an admin if the issue persists.</p>
-        `;
+        resultDiv.innerHTML =
+            '<div class="alert alert-danger">' +
+                '<i class="fas fa-exclamation-circle me-2"></i> Error: ' + message +
+            '</div>' +
+            '<p class="mt-3">Please try again or contact an admin if the issue persists.</p>';
     }
 }
 
@@ -428,42 +432,39 @@ function showResultModal(data, apiResponse) {
 
     let roleStatus = '';
     if (data.discord_updated) {
-        roleStatus = `
-            <div class="alert alert-success">
-                <i class="fab fa-discord me-2"></i> Your Discord role has been updated to <strong>${data.tier}</strong>!
-            </div>
-        `;
+        roleStatus =
+            '<div class="alert alert-success">' +
+                '<i class="fab fa-discord me-2"></i> Your Discord role has been updated to <strong>' + data.tier + '</strong>!' +
+            '</div>';
     } else {
         // Include detailed error message from API if available
-        const errorDetail = apiResponse.role_assignment?.message ||
+        const errorDetail = (apiResponse.role_assignment && apiResponse.role_assignment.message) ||
                            "Please contact an admin to have your role assigned manually.";
 
-        roleStatus = `
-            <div class="alert alert-warning">
-                <i class="fas fa-exclamation-triangle me-2"></i> Could not update your Discord role automatically.
-                <p class="mt-2 mb-0"><small>${errorDetail}</small></p>
-            </div>
-        `;
+        roleStatus =
+            '<div class="alert alert-warning">' +
+                '<i class="fas fa-exclamation-triangle me-2"></i> Could not update your Discord role automatically.' +
+                '<p class="mt-2 mb-0"><small>' + errorDetail + '</small></p>' +
+            '</div>';
     }
 
-    modalContent.innerHTML = `
-        <div class="text-center">
-            <div class="mb-3">
-                <i class="fas fa-check-circle fa-4x text-success"></i>
-            </div>
-            <h4>Your rank has been verified!</h4>
-            <p class="mb-3">Based on your ${data.rank} rank.</p>
+    modalContent.innerHTML =
+        '<div class="text-center">' +
+            '<div class="mb-3">' +
+                '<i class="fas fa-check-circle fa-4x text-success"></i>' +
+            '</div>' +
+            '<h4>Your rank has been verified!</h4>' +
+            '<p class="mb-3">Based on your ' + data.rank + ' rank.</p>' +
 
-            <div class="alert alert-info">
-                <strong>Discord Role:</strong> ${data.tier}<br>
-                <strong>Starting MMR:</strong> ${data.mmr}
-            </div>
+            '<div class="alert alert-info">' +
+                '<strong>Discord Role:</strong> ' + data.tier + '<br>' +
+                '<strong>Starting MMR:</strong> ' + data.mmr +
+            '</div>' +
 
-            ${roleStatus}
+            roleStatus +
 
-            <p>You can now join the 6 Mans queue in our Discord server.</p>
-        </div>
-    `;
+            '<p>You can now join the 6 Mans queue in our Discord server.</p>' +
+        '</div>';
 
     // Show modal
     const resultModal = new bootstrap.Modal(document.getElementById('resultModal'));
@@ -546,65 +547,63 @@ function setupRankSelector() {
 }
 
 // Check for a leaderboard/verification reset
-async function checkResetStatus() {
+function checkResetStatus() {
     // Skip if no verification exists
     if (!localStorage.getItem('rankVerified')) {
         return;
     }
 
-    try {
-        // Fetch the reset timestamp
-        const response = await fetch('/api/reset-timestamp');
-
-        if (!response.ok) {
-            console.warn("Couldn't check reset status:", response.status);
-            return;
-        }
-
-        const resetData = await response.json();
-
-        if (!resetData.success || !resetData.last_reset) {
-            return;
-        }
-
-        // Compare reset timestamps
-        const currentResetTime = resetData.last_reset;
-        const storedResetTime = localStorage.getItem('lastResetTime');
-
-        // If reset time is different or not stored, verification is invalid
-        if (!storedResetTime || storedResetTime !== currentResetTime) {
-            console.log("Reset detected! Clearing verification data...");
-
-            // Show reset notification
-            const resultDiv = document.getElementById('verificationResult');
-            if (resultDiv) {
-                resultDiv.innerHTML = `
-                    <div class="alert alert-info">
-                        <i class="fas fa-sync-alt me-2"></i>
-                        Leaderboard reset detected. Please verify your rank again.
-                    </div>
-                `;
+    fetch('/api/reset-timestamp')
+        .then(function(response) {
+            if (!response.ok) {
+                console.warn("Couldn't check reset status:", response.status);
+                return null;
+            }
+            return response.json();
+        })
+        .then(function(resetData) {
+            if (!resetData || !resetData.success || !resetData.last_reset) {
+                return;
             }
 
-            // Store the new reset time
-            localStorage.setItem('lastResetTime', currentResetTime);
+            // Compare reset timestamps
+            const currentResetTime = resetData.last_reset;
+            const storedResetTime = localStorage.getItem('lastResetTime');
 
-            // Clear verification data
-            localStorage.removeItem('rankVerified');
-            localStorage.removeItem('rankData');
+            // If reset time is different or not stored, verification is invalid
+            if (!storedResetTime || storedResetTime !== currentResetTime) {
+                console.log("Reset detected! Clearing verification data...");
 
-            // Reset the button
-            const verifyButton = document.getElementById('verifyRankButton');
-            if (verifyButton) {
-                verifyButton.disabled = false;
-                verifyButton.classList.remove('btn-success');
-                verifyButton.classList.add('btn-primary');
-                verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+                // Show reset notification
+                const resultDiv = document.getElementById('verificationResult');
+                if (resultDiv) {
+                    resultDiv.innerHTML =
+                        '<div class="alert alert-info">' +
+                            '<i class="fas fa-sync-alt me-2"></i>' +
+                            'Leaderboard reset detected. Please verify your rank again.' +
+                        '</div>';
+                }
+
+                // Store the new reset time
+                localStorage.setItem('lastResetTime', currentResetTime);
+
+                // Clear verification data
+                localStorage.removeItem('rankVerified');
+                localStorage.removeItem('rankData');
+
+                // Reset the button
+                const verifyButton = document.getElementById('verifyRankButton');
+                if (verifyButton) {
+                    verifyButton.disabled = false;
+                    verifyButton.classList.remove('btn-success');
+                    verifyButton.classList.add('btn-primary');
+                    verifyButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+                }
             }
-        }
-    } catch (error) {
-        console.error('Error checking reset status:', error);
-    }
+        })
+        .catch(function(error) {
+            console.error('Error checking reset status:', error);
+        });
 }
 </script>
 {% endblock %}
