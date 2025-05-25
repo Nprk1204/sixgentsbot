@@ -359,22 +359,23 @@
 
 {% block extra_js %}
 <script>
-// This script runs after main.js, so showPlayerDetails should be available globally
 document.addEventListener('DOMContentLoaded', function() {
-    // Simple setup for featured players - use the global function
+    // Initialize the player modal
+    const playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
+
+    // Set up click events for featured players
     const featuredPlayers = document.querySelectorAll('.featured-player');
     featuredPlayers.forEach(player => {
         player.addEventListener('click', function() {
             const playerId = this.dataset.playerId;
-            if (playerId && typeof window.showPlayerDetails === 'function') {
-                window.showPlayerDetails(playerId);
+            if (playerId) {
+                showPlayerDetails(playerId, playerModal);
             } else {
-                console.error("showPlayerDetails function not available or no player ID");
+                console.error("No player ID found for this element", this);
             }
         });
     });
-
-    console.log(`Set up ${featuredPlayers.length} featured player click handlers`);
 });
+
 </script>
 {% endblock %}

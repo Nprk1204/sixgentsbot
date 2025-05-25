@@ -562,14 +562,12 @@ img {
 /* Improved global stats styling to match ranked stats */
 .global-stats-enhanced {
     background-color: var(--dark-medium);
-    /* REMOVE THIS LINE: border-left: 4px solid var(--primary); */
+    border-left: 4px solid var(--primary);
 }
 
 .global-stats-enhanced .mmr-display.global {
     background-color: rgba(0, 0, 0, 0.15);
     border: 1px solid var(--border);
-    /* ENSURE NO LEFT BORDER */
-    border-left: 1px solid var(--border) !important;
 }
 
 .global-stats-enhanced .mmr-display.global::before {
@@ -1611,16 +1609,7 @@ img {
     min-height: 120px;
 }
 
-.mmr-display::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 4px;
-    background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
-}
-
+.mmr-display::before,
 .mmr-display.global::before {
     content: '';
     position: absolute;
@@ -2153,94 +2142,4 @@ img {
 
 .animate-pulse {
     animation: pulse 2s infinite;
-}
-
-/* Fix MMR display consistency */
-.mmr-display.global {
-    background-color: rgba(0, 0, 0, 0.15);
-    border: 1px solid var(--border);
-    border-left: 1px solid var(--border) !important; /* Ensure no blue left border */
-}
-
-/* Enhanced modal styling */
-#playerModal .modal-body {
-    padding: 1.5rem;
-}
-
-#playerStatsTabs {
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 1.5rem;
-}
-
-#playerStatsTabs .nav-link {
-    color: var(--text-muted);
-    padding: 0.75rem 1.25rem;
-    border: none;
-    margin-right: 0.5rem;
-    font-weight: 500;
-    border-radius: 8px 8px 0 0;
-    transition: all 0.2s ease;
-}
-
-#playerStatsTabs .nav-link:hover:not(.active) {
-    background-color: rgba(255, 255, 255, 0.05);
-    color: var(--text);
-}
-
-#playerStatsTabs .nav-link.active {
-    color: var(--primary);
-    background-color: var(--dark-medium);
-    border: 1px solid var(--border);
-    border-bottom-color: var(--dark-medium);
-    position: relative;
-}
-
-#playerStatsTabs .nav-link.active::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--primary);
-    border-radius: 0 0 2px 2px;
-}
-
-/* Ensure MMR values have consistent styling */
-.mmr-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 0.5rem;
-}
-
-.mmr-display.global .mmr-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-/* Ensure stat items have consistent styling */
-.stat-item {
-    text-align: center;
-    padding: 15px 10px;
-    background-color: rgba(0, 0, 0, 0.15);
-    border-radius: 8px;
-    transition: all 0.2s ease;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    border: 1px solid var(--border);
-}
-
-.stat-item:hover {
-    background-color: rgba(0, 0, 0, 0.25);
-    transform: translateY(-2px);
-    border-color: var(--primary);
 }
