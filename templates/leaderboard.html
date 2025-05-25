@@ -156,46 +156,122 @@ function loadLeaderboard(page) {
         </div>
     `;
 
-    // Get the current board type from the active nav link
-    const activeLink = document.querySelector('.nav-link.active');
-    const boardType = activeLink ? activeLink.getAttribute('href').split('/').pop() : 'global';
+    // Get the current board type from the URL path or active nav link
+    let boardType = 'global'; // Default
+
+    // First try to get from URL path
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length > 2 && pathParts[1] === 'leaderboard') {
+        boardType = pathParts[2];
+    } else {
+        // Fallback: get from active nav link
+        const activeLink = document.querySelector('.nav-link.active');
+        if (activeLink) {
+            const href = activeLink.getAttribute('href');
+            if (href) {
+                const hrefParts = href.split('/');
+                if (hrefParts.length > 2) {
+                    boardType = hrefParts[hrefParts.length - 1];
+                }
+            }
+        }
+    }
+
+    // Validate board type
+    const validTypes = ['global', 'rank-a', 'rank-b', 'rank-c'];
+    if (!validTypes.includes(boardType)) {
+        boardType = 'global';
+    }
+
+    console.log(`Loading leaderboard for type: ${boardType}, page: ${page}`);
 
     fetch(`/api/leaderboard/${boardType}?page=${page}&per_page=${perPage}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return response.json();
+        })
         .then(data => {
             leaderboardContent.innerHTML = '';
             currentPage = page;
 
-            // If the new API structure is used (with pagination)
+            // Check for error in response
+            if (data.error) {
+                leaderboardContent.innerHTML = `<p class="text-center py-4 text-danger">Error: ${data.error}</p>`;
+                return;
+            }
+
+            // Handle API response structure
             if (data.players && data.pagination) {
                 const players = data.players;
                 totalPages = data.pagination.pages;
 
                 if (players.length === 0) {
-                    leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available yet.</p>';
+                    leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available for this category yet.</p>';
                     return;
                 }
 
                 displayPlayers(players, (page - 1) * perPage);
                 updatePagination(page, totalPages);
-            }
-            // Legacy API structure (without pagination)
-            else if (Array.isArray(data)) {
+            } else if (Array.isArray(data)) {
+                // Legacy API structure
                 if (data.length === 0) {
-                    leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available yet.</p>';
+                    leaderboardContent.innerHTML = '<p class="text-center py-4">No player data available for this category yet.</p>';
                     return;
                 }
 
                 displayPlayers(data, 0);
-                // No pagination for legacy API
                 document.getElementById('pagination').innerHTML = '';
+            } else {
+                leaderboardContent.innerHTML = '<p class="text-center py-4 text-danger">Unexpected response format from server.</p>';
             }
         })
         .catch(error => {
             console.error('Error fetching leaderboard data:', error);
-            leaderboardContent.innerHTML = '<p class="text-center py-4 text-danger">Error loading leaderboard data. Please try again later.</p>';
+            leaderboardContent.innerHTML = `<p class="text-center py-4 text-danger">Error loading leaderboard data: ${error.message}</p>`;
         });
 }
+
+// Also add this function to handle navigation clicks properly
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle navigation clicks
+    const navLinks = document.querySelectorAll('.nav-pills .nav-link');
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            // Remove active from all links
+            navLinks.forEach(l => l.classList.remove('active'));
+            // Add active to clicked link
+            this.classList.add('active');
+
+            // Reset to page 1 when changing board type
+            currentPage = 1;
+            loadLeaderboard(1);
+        });
+    });
+
+    // Initialize other elements...
+    playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
+    loadLeaderboard(currentPage);
+
+    // Set up refresh button
+    document.getElementById('refreshButton').addEventListener('click', function() {
+        loadLeaderboard(currentPage);
+    });
+
+    // Set up search functionality
+    document.getElementById('searchButton').addEventListener('click', searchPlayers);
+    document.getElementById('searchInput').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            searchPlayers();
+        }
+    });
+
+    // Set up close search results button
+    document.getElementById('closeSearchResults').addEventListener('click', function() {
+        document.getElementById('searchResults').style.display = 'none';
+    });
+});
 
 function displayPlayers(players, startIndex) {
     const leaderboardContent = document.getElementById('leaderboardContent');

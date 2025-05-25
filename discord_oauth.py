@@ -1,8 +1,9 @@
-# discord_oauth.py - Discord OAuth integration
+# discord_oauth.py - Fixed Discord OAuth integration
 import os
 import requests
 from flask import session, redirect, url_for, request
 from functools import wraps
+import urllib.parse
 
 
 class DiscordOAuth:
@@ -22,7 +23,8 @@ class DiscordOAuth:
             'scope': 'identify guilds.members.read'
         }
 
-        query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+        # Properly encode parameters
+        query_string = urllib.parse.urlencode(params)
         return f"https://discord.com/api/oauth2/authorize?{query_string}"
 
     def exchange_code(self, code):
@@ -39,8 +41,26 @@ class DiscordOAuth:
             'Content-Type': 'application/x-www-form-urlencoded'
         }
 
-        response = requests.post(f"{self.api_endpoint}/oauth2/token", data=data, headers=headers)
-        return response.json()
+        try:
+            response = requests.post(
+                f"{self.api_endpoint}/oauth2/token",
+                data=data,
+                headers=headers,
+                timeout=10
+            )
+
+            print(f"OAuth token exchange status: {response.status_code}")
+            print(f"OAuth response: {response.text}")
+
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to exchange code: {response.status_code} - {response.text}")
+                return {"error": f"Failed to exchange code: {response.status_code}"}
+
+        except requests.exceptions.RequestException as e:
+            print(f"Request exception during OAuth: {e}")
+            return {"error": f"Network error: {str(e)}"}
 
     def get_user_info(self, access_token):
         """Get user information from Discord API"""
@@ -48,10 +68,16 @@ class DiscordOAuth:
             'Authorization': f'Bearer {access_token}'
         }
 
-        response = requests.get(f"{self.api_endpoint}/users/@me", headers=headers)
-        if response.status_code == 200:
-            return response.json()
-        return None
+        try:
+            response = requests.get(f"{self.api_endpoint}/users/@me", headers=headers, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get user info: {response.status_code} - {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            print(f"Request exception getting user info: {e}")
+            return None
 
     def get_guild_member(self, access_token, guild_id, user_id):
         """Get guild member information"""
@@ -59,13 +85,20 @@ class DiscordOAuth:
             'Authorization': f'Bearer {access_token}'
         }
 
-        response = requests.get(
-            f"{self.api_endpoint}/guilds/{guild_id}/members/{user_id}",
-            headers=headers
-        )
-        if response.status_code == 200:
-            return response.json()
-        return None
+        try:
+            response = requests.get(
+                f"{self.api_endpoint}/guilds/{guild_id}/members/{user_id}",
+                headers=headers,
+                timeout=10
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Failed to get guild member: {response.status_code} - {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            print(f"Request exception getting guild member: {e}")
+            return None
 
 
 def login_required(f):

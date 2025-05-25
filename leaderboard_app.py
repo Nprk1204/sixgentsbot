@@ -341,81 +341,128 @@ def leaderboard_by_type(board_type):
 @login_required
 def profile():
     """Display the user's profile page"""
-    user = get_current_user()
-    return render_template('profile.html', user=user)
+    try:
+        user = get_current_user()
+        if not user:
+            flash('Please log in to view your profile.', 'error')
+            return redirect(url_for('discord_login'))
+
+        return render_template('profile.html', user=user)
+    except Exception as e:
+        print(f"Error in profile route: {e}")
+        flash('An error occurred loading your profile.', 'error')
+        return redirect(url_for('home'))
 
 
 @app.route('/profile/stats')
 @login_required
 def profile_stats():
     """Display detailed player stats"""
-    user = get_current_user()
+    try:
+        user = get_current_user()
+        if not user:
+            flash('Please log in to view your stats.', 'error')
+            return redirect(url_for('discord_login'))
 
-    # Get player data from database
-    player_data = players_collection.find_one({"id": user['id']})
+        # Get player data from database
+        player_data = players_collection.find_one({"id": user['id']})
 
-    if not player_data:
-        # No stats available
-        return render_template('profile_stats.html', user=user, player_data=None, ranked_matches=[], global_matches=[])
+        if not player_data:
+            # No stats available - create empty data structure
+            player_data = {
+                'id': user['id'],
+                'name': user.get('global_name') or user.get('username'),
+                'mmr': 0,
+                'global_mmr': 300,
+                'wins': 0,
+                'losses': 0,
+                'matches': 0,
+                'global_wins': 0,
+                'global_losses': 0,
+                'global_matches': 0
+            }
 
-    # Get match history for performance graphs
-    match_history = list(matches_collection.find({
-        "$or": [
-            {"team1.id": user['id']},
-            {"team2.id": user['id']}
-        ],
-        "status": "completed"
-    }).sort("completed_at", 1))  # Sort ascending for chronological order
+        # Get match history for performance graphs
+        try:
+            match_history = list(matches_collection.find({
+                "$or": [
+                    {"team1.id": user['id']},
+                    {"team2.id": user['id']}
+                ],
+                "status": "completed"
+            }).sort("completed_at", 1).limit(50))  # Limit for performance
+        except Exception as e:
+            print(f"Error fetching match history: {e}")
+            match_history = []
 
-    # Process match history for graphs
-    ranked_matches = []
-    global_matches = []
+        # Process match history for graphs
+        ranked_matches = []
+        global_matches = []
 
-    for match in match_history:
-        # Determine if player won
-        player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
-        winner = match.get("winner")
-        player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+        for match in match_history:
+            try:
+                # Determine if player won
+                player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
+                winner = match.get("winner")
+                player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
 
-        match_data = {
-            'date': match.get('completed_at').isoformat() if match.get('completed_at') else '',
-            'won': player_won,
-            'match_id': match.get('match_id', ''),
-        }
+                match_data = {
+                    'date': match.get('completed_at').isoformat() if match.get('completed_at') else '',
+                    'won': player_won,
+                    'match_id': match.get('match_id', ''),
+                }
 
-        # Find MMR change for this player
-        for mmr_change in match.get("mmr_changes", []):
-            if mmr_change.get("player_id") == user['id']:
-                if match.get("is_global"):
-                    if mmr_change.get("is_global", False):
-                        match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
-                        match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
-                        global_matches.append(match_data)
-                else:
-                    if not mmr_change.get("is_global", False):
-                        match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
-                        match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
-                        ranked_matches.append(match_data)
-                break
+                # Find MMR change for this player
+                for mmr_change in match.get("mmr_changes", []):
+                    if mmr_change.get("player_id") == user['id']:
+                        if match.get("is_global"):
+                            if mmr_change.get("is_global", False):
+                                match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                                match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
+                                global_matches.append(match_data)
+                        else:
+                            if not mmr_change.get("is_global", False):
+                                match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                                match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
+                                ranked_matches.append(match_data)
+                        break
+            except Exception as e:
+                print(f"Error processing match {match.get('match_id', 'unknown')}: {e}")
+                continue
 
-    return render_template('profile_stats.html',
-                           user=user,
-                           player_data=player_data,
-                           ranked_matches=ranked_matches,
-                           global_matches=global_matches)
+        return render_template('profile_stats.html',
+                               user=user,
+                               player_data=player_data,
+                               ranked_matches=ranked_matches,
+                               global_matches=global_matches)
+    except Exception as e:
+        print(f"Error in profile_stats route: {e}")
+        flash('An error occurred loading your statistics.', 'error')
+        return redirect(url_for('profile'))
 
 
 @app.route('/profile/rank-check')
 @login_required
 def profile_rank_check():
     """Display rank check page for authenticated user"""
-    user = get_current_user()
+    try:
+        user = get_current_user()
+        if not user:
+            flash('Please log in to verify your rank.', 'error')
+            return redirect(url_for('discord_login'))
 
-    # Check if user already has rank verification
-    rank_data = ranks_collection.find_one({"discord_id": user['id']})
+        # Check if user already has rank verification
+        rank_data = None
+        try:
+            rank_data = ranks_collection.find_one({"discord_id": user['id']})
+        except Exception as e:
+            print(f"Error fetching rank data: {e}")
 
-    return render_template('profile_rank_check.html', user=user, rank_data=rank_data)
-
+        return render_template('profile_rank_check.html', user=user, rank_data=rank_data)
+    except Exception as e:
+        print(f"Error in profile_rank_check route: {e}")
+        flash('An error occurred loading the rank verification page.', 'error')
+        return redirect(url_for('profile'))
 
 # API Routes
 @app.route('/api/leaderboard/<board_type>')
