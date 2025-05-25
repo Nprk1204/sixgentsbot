@@ -61,161 +61,154 @@
     </div>
 </div>
 
-<!-- Main Content Row -->
-<div class="row">
-    <!-- Featured Players Section -->
-    <div class="col-lg-6">
-        <div class="content-container">
-            <ul class="nav nav-tabs mb-3" id="featuredPlayersTabs" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
-                            data-bs-target="#ranked-players" type="button" role="tab">
-                        Ranked Players
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="global-tab" data-bs-toggle="tab"
-                            data-bs-target="#global-players" type="button" role="tab">
-                        Global Players
-                    </button>
-                </li>
-            </ul>
+<!-- Featured Players and Recent Matches -->
+<div class="content-container">
+    <ul class="nav nav-tabs mb-3" id="featuredPlayersTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
+                    data-bs-target="#ranked-players" type="button" role="tab">
+                Ranked Players
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="global-tab" data-bs-toggle="tab"
+                    data-bs-target="#global-players" type="button" role="tab">
+                Global Players
+            </button>
+        </li>
+    </ul>
 
-            <div class="tab-content">
-                <!-- Ranked Players Tab -->
-                <div class="tab-pane fade show active" id="ranked-players" role="tabpanel">
-                    <div class="row">
-                        {% for player in featured_players %}
-                        <div class="col-md-6">
-                            <div class="featured-player" data-player-id="{{ player.id }}">
-                                <div class="featured-player-header">
-                                    {{ player.name }}
+    <div class="tab-content">
+        <!-- Ranked Players Tab -->
+        <div class="tab-pane fade show active" id="ranked-players" role="tabpanel">
+            <div class="row">
+                {% for player in featured_players %}
+                <div class="col-md-6">
+                    <div class="featured-player" data-player-id="{{ player.id }}">
+                        <div class="featured-player-header">
+                            {{ player.name }}
+                        </div>
+
+                        <div class="featured-player-body">
+                            <div class="featured-player-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.mmr }}</span>
+                                    <span class="stat-label">MMR</span>
                                 </div>
 
-                                <div class="featured-player-body">
-                                    <div class="featured-player-stats">
-                                        <div class="stat">
-                                            <span class="stat-value">{{ player.mmr }}</span>
-                                            <span class="stat-label">MMR</span>
-                                        </div>
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.win_rate }}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
 
-                                        <div class="stat">
-                                            <span class="stat-value">{{ player.win_rate }}%</span>
-                                            <span class="stat-label">Win Rate</span>
-                                        </div>
-
-                                        <div class="stat">
-                                            <span class="stat-value">{{ player.matches }}</span>
-                                            <span class="stat-label">Matches</span>
-                                        </div>
-                                    </div>
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.matches }}</span>
+                                    <span class="stat-label">Matches</span>
                                 </div>
                             </div>
                         </div>
-                        {% endfor %}
                     </div>
                 </div>
+                {% endfor %}
+            </div>
+        </div>
 
-                <!-- Global Players Tab -->
-                <div class="tab-pane fade" id="global-players" role="tabpanel">
-                    <div class="row">
-                        {% for player in featured_global_players %}
-                        <div class="col-md-6">
-                            <div class="featured-player" data-player-id="{{ player.id }}">
-                                <div class="featured-player-header">
-                                    {{ player.name }}
+        <!-- Global Players Tab -->
+        <div class="tab-pane fade" id="global-players" role="tabpanel">
+            <div class="row">
+                {% for player in featured_global_players %}
+                <div class="col-md-6">
+                    <div class="featured-player" data-player-id="{{ player.id }}">
+                        <div class="featured-player-header">
+                            {{ player.name }}
+                        </div>
+
+                        <div class="featured-player-body">
+                            <div class="featured-player-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.mmr }}</span>
+                                    <span class="stat-label">Global MMR</span>
                                 </div>
 
-                                <div class="featured-player-body">
-                                    <div class="featured-player-stats">
-                                        <div class="stat">
-                                            <span class="stat-value">{{ player.mmr }}</span>
-                                            <span class="stat-label">Global MMR</span>
-                                        </div>
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.win_rate }}%</span>
+                                    <span class="stat-label">Win Rate</span>
+                                </div>
 
-                                        <div class="stat">
-                                            <span class="stat-value">{{ player.win_rate }}%</span>
-                                            <span class="stat-label">Win Rate</span>
-                                        </div>
-
-                                        <div class="stat">
-                                            <span class="stat-value">{{ player.global_matches }}</span>
-                                            <span class="stat-label">Matches</span>
-                                        </div>
-                                    </div>
+                                <div class="stat">
+                                    <span class="stat-value">{{ player.global_matches }}</span>
+                                    <span class="stat-label">Matches</span>
                                 </div>
                             </div>
                         </div>
-                        {% endfor %}
                     </div>
                 </div>
+                {% endfor %}
             </div>
         </div>
     </div>
+</div>
 
-    <!-- Recent Matches Section -->
-    <div class="col-lg-6">
-        <div class="content-container">
-            <div class="content-header">
-                <h2>Recent Matches</h2>
-            </div>
+<!-- Recent Matches Section -->
+<div class="content-container">
+    <div class="content-header">
+        <h2>Recent Matches</h2>
+    </div>
 
-            {% if recent_matches %}
-                <div class="row">
-                    {% for match in recent_matches[:6] %}
-                    <div class="col-md-6 mb-3">
-                        <div class="match-card recent-match-card">
-                            <div class="match-header">
-                                <span class="match-date">{{ match.date }}</span>
-                                <div>
-                                    {% if match.is_global %}
-                                    <span class="badge bg-info me-2">Global</span>
-                                    {% else %}
-                                    <span class="badge bg-warning me-2">Ranked</span>
-                                    {% endif %}
-                                    <span class="match-id">{{ match.match_id }}</span>
-                                </div>
+    {% if recent_matches %}
+        <div class="row">
+            {% for match in recent_matches[:6] %}
+            <div class="col-md-6 mb-3">
+                <div class="match-card recent-match-card">
+                    <div class="match-header">
+                        <span class="match-date">{{ match.date }}</span>
+                        <div>
+                            {% if match.is_global %}
+                            <span class="badge bg-info me-2">Global</span>
+                            {% else %}
+                            <span class="badge bg-warning me-2">Ranked</span>
+                            {% endif %}
+                            <span class="match-id">{{ match.match_id }}</span>
+                        </div>
+                    </div>
+                    <div class="match-body">
+                        <div class="team team1 {% if match.winner == 1 %}team-winner{% endif %}">
+                            <div class="team-header">
+                                <i class="fas fa-users me-1"></i> Team 1
+                                {% if match.winner == 1 %}
+                                <span class="badge bg-success ms-1">W</span>
+                                {% endif %}
                             </div>
-                            <div class="match-body">
-                                <div class="team team1 {% if match.winner == 1 %}team-winner{% endif %}">
-                                    <div class="team-header">
-                                        <i class="fas fa-users me-1"></i> Team 1
-                                        {% if match.winner == 1 %}
-                                        <span class="badge bg-success ms-1">W</span>
-                                        {% endif %}
-                                    </div>
-                                    <div class="team-members">
-                                        {{ match.team1|join(', ') }}
-                                    </div>
-                                </div>
+                            <div class="team-members">
+                                {{ match.team1|join(', ') }}
+                            </div>
+                        </div>
 
-                                <div class="text-center my-2">
-                                    <span class="badge bg-dark">VS</span>
-                                </div>
+                        <div class="text-center my-2">
+                            <span class="badge bg-dark">VS</span>
+                        </div>
 
-                                <div class="team team2 {% if match.winner == 2 %}team-winner{% endif %}">
-                                    <div class="team-header">
-                                        <i class="fas fa-users me-1"></i> Team 2
-                                        {% if match.winner == 2 %}
-                                        <span class="badge bg-success ms-1">W</span>
-                                        {% endif %}
-                                    </div>
-                                    <div class="team-members">
-                                        {{ match.team2|join(', ') }}
-                                    </div>
-                                </div>
+                        <div class="team team2 {% if match.winner == 2 %}team-winner{% endif %}">
+                            <div class="team-header">
+                                <i class="fas fa-users me-1"></i> Team 2
+                                {% if match.winner == 2 %}
+                                <span class="badge bg-success ms-1">W</span>
+                                {% endif %}
+                            </div>
+                            <div class="team-members">
+                                {{ match.team2|join(', ') }}
                             </div>
                         </div>
                     </div>
-                    {% endfor %}
                 </div>
-            {% else %}
-                <div class="text-center py-4">
-                    <p>No matches have been played yet.</p>
-                </div>
-            {% endif %}
+            </div>
+            {% endfor %}
         </div>
-    </div>
+    {% else %}
+        <div class="text-center py-4">
+            <p>No matches have been played yet.</p>
+        </div>
+    {% endif %}
 </div>
 
 <!-- How It Works Section -->
