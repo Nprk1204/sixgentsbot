@@ -1647,7 +1647,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_collection_name = f"players_backup_{timestamp}"
 
-    # Create a backup of the current players collection - using get_collection method
+    # Create a backup of the current players collection
     backup_collection = db.get_collection(backup_collection_name)
     all_players = list(system_coordinator.match_system.players.find())
 
@@ -1657,6 +1657,17 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     # Initialize counters
     player_count = len(all_players)
     reset_count = 0
+    roles_removed_count = 0
+
+    # Define rank roles
+    rank_roles = {
+        'Rank A': discord.utils.get(interaction.guild.roles, name="Rank A"),
+        'Rank B': discord.utils.get(interaction.guild.roles, name="Rank B"),
+        'Rank C': discord.utils.get(interaction.guild.roles, name="Rank C")
+    }
+
+    # Filter out None values (roles that don't exist)
+    existing_rank_roles = {name: role for name, role in rank_roles.items() if role is not None}
 
     if reset_type == "global":
         # Reset only global stats
@@ -1666,7 +1677,10 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
                 "global_mmr": 300,
                 "global_wins": 0,
                 "global_losses": 0,
-                "global_matches": 0
+                "global_matches": 0,
+                "global_current_streak": 0,
+                "global_longest_win_streak": 0,
+                "global_longest_loss_streak": 0
             }}
         )
         reset_count = result.modified_count
@@ -1674,6 +1688,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         # Reset global matches
         matches_result = system_coordinator.match_system.matches.delete_many({"is_global": True})
         matches_removed = matches_result.deleted_count
+
+        # For global reset, we don't remove Discord roles since they're based on ranked MMR
 
     elif reset_type == "ranked":
         # Reset only ranked stats
@@ -1696,7 +1712,10 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
                     "mmr": starting_mmr,
                     "wins": 0,
                     "losses": 0,
-                    "matches": 0
+                    "matches": 0,
+                    "current_streak": 0,
+                    "longest_win_streak": 0,
+                    "longest_loss_streak": 0
                 }}
             )
             reset_count += 1
@@ -1705,46 +1724,58 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         matches_result = system_coordinator.match_system.matches.delete_many({"is_global": {"$ne": True}})
         matches_removed = matches_result.deleted_count
 
-    else:  # "all" - Complete reset
+        # For ranked reset, we don't remove Discord roles since they should keep their verified rank
+
+    else:  # "all" - Complete reset including Discord roles
         # COMPLETE RESET: Clear and reset everything including rank verifications
 
         # 1. Make backup of rank verification data
         ranks_collection = db.get_collection('ranks')
         all_ranks = list(ranks_collection.find())
-        # Use get_collection instead of dictionary access
         backup_ranks_collection = db.get_collection(f"ranks_backup_{timestamp}")
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
 
-        # 2. For complete resets, DELETE all player records instead of setting to 0
-        players_removed = system_coordinator.match_system.players.delete_many({}).deleted_count
-        print(f"Removed {players_removed} player records for complete reset")
-        reset_count = players_removed
+        # 2. Remove Discord roles from all players BEFORE deleting player records
+        print("Starting Discord role removal...")
 
-        # 3. Remove Discord roles for all players
         for player in all_players:
             player_id = player.get("id")
+            if not player_id or player_id.startswith('9000'):  # Skip dummy players
+                continue
+
             try:
                 member = await interaction.guild.fetch_member(int(player_id))
                 if member:
-                    # Get all rank roles
-                    rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
-                    rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
-                    rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
-
-                    # Remove all rank roles
+                    # Check which rank roles the member has
                     roles_to_remove = []
-                    if rank_a_role and rank_a_role in member.roles:
-                        roles_to_remove.append(rank_a_role)
-                    if rank_b_role and rank_b_role in member.roles:
-                        roles_to_remove.append(rank_b_role)
-                    if rank_c_role and rank_c_role in member.roles:
-                        roles_to_remove.append(rank_c_role)
+                    for role_name, role_obj in existing_rank_roles.items():
+                        if role_obj in member.roles:
+                            roles_to_remove.append(role_obj)
 
+                    # Remove all rank roles from this member
                     if roles_to_remove:
-                        await member.remove_roles(*roles_to_remove, reason="Leaderboard reset")
+                        await member.remove_roles(*roles_to_remove, reason="Complete leaderboard reset")
+                        roles_removed_count += 1
+                        print(f"Removed rank roles from {member.display_name}")
+
+                        # Small delay to avoid rate limits
+                        await asyncio.sleep(0.1)
+
+            except discord.NotFound:
+                print(f"Member with ID {player_id} not found in guild")
+                continue
+            except discord.Forbidden:
+                print(f"No permission to remove roles from member {player_id}")
+                continue
             except Exception as e:
-                print(f"Error removing roles for {player_id}: {e}")
+                print(f"Error removing roles from {player_id}: {e}")
+                continue
+
+        # 3. DELETE all player records instead of setting to 0
+        players_removed = system_coordinator.match_system.players.delete_many({}).deleted_count
+        print(f"Removed {players_removed} player records for complete reset")
+        reset_count = players_removed
 
         # 4. Delete all rank verification records to force re-verification
         ranks_removed = ranks_collection.delete_many({}).deleted_count
@@ -1761,7 +1792,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         "timestamp": datetime.datetime.utcnow(),
         "admin_id": str(interaction.user.id),
         "admin_name": interaction.user.display_name,
-        "backup_collection": backup_collection_name
+        "backup_collection": backup_collection_name,
+        "roles_removed_count": roles_removed_count if reset_type == "all" else 0
     })
 
     # Send confirmation
@@ -1784,7 +1816,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     )
 
     if reset_type == "all":
-        # For complete reset, mention rank verification
+        # For complete reset, mention rank verification and Discord roles
         embed.add_field(
             name="Rank Verification Reset",
             value=f"**{ranks_removed}** rank verifications have been removed. All players must re-verify their ranks.",
@@ -1792,8 +1824,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         )
 
         embed.add_field(
-            name="Discord Roles",
-            value="All Rank A, B, and C roles have been removed from members. Roles will be reassigned during re-verification.",
+            name="Discord Roles Removed",
+            value=f"**{roles_removed_count}** members had their rank roles removed. Roles will be reassigned during re-verification.",
             inline=False
         )
     elif reset_type in ["ranked", "all"]:
@@ -1824,7 +1856,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     if reset_type == "all":
         announcement.add_field(
             name="🚨 IMPORTANT: Re-verification Required 🚨",
-            value="This was a complete reset. **All Discord roles have been removed and player records have been deleted**. " +
+            value=f"This was a complete reset. **{roles_removed_count} members had their Discord roles removed** and player records have been deleted. " +
                   "**All players must re-verify their ranks** before joining the queue again.",
             inline=False
         )
