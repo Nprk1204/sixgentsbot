@@ -1965,6 +1965,290 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         await interaction.channel.send(embed=announcement)
 
 
+# Add this command to your main.py file, after the other slash commands
+
+@bot.tree.command(name="resetplayer", description="Reset all data for a specific player (Admin only)")
+@app_commands.describe(
+    member="The member whose data you want to reset",
+    confirmation="Type 'CONFIRM' to confirm the reset"
+)
+async def resetplayer_slash(interaction: discord.Interaction, member: discord.Member, confirmation: str):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("You need administrator permissions to use this command.",
+                                                ephemeral=True)
+        return
+
+    # Check confirmation
+    if confirmation != "CONFIRM":
+        await interaction.response.send_message(
+            "❌ Player reset canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
+            ephemeral=True
+        )
+        return
+
+    # Defer response as this operation could take time
+    await interaction.response.defer()
+
+    player_id = str(member.id)
+    player_name = member.display_name
+
+    # Check if player is currently in an active match
+    if player_id in system_coordinator.queue_manager.player_matches:
+        match_id = system_coordinator.queue_manager.player_matches[player_id]
+        await interaction.followup.send(
+            f"❌ Cannot reset {member.mention} - they are currently in an active match (ID: `{match_id}`). "
+            "Please wait for the match to complete or use `/removeactivematches` first.",
+            ephemeral=True
+        )
+        return
+
+    # Check if player is in any queue
+    player_in_queue = False
+    queue_channel = None
+    for channel_id, players in system_coordinator.queue_manager.channel_queues.items():
+        for p in players:
+            if p.get('id') == player_id:
+                player_in_queue = True
+                try:
+                    queue_channel = bot.get_channel(int(channel_id))
+                except:
+                    queue_channel = None
+                break
+        if player_in_queue:
+            break
+
+    if player_in_queue:
+        # Remove player from queue first
+        try:
+            result = system_coordinator.queue_manager.queue_collection.delete_one({
+                "id": player_id
+            })
+
+            # Update in-memory state
+            for channel_id, players in system_coordinator.queue_manager.channel_queues.items():
+                system_coordinator.queue_manager.channel_queues[channel_id] = [
+                    p for p in players if p.get('id') != player_id
+                ]
+
+            queue_info = f" (removed from queue in {queue_channel.mention if queue_channel else 'unknown channel'})"
+        except Exception as e:
+            queue_info = f" (warning: could not remove from queue - {str(e)})"
+    else:
+        queue_info = ""
+
+    # Initialize counters for what we're resetting
+    reset_summary = {
+        "player_data": False,
+        "rank_verification": False,
+        "discord_roles": False,
+        "queue_removal": player_in_queue,
+        "errors": []
+    }
+
+    try:
+        # 1. Get current player data before deletion (for summary)
+        player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+
+        current_stats = {}
+        if player_data:
+            current_stats = {
+                "ranked_mmr": player_data.get("mmr", 0),
+                "global_mmr": player_data.get("global_mmr", 300),
+                "ranked_matches": player_data.get("matches", 0),
+                "global_matches": player_data.get("global_matches", 0),
+                "ranked_wins": player_data.get("wins", 0),
+                "global_wins": player_data.get("global_wins", 0),
+                "ranked_losses": player_data.get("losses", 0),
+                "global_losses": player_data.get("global_losses", 0),
+                "current_streak": player_data.get("current_streak", 0),
+                "global_current_streak": player_data.get("global_current_streak", 0)
+            }
+
+        # 2. Delete player data from players collection
+        try:
+            result = system_coordinator.match_system.players.delete_one({"id": player_id})
+            if result.deleted_count > 0:
+                reset_summary["player_data"] = True
+                print(f"Deleted player data for {player_name} (ID: {player_id})")
+            else:
+                print(f"No player data found for {player_name} (ID: {player_id})")
+        except Exception as e:
+            reset_summary["errors"].append(f"Failed to delete player data: {str(e)}")
+
+        # 3. Delete rank verification from ranks collection
+        try:
+            ranks_collection = db.get_collection('ranks')
+            result = ranks_collection.delete_one({"discord_id": player_id})
+            if result.deleted_count > 0:
+                reset_summary["rank_verification"] = True
+                print(f"Deleted rank verification for {player_name} (ID: {player_id})")
+            else:
+                print(f"No rank verification found for {player_name} (ID: {player_id})")
+        except Exception as e:
+            reset_summary["errors"].append(f"Failed to delete rank verification: {str(e)}")
+
+        # 4. Remove Discord rank roles
+        try:
+            # Get rank roles
+            rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+            rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+            rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+            rank_roles = [role for role in [rank_a_role, rank_b_role, rank_c_role] if role]
+
+            # Check if member has any rank roles
+            member_rank_roles = [role for role in member.roles if role in rank_roles]
+
+            if member_rank_roles:
+                await member.remove_roles(*member_rank_roles, reason=f"Player reset by {interaction.user.display_name}")
+                reset_summary["discord_roles"] = True
+                print(f"Removed {len(member_rank_roles)} rank role(s) from {player_name}")
+            else:
+                print(f"No rank roles found for {player_name}")
+
+        except discord.Forbidden:
+            reset_summary["errors"].append("No permission to remove Discord roles")
+        except discord.HTTPException as e:
+            reset_summary["errors"].append(f"Discord error removing roles: {str(e)}")
+        except Exception as e:
+            reset_summary["errors"].append(f"Unexpected error removing roles: {str(e)}")
+
+        # 5. Remove player from player_matches tracking (if somehow still there)
+        if player_id in system_coordinator.queue_manager.player_matches:
+            del system_coordinator.queue_manager.player_matches[player_id]
+
+    except Exception as e:
+        reset_summary["errors"].append(f"Unexpected error during reset: {str(e)}")
+
+    # Create detailed response embed
+    embed = discord.Embed(
+        title=f"🔄 Player Reset Complete",
+        description=f"Reset data for {member.mention} ({member.display_name})",
+        color=0xff9900 if reset_summary["errors"] else 0x00ff00
+    )
+
+    # Add what was reset
+    reset_items = []
+    if reset_summary["player_data"]:
+        reset_items.append("✅ Player statistics and MMR data")
+    if reset_summary["rank_verification"]:
+        reset_items.append("✅ Rank verification record")
+    if reset_summary["discord_roles"]:
+        reset_items.append("✅ Discord rank roles")
+    if reset_summary["queue_removal"]:
+        reset_items.append("✅ Removed from queue")
+
+    if not reset_items:
+        reset_items.append("ℹ️ No data found to reset")
+
+    embed.add_field(
+        name="Data Reset",
+        value="\n".join(reset_items),
+        inline=False
+    )
+
+    # Add previous stats if we had any
+    if current_stats and (current_stats["ranked_matches"] > 0 or current_stats["global_matches"] > 0):
+        stats_text = []
+        if current_stats["ranked_matches"] > 0:
+            stats_text.append(f"**Ranked:** {current_stats['ranked_wins']}W-{current_stats['ranked_losses']}L "
+                              f"({current_stats['ranked_matches']} matches, {current_stats['ranked_mmr']} MMR)")
+        if current_stats["global_matches"] > 0:
+            stats_text.append(f"**Global:** {current_stats['global_wins']}W-{current_stats['global_losses']}L "
+                              f"({current_stats['global_matches']} matches, {current_stats['global_mmr']} MMR)")
+
+        embed.add_field(
+            name="Previous Stats",
+            value="\n".join(stats_text) if stats_text else "No previous match data",
+            inline=False
+        )
+
+    # Add queue removal info
+    if queue_info:
+        embed.add_field(
+            name="Queue Status",
+            value=f"Player was{queue_info}",
+            inline=False
+        )
+
+    # Add errors if any
+    if reset_summary["errors"]:
+        error_text = "\n".join([f"❌ {error}" for error in reset_summary["errors"]])
+        embed.add_field(
+            name="Errors Encountered",
+            value=error_text,
+            inline=False
+        )
+
+    # Add instructions for the player
+    embed.add_field(
+        name="Next Steps",
+        value=(
+            f"{member.mention} will need to:\n"
+            "1. Visit the rank verification page on the website\n"
+            "2. Re-verify their Rocket League rank\n"
+            "3. Get their Discord role and starting MMR back\n"
+            "4. Join queues again to start playing"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(
+        text=f"Reset by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+
+    await interaction.followup.send(embed=embed)
+
+    # Send a DM to the player (optional, with error handling)
+    try:
+        dm_embed = discord.Embed(
+            title="Your 6 Mans Data Has Been Reset",
+            description="An administrator has reset your 6 Mans player data.",
+            color=0xffa500
+        )
+
+        dm_embed.add_field(
+            name="What This Means",
+            value=(
+                "• All your match history and MMR have been cleared\n"
+                "• Your rank verification has been removed\n"
+                "• Your Discord rank role has been removed"
+            ),
+            inline=False
+        )
+
+        dm_embed.add_field(
+            name="To Play Again",
+            value=(
+                "1. Visit the rank verification page on our website\n"
+                "2. Re-verify your Rocket League rank\n"
+                "3. You'll get your Discord role and starting MMR back\n"
+                "4. You can then join queues again"
+            ),
+            inline=False
+        )
+
+        dm_embed.set_footer(text="If you have questions, contact a server administrator")
+
+        await member.send(embed=dm_embed)
+        print(f"Sent reset notification DM to {player_name}")
+
+    except discord.Forbidden:
+        print(f"Could not send DM to {player_name} - DMs disabled")
+    except Exception as dm_error:
+        print(f"Error sending DM to {player_name}: {str(dm_error)}")
+
+    print(f"Player reset completed for {player_name} by {interaction.user.display_name}")
+
+
 # 4. Sub Command
 @bot.tree.command(name="sub", description="Substitute players in an active match")
 @app_commands.describe(
