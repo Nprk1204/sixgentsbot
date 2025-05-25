@@ -801,9 +801,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Auto-reload after delay
                 setTimeout(() => {
-                    if (confirm('Verification successful! Reload the page to see your verified status?')) {
                         window.location.reload();
-                    }
                 }, 3000);
             } else {
                 handleEnhancedError(data.message || "Verification failed");
