@@ -2,6 +2,7 @@ from flask import Flask, render_template, jsonify, request, redirect, url_for, f
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 import os
+import datetime  # Keep only this import
 import time
 import requests
 import json
@@ -11,7 +12,7 @@ from dotenv import load_dotenv
 import functools
 import re
 import json
-from datetime import datetime
+# Remove the conflicting import: from datetime import datetime
 
 # Import our Discord OAuth integration
 from discord_oauth import DiscordOAuth, login_required, get_current_user
@@ -164,7 +165,7 @@ def to_json_filter(obj):
 
     def json_serial(obj):
         """JSON serializer for objects not serializable by default json code"""
-        if isinstance(obj, datetime):
+        if isinstance(obj, datetime.datetime):  # Fixed: Use datetime.datetime instead of datetime
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
 
@@ -1020,7 +1021,7 @@ def profile_rank_check_api():
                 "tier": manual_tier,  # Keep both for compatibility
                 "mmr": manual_mmr,
                 "global_mmr": 300,  # Default global MMR
-                "timestamp": datetime.datetime.utcnow()
+                "timestamp": datetime.datetime.utcnow()  # Fixed: Use datetime.datetime
             }
 
             print(f"Storing rank document: {rank_document}")
@@ -1435,7 +1436,7 @@ def store_rank_data(discord_username, game_username, platform, rank_data, discor
             "tier": rank_data.get("tier"),
             "mmr": rank_data.get("mmr"),
             "global_mmr": 300,
-            "timestamp": datetime.datetime.utcnow()
+            "timestamp": datetime.datetime.utcnow()  # Fixed: Use datetime.datetime
         }
 
         print(f"Rank document to store: {rank_document}")
@@ -1584,7 +1585,7 @@ def reset_leaderboard():
         rank_count = ranks_collection.count_documents({})
 
         # Create backup collections with timestamp
-        timestamp = datetime.datetime.utcnow()
+        timestamp = datetime.datetime.utcnow()  # Fixed: Use datetime.datetime
         timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
 
         # Backup players
@@ -1641,7 +1642,7 @@ def reset_verification():
             return jsonify({"success": False, "message": "Unauthorized"}), 401
 
         # Create a record of the reset
-        reset_timestamp = datetime.datetime.utcnow()
+        reset_timestamp = datetime.datetime.utcnow()  # Fixed: Use datetime.datetime
 
         # Store reset event in the resets collection
         resets_collection.insert_one({
@@ -1688,7 +1689,7 @@ def verify_rank():
             "rank": rank,
             "tier": tier,
             "mmr": int(mmr),
-            "timestamp": datetime.datetime.utcnow()
+            "timestamp": datetime.datetime.utcnow()  # Fixed: Use datetime.datetime
         })
 
         # Try to assign the Discord role

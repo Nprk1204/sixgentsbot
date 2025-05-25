@@ -1,112 +1,210 @@
 {% extends "base.html" %}
 
-{% block title %}Rocket League Six Gents - Rank Check{% endblock %}
+{% block title %}Rank Verification - Rocket League 6 Gents{% endblock %}
 
 {% block content %}
 <div class="content-container">
     <div class="content-header">
-        <h2>Rocket League Rank Check</h2>
-    </div>
-
-    <!-- Debug: Show user and rank data status -->
-    <div class="alert alert-info mb-4">
-        <strong>Debug Info:</strong><br>
-        User logged in: {{ "Yes" if user else "No" }}<br>
-        {% if user %}
-        Username: {{ user.global_name or user.username }}<br>
-        User ID: {{ user.id }}<br>
-        {% endif %}
-        Rank data exists: {{ "Yes" if rank_data else "No" }}<br>
-        {% if rank_data %}
-        Current tier: {{ rank_data.tier }}<br>
-        Current MMR: {{ rank_data.mmr }}<br>
-        {% endif %}
+        <h2><i class="fas fa-shield-alt me-2"></i> Rank Verification</h2>
+        <p class="text-muted">Verify your Rocket League rank to get the appropriate Discord role and starting MMR</p>
     </div>
 
     {% if not user %}
-        <!-- Not logged in -->
-        <div class="alert alert-warning mb-4">
-            <i class="fas fa-sign-in-alt me-2"></i>
-            <strong>Login Required:</strong> You must be logged in with Discord to verify your rank.
-            <a href="{{ url_for('discord_login') }}" class="btn btn-primary btn-sm ms-3">
-                <i class="fab fa-discord me-1"></i> Login with Discord
-            </a>
+        <!-- Not logged in - Enhanced login prompt -->
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="card bg-dark-medium text-center">
+                    <div class="card-body py-5">
+                        <div class="mb-4">
+                            <i class="fab fa-discord fa-4x text-primary"></i>
+                        </div>
+                        <h3 class="mb-3">Discord Login Required</h3>
+                        <p class="text-muted mb-4 lead">
+                            You must be logged in with Discord to verify your rank and get your role assigned.
+                        </p>
+                        <a href="{{ url_for('discord_login') }}" class="btn btn-primary btn-lg">
+                            <i class="fab fa-discord me-2"></i> Login with Discord
+                        </a>
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                <i class="fas fa-info-circle me-1"></i>
+                                We only access your Discord username and ID for verification purposes
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     {% elif rank_data %}
-        <!-- Already Verified - Show Status Only -->
-        <div class="alert alert-success mb-4">
-            <i class="fas fa-check-circle me-2"></i>
-            <strong>Already Verified:</strong> You are verified as <strong>{{ rank_data.tier }}</strong>
-            with MMR <strong>{{ rank_data.mmr }}</strong>.
-        </div>
-
-        <div class="row">
-            <div class="col-lg-8 mx-auto">
-                <div class="card bg-dark-medium">
-                    <div class="card-header text-center">
-                        <h4 class="mb-0"><i class="fas fa-shield-alt me-2"></i>Rank Verification Complete</h4>
+        <!-- Already Verified - Enhanced status display -->
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="alert alert-success border-0 shadow-sm mb-4">
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-check-circle fa-2x me-3"></i>
+                        <div>
+                            <h5 class="mb-1">Rank Already Verified!</h5>
+                            <p class="mb-0">You are verified as <strong>{{ rank_data.tier }}</strong> with MMR <strong>{{ rank_data.mmr }}</strong></p>
+                        </div>
                     </div>
-                    <div class="card-body text-center">
-                        <div class="alert alert-info">
-                            <i class="fas fa-info-circle me-2"></i>
-                            <strong>Your rank has been verified!</strong><br>
-                            You can now participate in 6 Mans matches. Use the Discord bot commands to join the queue.
+                </div>
+
+                <div class="card bg-dark-medium shadow-lg">
+                    <div class="card-header text-center py-4">
+                        <h4 class="mb-2">
+                            <i class="fas fa-trophy me-2 text-warning"></i>
+                            Verification Complete
+                        </h4>
+                        <p class="text-muted mb-0">Your rank has been verified and your Discord role assigned</p>
+                    </div>
+                    <div class="card-body text-center py-5">
+                        <!-- Rank display card -->
+                        <div class="rank-display-card mb-4">
+                            {% if rank_data.tier == 'Rank A' %}
+                                <div class="rank-icon rank-a mb-3">
+                                    <i class="fas fa-trophy fa-3x"></i>
+                                </div>
+                                <h3 class="text-danger">{{ rank_data.tier }}</h3>
+                                <p class="text-muted">Grand Champion I & Above</p>
+                                <div class="rank-stats">
+                                    <span class="badge bg-danger fs-6 px-3 py-2">{{ rank_data.mmr }} MMR</span>
+                                </div>
+                            {% elif rank_data.tier == 'Rank B' %}
+                                <div class="rank-icon rank-b mb-3">
+                                    <i class="fas fa-award fa-3x"></i>
+                                </div>
+                                <h3 class="text-primary">{{ rank_data.tier }}</h3>
+                                <p class="text-muted">Champion I - Champion III</p>
+                                <div class="rank-stats">
+                                    <span class="badge bg-primary fs-6 px-3 py-2">{{ rank_data.mmr }} MMR</span>
+                                </div>
+                            {% else %}
+                                <div class="rank-icon rank-c mb-3">
+                                    <i class="fas fa-medal fa-3x"></i>
+                                </div>
+                                <h3 class="text-success">{{ rank_data.tier }}</h3>
+                                <p class="text-muted">Bronze I - Diamond III</p>
+                                <div class="rank-stats">
+                                    <span class="badge bg-success fs-6 px-3 py-2">{{ rank_data.mmr }} MMR</span>
+                                </div>
+                            {% endif %}
                         </div>
 
-                        <div class="d-grid gap-2 col-md-6 mx-auto">
-                            <a href="{{ url_for('profile_stats') }}" class="btn btn-primary">
+                        <div class="verification-info bg-dark p-4 rounded mb-4">
+                            <h6 class="text-primary mb-3">
+                                <i class="fas fa-info-circle me-2"></i>
+                                What's Next?
+                            </h6>
+                            <p class="mb-3">Your rank verification is complete! You can now:</p>
+                            <ul class="list-unstyled text-start">
+                                <li class="mb-2">
+                                    <i class="fas fa-gamepad text-primary me-2"></i>
+                                    Join the 6 Mans queue using Discord bot commands
+                                </li>
+                                <li class="mb-2">
+                                    <i class="fas fa-chart-line text-success me-2"></i>
+                                    Track your performance and climb the leaderboard
+                                </li>
+                                <li class="mb-2">
+                                    <i class="fas fa-users text-warning me-2"></i>
+                                    Play matches with players of similar skill level
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div class="d-grid gap-2 col-md-8 mx-auto">
+                            <a href="{{ url_for('profile_stats') }}" class="btn btn-primary btn-lg">
                                 <i class="fas fa-chart-line me-2"></i> View My Statistics
                             </a>
-                            <a href="{{ url_for('leaderboard') }}" class="btn btn-secondary">
+                            <a href="{{ url_for('leaderboard') }}" class="btn btn-outline-primary">
                                 <i class="fas fa-trophy me-2"></i> View Leaderboard
                             </a>
                         </div>
 
-                        <hr class="my-4">
-                        <small class="text-muted">
-                            <i class="fas fa-lock me-1"></i>
-                            Rank verification is complete and cannot be changed.
-                            Contact an administrator if you need assistance.
-                        </small>
+                        <div class="mt-4">
+                            <small class="text-muted">
+                                <i class="fas fa-lock me-1"></i>
+                                Rank verification is permanent. Contact an admin if you need changes.
+                            </small>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     {% else %}
-        <!-- Not Yet Verified - Show Rank Selection -->
-        <div class="row mb-4">
-            <div class="col-lg-6">
-                <div class="card bg-dark-medium">
+        <!-- Rank Selection Interface - Enhanced design -->
+        <div class="row">
+            <!-- Rank Selection Form -->
+            <div class="col-lg-7">
+                <div class="card bg-dark-medium shadow-lg">
                     <div class="card-header">
-                        <h4 class="mb-0">Select Your Rank</h4>
+                        <h4 class="mb-0">
+                            <i class="fas fa-user-check me-2"></i>
+                            Select Your Rank
+                        </h4>
+                        <p class="text-muted mb-0 mt-2">Choose your current Rocket League 3v3 competitive rank</p>
                     </div>
                     <div class="card-body">
-                        <div class="mb-3">
-                            <label for="rlRank" class="form-label">Your Rocket League 3v3 Rank</label>
-                            <select class="form-select" id="rlRank">
-                                <option value="" selected disabled>Select your 3v3 competitive rank</option>
-                                <option value="rank_c" data-mmr="600" data-tier="Rank C">Bronze I - Diamond III</option>
-                                <option value="rank_b" data-mmr="1350" data-tier="Rank B">Champion I - Champion III</option>
-                                <option value="rank_a" data-mmr="1850" data-tier="Rank A">Grand Champion I - Supersonic Legend</option>
-                            </select>
-                        </div>
+                        <form id="rankVerificationForm">
+                            <div class="mb-4">
+                                <label for="rlRank" class="form-label fw-bold">
+                                    <i class="fas fa-trophy me-2"></i>
+                                    Your Rocket League 3v3 Rank
+                                </label>
+                                <select class="form-select form-select-lg" id="rlRank">
+                                    <option value="" selected disabled>Select your 3v3 competitive rank...</option>
+                                    <option value="rank_c" data-mmr="600" data-tier="Rank C" data-color="success">
+                                        🥉 Rank C - Bronze I through Diamond III
+                                    </option>
+                                    <option value="rank_b" data-mmr="1350" data-tier="Rank B" data-color="primary">
+                                        🥈 Rank B - Champion I through Champion III
+                                    </option>
+                                    <option value="rank_a" data-mmr="1850" data-tier="Rank A" data-color="danger">
+                                        🥇 Rank A - Grand Champion I through Supersonic Legend
+                                    </option>
+                                </select>
+                                <div class="form-text">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Select the tier that matches your current or highest 3v3 competitive rank
+                                </div>
+                            </div>
 
-                        <div class="d-grid">
-                            <button type="button" id="verifyRankButton" class="btn btn-primary">
-                                <i class="fas fa-check-circle me-2"></i>
-                                Verify My Rank
-                            </button>
-                        </div>
+                            <!-- Rank Preview -->
+                            <div id="rankPreview" class="rank-preview-card d-none mb-4">
+                                <div class="card bg-dark border-primary">
+                                    <div class="card-body text-center">
+                                        <div id="previewIcon" class="mb-3">
+                                            <i class="fas fa-medal fa-2x"></i>
+                                        </div>
+                                        <h5 id="previewTier" class="mb-2">Rank C</h5>
+                                        <p id="previewDescription" class="text-muted mb-2">Bronze I - Diamond III</p>
+                                        <span id="previewMMR" class="badge bg-success">600 Starting MMR</span>
+                                    </div>
+                                </div>
+                            </div>
 
-                        <div class="mt-3">
-                            <div class="card bg-dark-medium">
+                            <div class="d-grid">
+                                <button type="button" id="verifyRankButton" class="btn btn-primary btn-lg" disabled>
+                                    <i class="fas fa-check-circle me-2"></i>
+                                    Verify My Rank
+                                </button>
+                            </div>
+                        </form>
+
+                        <!-- Verification Result -->
+                        <div class="mt-4">
+                            <div class="card bg-dark">
                                 <div class="card-header">
-                                    <h5 class="mb-0">Verification Result</h5>
+                                    <h6 class="mb-0">
+                                        <i class="fas fa-clipboard-check me-2"></i>
+                                        Verification Status
+                                    </h6>
                                 </div>
                                 <div class="card-body" id="verificationResult">
-                                    <p class="text-center text-muted">
-                                        Select your Rocket League rank and click "Verify My Rank" to see your results.
-                                    </p>
+                                    <div class="text-center text-muted py-3">
+                                        <i class="fas fa-hourglass-half fa-2x mb-3 opacity-50"></i>
+                                        <p class="mb-0">Select your rank and click "Verify My Rank" to begin verification</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -114,48 +212,111 @@
                 </div>
             </div>
 
-            <div class="col-lg-6">
-                <h4 class="mb-3">Rank Tiers</h4>
-                <div class="row">
-                    <div class="col-12 mb-3">
-                        <div class="rank-card">
-                            <div class="rank-header rank-a">
-                                <i class="fas fa-trophy fa-2x"></i>
+            <!-- Rank Information Sidebar -->
+            <div class="col-lg-5">
+                <div class="sticky-top" style="top: 2rem;">
+                    <h4 class="mb-4">
+                        <i class="fas fa-info-circle me-2"></i>
+                        Rank Tiers
+                    </h4>
+
+                    <!-- Rank A Card -->
+                    <div class="rank-info-card rank-a-card mb-3">
+                        <div class="card bg-dark-medium border-danger">
+                            <div class="card-header bg-danger bg-opacity-10 border-danger">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-trophy fa-2x text-danger me-3"></i>
+                                    <div>
+                                        <h5 class="mb-1 text-danger">Rank A</h5>
+                                        <small class="text-muted">Elite Tier</small>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="rank-body">
-                                <h5 class="rank-title">Rank A</h5>
-                                <p class="rank-description">Grand Champion I & Above</p>
-                                <p class="rank-mmr">Starting MMR: 1850</p>
-                                <span class="badge bg-danger">Rank A Role</span>
+                            <div class="card-body">
+                                <p class="mb-2"><strong>Ranks:</strong> Grand Champion I & Above</p>
+                                <p class="mb-2"><strong>Starting MMR:</strong> 1,850</p>
+                                <p class="mb-3"><strong>Discord Role:</strong> <span class="badge bg-danger">Rank A</span></p>
+                                <small class="text-muted">
+                                    <i class="fas fa-star me-1"></i>
+                                    For the most skilled players who have reached the highest ranks
+                                </small>
                             </div>
                         </div>
                     </div>
 
-                    <div class="col-12 mb-3">
-                        <div class="rank-card">
-                            <div class="rank-header rank-b">
-                                <i class="fas fa-award fa-2x"></i>
+                    <!-- Rank B Card -->
+                    <div class="rank-info-card rank-b-card mb-3">
+                        <div class="card bg-dark-medium border-primary">
+                            <div class="card-header bg-primary bg-opacity-10 border-primary">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-award fa-2x text-primary me-3"></i>
+                                    <div>
+                                        <h5 class="mb-1 text-primary">Rank B</h5>
+                                        <small class="text-muted">Advanced Tier</small>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="rank-body">
-                                <h5 class="rank-title">Rank B</h5>
-                                <p class="rank-description">Champion I - Champion III</p>
-                                <p class="rank-mmr">Starting MMR: 1350</p>
-                                <span class="badge bg-primary">Rank B Role</span>
+                            <div class="card-body">
+                                <p class="mb-2"><strong>Ranks:</strong> Champion I - Champion III</p>
+                                <p class="mb-2"><strong>Starting MMR:</strong> 1,350</p>
+                                <p class="mb-3"><strong>Discord Role:</strong> <span class="badge bg-primary">Rank B</span></p>
+                                <small class="text-muted">
+                                    <i class="fas fa-chart-line me-1"></i>
+                                    For experienced players who have mastered advanced mechanics
+                                </small>
                             </div>
                         </div>
                     </div>
 
-                    <div class="col-12 mb-3">
-                        <div class="rank-card">
-                            <div class="rank-header rank-c">
-                                <i class="fas fa-medal fa-2x"></i>
+                    <!-- Rank C Card -->
+                    <div class="rank-info-card rank-c-card mb-3">
+                        <div class="card bg-dark-medium border-success">
+                            <div class="card-header bg-success bg-opacity-10 border-success">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-medal fa-2x text-success me-3"></i>
+                                    <div>
+                                        <h5 class="mb-1 text-success">Rank C</h5>
+                                        <small class="text-muted">Standard Tier</small>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="rank-body">
-                                <h5 class="rank-title">Rank C</h5>
-                                <p class="rank-description">Bronze I - Diamond III</p>
-                                <p class="rank-mmr">Starting MMR: 600</p>
-                                <span class="badge bg-success">Rank C Role</span>
+                            <div class="card-body">
+                                <p class="mb-2"><strong>Ranks:</strong> Bronze I - Diamond III</p>
+                                <p class="mb-2"><strong>Starting MMR:</strong> 600</p>
+                                <p class="mb-3"><strong>Discord Role:</strong> <span class="badge bg-success">Rank C</span></p>
+                                <small class="text-muted">
+                                    <i class="fas fa-graduation-cap me-1"></i>
+                                    For players learning and improving their skills
+                                </small>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Info Box -->
+                    <div class="card bg-dark border-info">
+                        <div class="card-body">
+                            <h6 class="text-info mb-3">
+                                <i class="fas fa-lightbulb me-2"></i>
+                                How It Works
+                            </h6>
+                            <ul class="list-unstyled small">
+                                <li class="mb-2">
+                                    <i class="fas fa-check text-success me-2"></i>
+                                    Select your current 3v3 competitive rank
+                                </li>
+                                <li class="mb-2">
+                                    <i class="fas fa-check text-success me-2"></i>
+                                    Get assigned the appropriate Discord role
+                                </li>
+                                <li class="mb-2">
+                                    <i class="fas fa-check text-success me-2"></i>
+                                    Start with the correct MMR for your skill level
+                                </li>
+                                <li class="mb-0">
+                                    <i class="fas fa-check text-success me-2"></i>
+                                    Begin playing 6 Mans matches!
+                                </li>
+                            </ul>
                         </div>
                     </div>
                 </div>
@@ -164,18 +325,27 @@
     {% endif %}
 </div>
 
-<!-- Simplified Modal -->
+<!-- Enhanced Result Modal -->
 <div class="modal fade" id="resultModal" tabindex="-1" aria-labelledby="resultModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="resultModalLabel">Rank Verification Result</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark-medium">
+            <div class="modal-header border-bottom border-secondary">
+                <h5 class="modal-title" id="resultModalLabel">
+                    <i class="fas fa-shield-alt me-2"></i>
+                    Rank Verification Result
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="resultModalContent">
                 <!-- Results will be shown here -->
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p class="mt-3">Processing verification...</p>
+                </div>
             </div>
-            <div class="modal-footer">
+            <div class="modal-footer border-top border-secondary">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
@@ -183,12 +353,150 @@
 </div>
 {% endblock %}
 
+{% block extra_css %}
+<style>
+/* Custom rank verification styles */
+.rank-preview-card {
+    animation: slideInUp 0.3s ease-out;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.rank-info-card {
+    transition: all 0.3s ease;
+}
+
+.rank-info-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.rank-a-card:hover {
+    box-shadow: 0 8px 16px rgba(220, 53, 69, 0.3);
+}
+
+.rank-b-card:hover {
+    box-shadow: 0 8px 16px rgba(13, 110, 253, 0.3);
+}
+
+.rank-c-card:hover {
+    box-shadow: 0 8px 16px rgba(25, 135, 84, 0.3);
+}
+
+.rank-display-card {
+    padding: 2rem;
+    border-radius: 15px;
+    background: linear-gradient(135deg, var(--dark-medium) 0%, var(--dark) 100%);
+    border: 1px solid var(--border);
+}
+
+.rank-icon {
+    padding: 1rem;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.rank-icon.rank-a {
+    background: linear-gradient(135deg, rgba(220, 53, 69, 0.2) 0%, rgba(220, 53, 69, 0.1) 100%);
+    color: #dc3545;
+}
+
+.rank-icon.rank-b {
+    background: linear-gradient(135deg, rgba(13, 110, 253, 0.2) 0%, rgba(13, 110, 253, 0.1) 100%);
+    color: #0d6efd;
+}
+
+.rank-icon.rank-c {
+    background: linear-gradient(135deg, rgba(25, 135, 84, 0.2) 0%, rgba(25, 135, 84, 0.1) 100%);
+    color: #198754;
+}
+
+.verification-info {
+    border: 1px solid var(--border);
+    transition: all 0.3s ease;
+}
+
+.verification-info:hover {
+    border-color: var(--primary);
+    background-color: rgba(0, 168, 255, 0.05);
+}
+
+/* Form enhancements */
+.form-select-lg {
+    padding: 1rem 1.5rem;
+    font-size: 1.1rem;
+    border-radius: 10px;
+    transition: all 0.3s ease;
+}
+
+.form-select:focus {
+    box-shadow: 0 0 0 0.25rem rgba(0, 168, 255, 0.25);
+    border-color: var(--primary);
+}
+
+/* Button enhancements */
+.btn-lg {
+    padding: 1rem 2rem;
+    font-size: 1.1rem;
+    border-radius: 10px;
+    font-weight: 600;
+    transition: all 0.3s ease;
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(0, 168, 255, 0.3);
+}
+
+/* Success animation */
+.success-pulse {
+    animation: successPulse 0.6s ease-out;
+}
+
+@keyframes successPulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    .rank-display-card {
+        padding: 1.5rem;
+    }
+
+    .rank-icon {
+        padding: 0.75rem;
+    }
+
+    .rank-icon i {
+        font-size: 2rem !important;
+    }
+}
+</style>
+{% endblock %}
+
 {% block extra_js %}
 <script>
-console.log('Rank check page loaded');
+console.log('Enhanced rank check page loaded');
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM Content Loaded');
+    console.log('DOM Content Loaded - Enhanced version');
 
     // Check if user is logged in and already verified from template
     const isLoggedIn = {{ "true" if user else "false" }};
@@ -209,38 +517,71 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
     }
 
-    console.log('Initializing verification form...');
+    console.log('Initializing enhanced verification form...');
 
     // Initialize elements for verification
-    const checkRankButton = document.getElementById('verifyRankButton');
+    const verifyRankButton = document.getElementById('verifyRankButton');
     const rankSelect = document.getElementById('rlRank');
+    const rankPreview = document.getElementById('rankPreview');
+    const previewIcon = document.getElementById('previewIcon');
+    const previewTier = document.getElementById('previewTier');
+    const previewDescription = document.getElementById('previewDescription');
+    const previewMMR = document.getElementById('previewMMR');
 
-    if (!checkRankButton) {
-        console.error('Verify rank button not found!');
+    if (!verifyRankButton || !rankSelect) {
+        console.error('Required elements not found!');
         return;
     }
 
-    if (!rankSelect) {
-        console.error('Rank select not found!');
-        return;
-    }
+    console.log('Elements found, setting up enhanced event listeners...');
 
-    console.log('Elements found, setting up event listener...');
-
-    // Set up rank selector preview
+    // Enhanced rank selector with preview
     rankSelect.addEventListener('change', function() {
         const selectedOption = this.options[this.selectedIndex];
-        const text = selectedOption.text;
-        console.log('Rank selected:', text);
+
+        if (!selectedOption.value) {
+            rankPreview.classList.add('d-none');
+            verifyRankButton.disabled = true;
+            return;
+        }
+
+        const tier = selectedOption.getAttribute('data-tier');
+        const mmr = selectedOption.getAttribute('data-mmr');
+        const color = selectedOption.getAttribute('data-color');
+
+        console.log('Rank selected:', tier, mmr, color);
+
+        // Update preview
+        previewTier.textContent = tier;
+        previewMMR.textContent = `${mmr} Starting MMR`;
+
+        // Update icon and colors based on rank
+        previewIcon.className = 'mb-3';
+        previewMMR.className = `badge bg-${color}`;
+
+        if (tier === 'Rank A') {
+            previewIcon.innerHTML = '<i class="fas fa-trophy fa-2x text-danger"></i>';
+            previewDescription.textContent = 'Grand Champion I & Above';
+        } else if (tier === 'Rank B') {
+            previewIcon.innerHTML = '<i class="fas fa-award fa-2x text-primary"></i>';
+            previewDescription.textContent = 'Champion I - Champion III';
+        } else {
+            previewIcon.innerHTML = '<i class="fas fa-medal fa-2x text-success"></i>';
+            previewDescription.textContent = 'Bronze I - Diamond III';
+        }
+
+        // Show preview and enable button
+        rankPreview.classList.remove('d-none');
+        verifyRankButton.disabled = false;
     });
 
-    // Main verification button click handler
-    checkRankButton.addEventListener('click', function() {
-        console.log('Verify button clicked');
+    // Enhanced verification button click handler
+    verifyRankButton.addEventListener('click', function() {
+        console.log('Enhanced verify button clicked');
 
-        // Basic validation
+        // Validation
         if (!rankSelect.value) {
-            alert('Please select your Rocket League rank tier first');
+            showAlert('Please select your Rocket League rank tier first', 'warning');
             return;
         }
 
@@ -249,25 +590,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const rankTier = selectedOption.getAttribute('data-tier');
         const rankMMR = selectedOption.getAttribute('data-mmr');
 
-        console.log('Selected tier:', rankTier);
-        console.log('Selected MMR:', rankMMR);
+        console.log('Selected tier:', rankTier, 'MMR:', rankMMR);
 
-        // Show loading state
-        checkRankButton.disabled = true;
-        checkRankButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
-
-        // Show loading state in result div
-        const resultDiv = document.getElementById('verificationResult');
-        if (resultDiv) {
-            resultDiv.innerHTML = `
-                <div class="text-center py-3">
-                    <div class="spinner-border text-primary" role="status">
-                        <span class="visually-hidden">Loading...</span>
-                    </div>
-                    <p class="mt-2">Verifying your rank...</p>
-                </div>
-            `;
-        }
+        // Enhanced loading state
+        setButtonLoading(true);
+        showLoadingInResult();
 
         // Prepare request data
         const requestData = {
@@ -275,9 +602,9 @@ document.addEventListener('DOMContentLoaded', function() {
             manual_mmr: rankMMR
         };
 
-        console.log('Sending request data:', requestData);
+        console.log('Sending enhanced request:', requestData);
 
-        // Make the API call
+        // Make the API call with enhanced error handling
         fetch('/api/profile/rank-check', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -285,128 +612,254 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(response => {
             console.log('Response status:', response.status);
-            console.log('Response headers:', response.headers);
 
-            // Get response text first for debugging
             return response.text().then(text => {
                 console.log('Response text:', text);
 
                 if (!response.ok) {
-                    throw new Error(`Server responded with status: ${response.status}. Response: ${text}`);
+                    throw new Error(`Server error ${response.status}: ${text}`);
                 }
 
-                // Try to parse as JSON
                 try {
                     return JSON.parse(text);
                 } catch (parseError) {
                     console.error('JSON parse error:', parseError);
-                    throw new Error(`Invalid JSON response: ${text}`);
+                    throw new Error(`Invalid response format: ${text}`);
                 }
             });
         })
         .then(data => {
-            console.log("Server response:", data);
+            console.log("Enhanced server response:", data);
 
             if (data.success) {
-                // Update button state
-                checkRankButton.classList.remove('btn-primary');
-                checkRankButton.classList.add('btn-success');
-                checkRankButton.innerHTML = '<i class="fas fa-check me-2"></i>Rank Verified!';
+                setButtonSuccess();
+                displayEnhancedSuccess(data);
 
-                // Display success message
-                displayVerificationSuccess(data, resultDiv);
+                // Show success modal
+                showSuccessModal(data);
 
-                // Offer page reload to see updated status
+                // Auto-reload after delay
                 setTimeout(() => {
-                    if (confirm('Verification successful! The page will reload to show your verified status.')) {
+                    if (confirm('Verification successful! Reload the page to see your verified status?')) {
                         window.location.reload();
                     }
-                }, 2000);
+                }, 3000);
             } else {
-                handleVerificationError(data.message || "Verification failed", checkRankButton, resultDiv);
+                handleEnhancedError(data.message || "Verification failed");
             }
         })
         .catch(error => {
-            console.error('Error:', error);
-            handleVerificationError("Server error: " + error.message, checkRankButton, resultDiv);
+            console.error('Enhanced error:', error);
+            handleEnhancedError("Connection error: " + error.message);
         });
     });
 
-    console.log('Event listener attached successfully');
-});
-
-function displayVerificationSuccess(data, resultDiv) {
-    console.log('Displaying verification success:', data);
-
-    if (!resultDiv) {
-        console.error('Result div not found');
-        return;
+    // Enhanced helper functions
+    function setButtonLoading(loading) {
+        if (loading) {
+            verifyRankButton.disabled = true;
+            verifyRankButton.innerHTML = `
+                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                Verifying...
+            `;
+        } else {
+            verifyRankButton.disabled = false;
+            verifyRankButton.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+        }
     }
 
-    const rankTier = data.rank || data.tier;
-    let roleStatus = 'Unknown';
-
-    if (data.role_assignment) {
-        roleStatus = data.role_assignment.success ? 'Successfully assigned' : 'Manual assignment needed';
+    function setButtonSuccess() {
+        verifyRankButton.classList.remove('btn-primary');
+        verifyRankButton.classList.add('btn-success', 'success-pulse');
+        verifyRankButton.innerHTML = '<i class="fas fa-check me-2"></i> Rank Verified!';
     }
 
-    const successHtml = `
-        <div class="alert alert-success mb-3">
-            <i class="fas fa-check-circle me-2"></i> Rank verification successful!
-        </div>
-        <div class="card bg-dark">
-            <div class="card-body">
-                <h6>Verification Details:</h6>
-                <p><strong>Tier:</strong> ${rankTier}</p>
-                <p><strong>MMR:</strong> ${data.mmr}</p>
-                <p><strong>Discord Role:</strong> ${roleStatus}</p>
-                ${data.role_assignment && data.role_assignment.message ?
-                    `<p><small class="text-muted">Role Details: ${data.role_assignment.message}</small></p>` : ''}
-            </div>
-        </div>
-    `;
-
-    resultDiv.innerHTML = successHtml;
-}
-
-function handleVerificationError(message, button, resultDiv) {
-    console.error('Verification error:', message);
-
-    // Reset button
-    if (button) {
-        button.disabled = false;
-        button.classList.remove('btn-success');
-        button.classList.add('btn-primary');
-        button.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+    function showLoadingInResult() {
+        const resultDiv = document.getElementById('verificationResult');
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary mb-3" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h6 class="mb-2">Verifying Your Rank</h6>
+                    <p class="text-muted mb-0">Please wait while we process your verification...</p>
+                </div>
+            `;
+        }
     }
 
-    // Show error message
-    if (resultDiv) {
+    function displayEnhancedSuccess(data) {
+        const resultDiv = document.getElementById('verificationResult');
+        if (!resultDiv) return;
+
+        const rankTier = data.rank || data.tier;
+        let colorClass = 'success';
+        let iconClass = 'fas fa-medal';
+
+        if (rankTier === 'Rank A') {
+            colorClass = 'danger';
+            iconClass = 'fas fa-trophy';
+        } else if (rankTier === 'Rank B') {
+            colorClass = 'primary';
+            iconClass = 'fas fa-award';
+        }
+
+        const roleStatus = data.role_assignment && data.role_assignment.success ?
+            '<span class="badge bg-success"><i class="fas fa-check me-1"></i> Role Assigned</span>' :
+            '<span class="badge bg-warning"><i class="fas fa-exclamation-triangle me-1"></i> Manual Assignment Needed</span>';
+
         resultDiv.innerHTML = `
-            <div class="alert alert-danger">
-                <i class="fas fa-exclamation-circle me-2"></i>
-                <strong>Error:</strong> ${message}
+            <div class="text-center py-4">
+                <div class="mb-4">
+                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                    <h5 class="text-success mb-0">Verification Successful!</h5>
+                </div>
+
+                <div class="card bg-dark border-${colorClass} mb-3">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center justify-content-center mb-3">
+                            <i class="${iconClass} fa-2x text-${colorClass} me-3"></i>
+                            <div class="text-start">
+                                <h6 class="mb-1 text-${colorClass}">${rankTier}</h6>
+                                <small class="text-muted">Starting MMR: ${data.mmr}</small>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="text-muted">Discord Role:</span>
+                            ${roleStatus}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="alert alert-info border-0">
+                    <i class="fas fa-rocket me-2"></i>
+                    You can now join the 6 Mans queue and start playing!
+                </div>
             </div>
-            <p class="mt-3 text-muted">Please try again or contact an admin if the issue persists.</p>
         `;
     }
-}
+
+    function handleEnhancedError(message) {
+        console.error('Enhanced verification error:', message);
+
+        // Reset button
+        setButtonLoading(false);
+
+        // Show error in result div
+        const resultDiv = document.getElementById('verificationResult');
+        if (resultDiv) {
+            resultDiv.innerHTML = `
+                <div class="text-center py-4">
+                    <div class="mb-4">
+                        <i class="fas fa-exclamation-circle fa-3x text-danger mb-3"></i>
+                        <h6 class="text-danger mb-0">Verification Failed</h6>
+                    </div>
+
+                    <div class="alert alert-danger border-0 mb-3">
+                        <strong>Error:</strong> ${message}
+                    </div>
+
+                    <p class="text-muted mb-0">
+                        Please try again or contact an admin if the issue persists.
+                    </p>
+                </div>
+            `;
+        }
+
+        // Show error alert
+        showAlert(message, 'danger');
+    }
+
+    function showSuccessModal(data) {
+        const modal = document.getElementById('resultModal');
+        const modalContent = document.getElementById('resultModalContent');
+
+        if (!modal || !modalContent) return;
+
+        const rankTier = data.rank || data.tier;
+        let colorClass = 'success';
+        let iconClass = 'fas fa-medal';
+
+        if (rankTier === 'Rank A') {
+            colorClass = 'danger';
+            iconClass = 'fas fa-trophy';
+        } else if (rankTier === 'Rank B') {
+            colorClass = 'primary';
+            iconClass = 'fas fa-award';
+        }
+
+        modalContent.innerHTML = `
+            <div class="text-center">
+                <div class="mb-4">
+                    <i class="fas fa-check-circle fa-4x text-success"></i>
+                </div>
+                <h4 class="mb-3">Rank Verification Complete!</h4>
+
+                <div class="rank-display-card mb-4">
+                    <div class="rank-icon rank-${rankTier.toLowerCase().replace(' ', '-')} mb-3">
+                        <i class="${iconClass} fa-3x"></i>
+                    </div>
+                    <h3 class="text-${colorClass} mb-2">${rankTier}</h3>
+                    <p class="text-muted mb-3">Starting MMR: ${data.mmr}</p>
+                    <span class="badge bg-${colorClass} fs-6 px-3 py-2">${rankTier} Role</span>
+                </div>
+
+                ${data.role_assignment && data.role_assignment.success ?
+                    '<div class="alert alert-success border-0"><i class="fab fa-discord me-2"></i> Discord role assigned successfully!</div>' :
+                    '<div class="alert alert-warning border-0"><i class="fas fa-exclamation-triangle me-2"></i> Discord role assignment needs manual review.</div>'
+                }
+
+                <p class="mb-4">You can now join the 6 Mans queue and start playing competitive matches!</p>
+
+                <div class="d-grid gap-2">
+                    <a href="/profile/stats" class="btn btn-primary">
+                        <i class="fas fa-chart-line me-2"></i> View My Stats
+                    </a>
+                    <a href="/leaderboard" class="btn btn-outline-primary">
+                        <i class="fas fa-trophy me-2"></i> View Leaderboard
+                    </a>
+                </div>
+            </div>
+        `;
+
+        // Show modal
+        const bootstrapModal = new bootstrap.Modal(modal);
+        bootstrapModal.show();
+    }
+
+    function showAlert(message, type = 'info') {
+        // Create and show a temporary alert
+        const alert = document.createElement('div');
+        alert.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px;';
+        alert.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+
+        document.body.appendChild(alert);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            if (alert.parentNode) {
+                alert.remove();
+            }
+        }, 5000);
+    }
+
+    console.log('Enhanced event listeners attached successfully');
+});
 
 // Global error handlers for debugging
 window.addEventListener('error', function(event) {
     console.error('Global JavaScript error:', event.error);
-    console.error('Error details:', {
-        message: event.message,
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno
-    });
 });
 
 window.addEventListener('unhandledrejection', function(event) {
     console.error('Unhandled promise rejection:', event.reason);
 });
 
-console.log('All JavaScript loaded successfully');
+console.log('Enhanced rank check JavaScript loaded successfully');
 </script>
 {% endblock %}
