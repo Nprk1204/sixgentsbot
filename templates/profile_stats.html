@@ -1,0 +1,452 @@
+{% extends "base.html" %}
+
+{% block title %}My Stats - Rocket League 6 Gents{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <div class="content-header">
+        <h2><i class="fas fa-chart-line me-2"></i> Detailed Statistics</h2>
+        <div class="user-indicator">
+            <i class="fas fa-user me-1"></i> {{ user.global_name or user.username }}
+        </div>
+    </div>
+
+    {% if not player_data or (player_data.matches == 0 and player_data.global_matches == 0) %}
+        <!-- No Stats Available -->
+        <div class="card bg-dark-medium">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-chart-line fa-4x text-muted mb-4"></i>
+                <h4>No Statistics Available</h4>
+                <p class="text-muted mb-4">
+                    You haven't played any matches yet! Join the queue in Discord to start building your stats.
+                </p>
+                <div class="row justify-content-center">
+                    <div class="col-md-6">
+                        <div class="getting-started-card p-4 rounded" style="background: rgba(0, 168, 255, 0.1); border: 1px solid var(--border);">
+                            <h6 class="text-primary mb-3">Getting Started</h6>
+                            <ol class="text-start">
+                                <li class="mb-2">Join our Discord server</li>
+                                <li class="mb-2">Use <code>/join</code> to join the queue</li>
+                                <li class="mb-2">Play matches and report results</li>
+                                <li>Watch your stats grow here!</li>
+                            </ol>
+                            <a href="{{ url_for('profile_rank_check') }}" class="btn btn-primary btn-sm mt-2">
+                                <i class="fas fa-check-circle me-1"></i> Verify Your Rank First
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <!-- Stats Available -->
+        <ul class="nav nav-tabs mb-4" id="statsTabsNav" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="overview-tab" data-bs-toggle="tab"
+                        data-bs-target="#overview" type="button" role="tab">
+                    <i class="fas fa-tachometer-alt me-1"></i> Overview
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="ranked-stats-tab" data-bs-toggle="tab"
+                        data-bs-target="#ranked-stats" type="button" role="tab">
+                    <i class="fas fa-trophy me-1"></i> Ranked Stats
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="global-stats-tab" data-bs-toggle="tab"
+                        data-bs-target="#global-stats" type="button" role="tab">
+                    <i class="fas fa-globe me-1"></i> Global Stats
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="statsTabsContent">
+            <!-- Overview Tab -->
+            <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">Ranked Performance</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-primary">{{ player_data.mmr or 0 }}</h3>
+                                            <small class="text-muted">Current MMR</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-success">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</h3>
+                                            <small class="text-muted">Win Rate</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <div class="text-center">
+                                    <span class="badge bg-info me-2">{{ player_data.matches or 0 }} Matches</span>
+                                    <span class="badge bg-success me-2">{{ player_data.wins or 0 }} Wins</span>
+                                    <span class="badge bg-danger">{{ player_data.losses or 0 }} Losses</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">Global Performance</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-primary">{{ player_data.global_mmr or 300 }}</h3>
+                                            <small class="text-muted">Global MMR</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-success">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</h3>
+                                            <small class="text-muted">Win Rate</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <div class="text-center">
+                                    <span class="badge bg-info me-2">{{ player_data.global_matches or 0 }} Matches</span>
+                                    <span class="badge bg-success me-2">{{ player_data.global_wins or 0 }} Wins</span>
+                                    <span class="badge bg-danger">{{ player_data.global_losses or 0 }} Losses</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Charts -->
+                {% if ranked_matches or global_matches %}
+                <div class="card bg-dark-medium">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i> MMR Progress</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="mmrChart" height="100"></canvas>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Ranked Stats Tab -->
+            <div class="tab-pane fade" id="ranked-stats" role="tabpanel">
+                {% if player_data.matches > 0 %}
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="stat-card primary">
+                                <div class="stat-card-value">{{ player_data.mmr or 0 }}</div>
+                                <div class="stat-card-title">Current MMR</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card secondary">
+                                <div class="stat-card-value">{{ player_data.matches or 0 }}</div>
+                                <div class="stat-card-title">Total Matches</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card accent">
+                                <div class="stat-card-value">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</div>
+                                <div class="stat-card-title">Win Rate</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-card-value">{{ player_data.current_streak or 0 }}</div>
+                                <div class="stat-card-title">Current Streak</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Ranked chart would go here -->
+                    {% if ranked_matches %}
+                    <div class="card bg-dark-medium mt-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">Ranked MMR History</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="rankedChart" height="100"></canvas>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-trophy fa-3x text-muted mb-3"></i>
+                        <h5>No Ranked Matches</h5>
+                        <p class="text-muted">You haven't played any ranked matches yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Global Stats Tab -->
+            <div class="tab-pane fade" id="global-stats" role="tabpanel">
+                {% if player_data.global_matches > 0 %}
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="stat-card primary">
+                                <div class="stat-card-value">{{ player_data.global_mmr or 300 }}</div>
+                                <div class="stat-card-title">Global MMR</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card secondary">
+                                <div class="stat-card-value">{{ player_data.global_matches or 0 }}</div>
+                                <div class="stat-card-title">Global Matches</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card accent">
+                                <div class="stat-card-value">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</div>
+                                <div class="stat-card-title">Win Rate</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-card-value">{{ player_data.global_current_streak or 0 }}</div>
+                                <div class="stat-card-title">Current Streak</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Global chart would go here -->
+                    {% if global_matches %}
+                    <div class="card bg-dark-medium mt-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">Global MMR History</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="globalChart" height="100"></canvas>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-globe fa-3x text-muted mb-3"></i>
+                        <h5>No Global Matches</h5>
+                        <p class="text-muted">You haven't played any global matches yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Chart configuration and data
+const chartData = {
+    ranked: {{ ranked_matches | tojsonfilter | safe }},
+    global: {{ global_matches | tojsonfilter | safe }}
+};
+
+// Chart.js default configuration
+Chart.defaults.color = '#f1f1f1';
+Chart.defaults.borderColor = '#2a303c';
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Combined MMR chart
+    const mmrCtx = document.getElementById('mmrChart');
+    if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {
+        const datasets = [];
+
+        if (chartData.ranked.length > 0) {
+            datasets.push({
+                label: 'Ranked MMR',
+                data: chartData.ranked.map(match => ({
+                    x: match.date,
+                    y: match.new_mmr
+                })),
+                borderColor: '#00a8ff',
+                backgroundColor: 'rgba(0, 168, 255, 0.1)',
+                tension: 0.3
+            });
+        }
+
+        if (chartData.global.length > 0) {
+            datasets.push({
+                label: 'Global MMR',
+                data: chartData.global.map(match => ({
+                    x: match.date,
+                    y: match.new_mmr
+                })),
+                borderColor: '#ff7e31',
+                backgroundColor: 'rgba(255, 126, 49, 0.1)',
+                tension: 0.3
+            });
+        }
+
+        new Chart(mmrCtx, {
+            type: 'line',
+            data: { datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
+                            displayFormats: {
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'MMR'
+                        },
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                return new Date(tooltipItems[0].parsed.x).toLocaleDateString();
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+    }
+
+    // Individual ranked chart
+    const rankedCtx = document.getElementById('rankedChart');
+    if (rankedCtx && chartData.ranked.length > 0) {
+        new Chart(rankedCtx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Ranked MMR',
+                    data: chartData.ranked.map(match => ({
+                        x: match.date,
+                        y: match.new_mmr
+                    })),
+                    borderColor: '#00a8ff',
+                    backgroundColor: 'rgba(0, 168, 255, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
+                            displayFormats: {
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'MMR'
+                        },
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+
+    // Individual global chart
+    const globalCtx = document.getElementById('globalChart');
+    if (globalCtx && chartData.global.length > 0) {
+        new Chart(globalCtx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Global MMR',
+                    data: chartData.global.map(match => ({
+                        x: match.date,
+                        y: match.new_mmr
+                    })),
+                    borderColor: '#ff7e31',
+                    backgroundColor: 'rgba(255, 126, 49, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
+                            displayFormats: {
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'MMR'
+                        },
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

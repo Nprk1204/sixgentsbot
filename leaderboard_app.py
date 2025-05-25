@@ -348,6 +348,7 @@ def profile():
             return redirect(url_for('discord_login'))
 
         return render_template('profile.html', user=user)
+
     except Exception as e:
         print(f"Error in profile route: {e}")
         flash('An error occurred loading your profile.', 'error')
@@ -365,7 +366,11 @@ def profile_stats():
             return redirect(url_for('discord_login'))
 
         # Get player data from database
-        player_data = players_collection.find_one({"id": user['id']})
+        player_data = None
+        try:
+            player_data = players_collection.find_one({"id": user['id']})
+        except Exception as db_error:
+            print(f"Database error fetching player: {db_error}")
 
         if not player_data:
             # No stats available - create empty data structure
@@ -383,6 +388,7 @@ def profile_stats():
             }
 
         # Get match history for performance graphs
+        match_history = []
         try:
             match_history = list(matches_collection.find({
                 "$or": [
@@ -390,10 +396,9 @@ def profile_stats():
                     {"team2.id": user['id']}
                 ],
                 "status": "completed"
-            }).sort("completed_at", 1).limit(50))  # Limit for performance
-        except Exception as e:
-            print(f"Error fetching match history: {e}")
-            match_history = []
+            }).sort("completed_at", 1).limit(50))
+        except Exception as match_error:
+            print(f"Error fetching match history: {match_error}")
 
         # Process match history for graphs
         ranked_matches = []
@@ -426,8 +431,8 @@ def profile_stats():
                                 match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
                                 ranked_matches.append(match_data)
                         break
-            except Exception as e:
-                print(f"Error processing match {match.get('match_id', 'unknown')}: {e}")
+            except Exception as process_error:
+                print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
                 continue
 
         return render_template('profile_stats.html',
@@ -435,6 +440,7 @@ def profile_stats():
                                player_data=player_data,
                                ranked_matches=ranked_matches,
                                global_matches=global_matches)
+
     except Exception as e:
         print(f"Error in profile_stats route: {e}")
         flash('An error occurred loading your statistics.', 'error')
@@ -444,7 +450,7 @@ def profile_stats():
 @app.route('/profile/rank-check')
 @login_required
 def profile_rank_check():
-    """Display rank check page for authenticated user"""
+    """Display rank check page for authenticated user - using existing rank_check.html"""
     try:
         user = get_current_user()
         if not user:
@@ -455,10 +461,16 @@ def profile_rank_check():
         rank_data = None
         try:
             rank_data = ranks_collection.find_one({"discord_id": user['id']})
-        except Exception as e:
-            print(f"Error fetching rank data: {e}")
+        except Exception as rank_error:
+            print(f"Error fetching rank data: {rank_error}")
 
-        return render_template('profile_rank_check.html', user=user, rank_data=rank_data)
+        # Use the existing rank_check.html template
+        # We'll pass the user data and any existing rank data
+        return render_template('rank_check.html',
+                               user=user,
+                               rank_data=rank_data,
+                               current_user=user)  # Make sure current_user is available
+
     except Exception as e:
         print(f"Error in profile_rank_check route: {e}")
         flash('An error occurred loading the rank verification page.', 'error')
@@ -881,65 +893,75 @@ def search_players():
 @login_required
 def profile_rank_check_api():
     """Handle rank check for authenticated user"""
-    user = get_current_user()
-    data = request.json
-
-    if not data:
-        return jsonify({"success": False, "message": "No data provided"}), 400
-
-    manual_tier = data.get('manual_tier')
-    manual_mmr = data.get('manual_mmr')
-
-    if not manual_tier or not manual_mmr:
-        return jsonify({"success": False, "message": "Missing tier or MMR data"}), 400
-
     try:
-        # Store rank data
-        rank_document = {
-            "discord_username": user.get('global_name') or user.get('username'),
-            "discord_id": user['id'],
-            "rank": manual_tier,
-            "tier": manual_tier,
-            "mmr": int(manual_mmr),
-            "global_mmr": 300,
-            "timestamp": datetime.datetime.utcnow()
-        }
+        user = get_current_user()
+        if not user:
+            return jsonify({"success": False, "message": "Not authenticated"}), 401
 
-        # Update or insert rank record
-        existing_rank = ranks_collection.find_one({"discord_id": user['id']})
+        data = request.json
+        if not data:
+            return jsonify({"success": False, "message": "No data provided"}), 400
 
-        if existing_rank:
-            update_data = rank_document.copy()
-            if "global_mmr" in existing_rank:
-                del update_data["global_mmr"]
+        manual_tier = data.get('manual_tier')
+        manual_mmr = data.get('manual_mmr')
 
-            ranks_collection.update_one(
-                {"discord_id": user['id']},
-                {"$set": update_data}
+        if not manual_tier or not manual_mmr:
+            return jsonify({"success": False, "message": "Missing tier or MMR data"}), 400
+
+        try:
+            # Store rank data
+            rank_document = {
+                "discord_username": user.get('global_name') or user.get('username'),
+                "discord_id": user['id'],
+                "rank": manual_tier,
+                "tier": manual_tier,
+                "mmr": int(manual_mmr),
+                "global_mmr": 300,
+                "timestamp": datetime.datetime.utcnow()
+            }
+
+            # Update or insert rank record
+            existing_rank = ranks_collection.find_one({"discord_id": user['id']})
+
+            if existing_rank:
+                update_data = rank_document.copy()
+                if "global_mmr" in existing_rank:
+                    del update_data["global_mmr"]
+
+                ranks_collection.update_one(
+                    {"discord_id": user['id']},
+                    {"$set": update_data}
+                )
+            else:
+                ranks_collection.insert_one(rank_document)
+
+            # Try to assign Discord role
+            role_result = assign_discord_role(
+                username=user.get('global_name') or user.get('username'),
+                role_name=manual_tier,
+                discord_id=user['id']
             )
-        else:
-            ranks_collection.insert_one(rank_document)
 
-        # Try to assign Discord role
-        role_result = assign_discord_role(
-            username=user.get('global_name') or user.get('username'),
-            role_name=manual_tier,
-            discord_id=user['id']
-        )
+            return jsonify({
+                "success": True,
+                "message": "Rank verified successfully",
+                "rank": manual_tier,
+                "mmr": int(manual_mmr),
+                "role_assignment": role_result
+            })
 
-        return jsonify({
-            "success": True,
-            "message": "Rank verified successfully",
-            "rank": manual_tier,
-            "mmr": int(manual_mmr),
-            "role_assignment": role_result
-        })
+        except Exception as process_error:
+            print(f"Error processing rank verification: {process_error}")
+            return jsonify({
+                "success": False,
+                "message": f"Processing error: {str(process_error)}"
+            }), 500
 
     except Exception as e:
-        print(f"Error in profile rank check: {str(e)}")
+        print(f"Error in profile rank check API: {e}")
         return jsonify({
             "success": False,
-            "message": f"Error: {str(e)}"
+            "message": f"Server error: {str(e)}"
         }), 500
 
 
