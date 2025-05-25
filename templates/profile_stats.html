@@ -11,7 +11,11 @@
         </div>
     </div>
 
-    {% if not player_data or (player_data.matches == 0 and player_data.global_matches == 0) %}
+    {% set has_ranked_stats = player_data and player_data.matches and player_data.matches > 0 %}
+    {% set has_global_stats = player_data and player_data.global_matches and player_data.global_matches > 0 %}
+    {% set has_any_stats = has_ranked_stats or has_global_stats %}
+
+    {% if not has_any_stats %}
         <!-- No Stats Available -->
         <div class="card bg-dark-medium">
             <div class="card-body text-center py-5">
@@ -47,24 +51,29 @@
                     <i class="fas fa-tachometer-alt me-1"></i> Overview
                 </button>
             </li>
+            {% if has_ranked_stats %}
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="ranked-stats-tab" data-bs-toggle="tab"
                         data-bs-target="#ranked-stats" type="button" role="tab">
                     <i class="fas fa-trophy me-1"></i> Ranked Stats
                 </button>
             </li>
+            {% endif %}
+            {% if has_global_stats %}
             <li class="nav-item" role="presentation">
                 <button class="nav-link" id="global-stats-tab" data-bs-toggle="tab"
                         data-bs-target="#global-stats" type="button" role="tab">
                     <i class="fas fa-globe me-1"></i> Global Stats
                 </button>
             </li>
+            {% endif %}
         </ul>
 
         <div class="tab-content" id="statsTabsContent">
             <!-- Overview Tab -->
             <div class="tab-pane fade show active" id="overview" role="tabpanel">
                 <div class="row">
+                    {% if has_ranked_stats %}
                     <div class="col-lg-6">
                         <div class="card bg-dark-medium mb-4">
                             <div class="card-header">
@@ -94,6 +103,9 @@
                             </div>
                         </div>
                     </div>
+                    {% endif %}
+
+                    {% if has_global_stats %}
                     <div class="col-lg-6">
                         <div class="card bg-dark-medium mb-4">
                             <div class="card-header">
@@ -123,120 +135,127 @@
                             </div>
                         </div>
                     </div>
+                    {% endif %}
+
+                    {% if not has_ranked_stats and not has_global_stats %}
+                    <div class="col-12">
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-body text-center py-4">
+                                <i class="fas fa-info-circle fa-2x text-muted mb-3"></i>
+                                <h5>No Match Data</h5>
+                                <p class="text-muted">Start playing matches to see your performance statistics here!</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
 
                 <!-- Performance Charts -->
-                {% if ranked_matches or global_matches %}
+                {% if (ranked_matches and ranked_matches|length > 0) or (global_matches and global_matches|length > 0) %}
                 <div class="card bg-dark-medium">
                     <div class="card-header">
                         <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i> MMR Progress</h5>
                     </div>
                     <div class="card-body">
-                        <canvas id="mmrChart" height="100"></canvas>
+                        <div class="chart-container">
+                            <canvas id="mmrChart" height="100"></canvas>
+                        </div>
                     </div>
                 </div>
                 {% endif %}
             </div>
 
             <!-- Ranked Stats Tab -->
+            {% if has_ranked_stats %}
             <div class="tab-pane fade" id="ranked-stats" role="tabpanel">
-                {% if player_data.matches > 0 %}
-                    <div class="row">
-                        <div class="col-md-3">
-                            <div class="stat-card primary">
-                                <div class="stat-card-value">{{ player_data.mmr or 0 }}</div>
-                                <div class="stat-card-title">Current MMR</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card secondary">
-                                <div class="stat-card-value">{{ player_data.matches or 0 }}</div>
-                                <div class="stat-card-title">Total Matches</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card accent">
-                                <div class="stat-card-value">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</div>
-                                <div class="stat-card-title">Win Rate</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card">
-                                <div class="stat-card-value">{{ player_data.current_streak or 0 }}</div>
-                                <div class="stat-card-title">Current Streak</div>
-                            </div>
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="stat-card primary">
+                            <div class="stat-card-value">{{ player_data.mmr or 0 }}</div>
+                            <div class="stat-card-title">Current MMR</div>
                         </div>
                     </div>
-
-                    <!-- Ranked chart would go here -->
-                    {% if ranked_matches %}
-                    <div class="card bg-dark-medium mt-4">
-                        <div class="card-header">
-                            <h5 class="mb-0">Ranked MMR History</h5>
+                    <div class="col-md-3">
+                        <div class="stat-card secondary">
+                            <div class="stat-card-value">{{ player_data.matches or 0 }}</div>
+                            <div class="stat-card-title">Total Matches</div>
                         </div>
-                        <div class="card-body">
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card accent">
+                            <div class="stat-card-value">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</div>
+                            <div class="stat-card-title">Win Rate</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-card-value">{{ player_data.current_streak or 0 }}</div>
+                            <div class="stat-card-title">Current Streak</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ranked chart -->
+                {% if ranked_matches and ranked_matches|length > 0 %}
+                <div class="card bg-dark-medium mt-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Ranked MMR History</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
                             <canvas id="rankedChart" height="100"></canvas>
                         </div>
                     </div>
-                    {% endif %}
-                {% else %}
-                    <div class="text-center py-5">
-                        <i class="fas fa-trophy fa-3x text-muted mb-3"></i>
-                        <h5>No Ranked Matches</h5>
-                        <p class="text-muted">You haven't played any ranked matches yet.</p>
-                    </div>
+                </div>
                 {% endif %}
             </div>
+            {% endif %}
 
             <!-- Global Stats Tab -->
+            {% if has_global_stats %}
             <div class="tab-pane fade" id="global-stats" role="tabpanel">
-                {% if player_data.global_matches > 0 %}
-                    <div class="row">
-                        <div class="col-md-3">
-                            <div class="stat-card primary">
-                                <div class="stat-card-value">{{ player_data.global_mmr or 300 }}</div>
-                                <div class="stat-card-title">Global MMR</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card secondary">
-                                <div class="stat-card-value">{{ player_data.global_matches or 0 }}</div>
-                                <div class="stat-card-title">Global Matches</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card accent">
-                                <div class="stat-card-value">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</div>
-                                <div class="stat-card-title">Win Rate</div>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="stat-card">
-                                <div class="stat-card-value">{{ player_data.global_current_streak or 0 }}</div>
-                                <div class="stat-card-title">Current Streak</div>
-                            </div>
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="stat-card primary">
+                            <div class="stat-card-value">{{ player_data.global_mmr or 300 }}</div>
+                            <div class="stat-card-title">Global MMR</div>
                         </div>
                     </div>
-
-                    <!-- Global chart would go here -->
-                    {% if global_matches %}
-                    <div class="card bg-dark-medium mt-4">
-                        <div class="card-header">
-                            <h5 class="mb-0">Global MMR History</h5>
+                    <div class="col-md-3">
+                        <div class="stat-card secondary">
+                            <div class="stat-card-value">{{ player_data.global_matches or 0 }}</div>
+                            <div class="stat-card-title">Global Matches</div>
                         </div>
-                        <div class="card-body">
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card accent">
+                            <div class="stat-card-value">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</div>
+                            <div class="stat-card-title">Win Rate</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="stat-card">
+                            <div class="stat-card-value">{{ player_data.global_current_streak or 0 }}</div>
+                            <div class="stat-card-title">Current Streak</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Global chart -->
+                {% if global_matches and global_matches|length > 0 %}
+                <div class="card bg-dark-medium mt-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">Global MMR History</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
                             <canvas id="globalChart" height="100"></canvas>
                         </div>
                     </div>
-                    {% endif %}
-                {% else %}
-                    <div class="text-center py-5">
-                        <i class="fas fa-globe fa-3x text-muted mb-3"></i>
-                        <h5>No Global Matches</h5>
-                        <p class="text-muted">You haven't played any global matches yet.</p>
-                    </div>
+                </div>
                 {% endif %}
             </div>
+            {% endif %}
         </div>
     {% endif %}
 </div>
@@ -246,8 +265,8 @@
 <script>
 // Chart configuration and data
 const chartData = {
-    ranked: {{ ranked_matches | tojsonfilter | safe }},
-    global: {{ global_matches | tojsonfilter | safe }}
+    ranked: {{ ranked_matches | tojsonfilter | safe if ranked_matches else [] }},
+    global: {{ global_matches | tojsonfilter | safe if global_matches else [] }}
 };
 
 // Chart.js default configuration
@@ -255,6 +274,8 @@ Chart.defaults.color = '#f1f1f1';
 Chart.defaults.borderColor = '#2a303c';
 
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('Chart data:', chartData);
+
     // Combined MMR chart
     const mmrCtx = document.getElementById('mmrChart');
     if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {

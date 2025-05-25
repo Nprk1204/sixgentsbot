@@ -11,6 +11,8 @@ from functools import lru_cache
 from dotenv import load_dotenv
 import functools
 import re
+import json
+from datetime import datetime
 
 # Import our Discord OAuth integration
 from discord_oauth import DiscordOAuth, login_required, get_current_user
@@ -156,6 +158,21 @@ except Exception as e:
     ranks_collection = db['ranks']
     resets_collection = db['resets']
 
+
+@app.template_filter('tojsonfilter')
+def to_json_filter(obj):
+    """Convert Python object to JSON string for safe template usage"""
+
+    def json_serial(obj):
+        """JSON serializer for objects not serializable by default json code"""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        raise TypeError(f"Type {type(obj)} not serializable")
+
+    try:
+        return json.dumps(obj, default=json_serial)
+    except (TypeError, ValueError):
+        return '[]'  # Return empty array if conversion fails
 
 # Context processor to make current user available in all templates
 @app.context_processor
@@ -365,14 +382,18 @@ def profile_stats():
             flash('Please log in to view your stats.', 'error')
             return redirect(url_for('discord_login'))
 
+        print(f"Loading stats for user: {user.get('username')} (ID: {user.get('id')})")
+
         # Get player data from database
         player_data = None
         try:
             player_data = players_collection.find_one({"id": user['id']})
+            print(f"Player data found: {player_data is not None}")
         except Exception as db_error:
             print(f"Database error fetching player: {db_error}")
 
         if not player_data:
+            print("No player data found, creating empty structure")
             # No stats available - create empty data structure
             player_data = {
                 'id': user['id'],
@@ -384,12 +405,46 @@ def profile_stats():
                 'matches': 0,
                 'global_wins': 0,
                 'global_losses': 0,
-                'global_matches': 0
+                'global_matches': 0,
+                'current_streak': 0,
+                'longest_win_streak': 0,
+                'longest_loss_streak': 0,
+                'global_current_streak': 0,
+                'global_longest_win_streak': 0,
+                'global_longest_loss_streak': 0
             }
 
+        # Ensure all required fields exist with defaults
+        required_fields = {
+            'mmr': 0,
+            'global_mmr': 300,
+            'wins': 0,
+            'losses': 0,
+            'matches': 0,
+            'global_wins': 0,
+            'global_losses': 0,
+            'global_matches': 0,
+            'current_streak': 0,
+            'longest_win_streak': 0,
+            'longest_loss_streak': 0,
+            'global_current_streak': 0,
+            'global_longest_win_streak': 0,
+            'global_longest_loss_streak': 0
+        }
+
+        for field, default_value in required_fields.items():
+            if field not in player_data:
+                player_data[field] = default_value
+
+        print(
+            f"Player data prepared: matches={player_data.get('matches')}, global_matches={player_data.get('global_matches')}")
+
         # Get match history for performance graphs
-        match_history = []
+        ranked_matches = []
+        global_matches = []
+
         try:
+            print("Fetching match history...")
             match_history = list(matches_collection.find({
                 "$or": [
                     {"team1.id": user['id']},
@@ -397,43 +452,64 @@ def profile_stats():
                 ],
                 "status": "completed"
             }).sort("completed_at", 1).limit(50))
+
+            print(f"Found {len(match_history)} matches in history")
+
+            # Process match history for graphs
+            for match in match_history:
+                try:
+                    # Determine if player won
+                    player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
+                    winner = match.get("winner")
+                    player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+
+                    # Get completed date
+                    completed_at = match.get('completed_at')
+                    if not completed_at:
+                        print(f"Skipping match {match.get('match_id')} - no completed_at timestamp")
+                        continue
+
+                    match_data = {
+                        'date': completed_at.isoformat() if hasattr(completed_at, 'isoformat') else str(completed_at),
+                        'won': player_won,
+                        'match_id': match.get('match_id', ''),
+                        'mmr_change': 0,
+                        'new_mmr': 0
+                    }
+
+                    # Find MMR change for this player
+                    mmr_changes = match.get("mmr_changes", [])
+                    player_mmr_change = None
+
+                    for mmr_change in mmr_changes:
+                        if mmr_change.get("player_id") == user['id']:
+                            player_mmr_change = mmr_change
+                            break
+
+                    if player_mmr_change:
+                        match_data['mmr_change'] = player_mmr_change.get("mmr_change", 0)
+                        match_data['new_mmr'] = player_mmr_change.get("new_mmr", 0)
+
+                        # Sort into ranked vs global based on match type
+                        if match.get("is_global", False):
+                            # Only include if this was a global MMR change
+                            if player_mmr_change.get("is_global", False):
+                                global_matches.append(match_data)
+                        else:
+                            # Only include if this was a ranked MMR change
+                            if not player_mmr_change.get("is_global", False):
+                                ranked_matches.append(match_data)
+                    else:
+                        print(f"No MMR change found for player in match {match.get('match_id')}")
+
+                except Exception as process_error:
+                    print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
+                    continue
+
         except Exception as match_error:
             print(f"Error fetching match history: {match_error}")
 
-        # Process match history for graphs
-        ranked_matches = []
-        global_matches = []
-
-        for match in match_history:
-            try:
-                # Determine if player won
-                player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
-                winner = match.get("winner")
-                player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
-
-                match_data = {
-                    'date': match.get('completed_at').isoformat() if match.get('completed_at') else '',
-                    'won': player_won,
-                    'match_id': match.get('match_id', ''),
-                }
-
-                # Find MMR change for this player
-                for mmr_change in match.get("mmr_changes", []):
-                    if mmr_change.get("player_id") == user['id']:
-                        if match.get("is_global"):
-                            if mmr_change.get("is_global", False):
-                                match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
-                                match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
-                                global_matches.append(match_data)
-                        else:
-                            if not mmr_change.get("is_global", False):
-                                match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
-                                match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
-                                ranked_matches.append(match_data)
-                        break
-            except Exception as process_error:
-                print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
-                continue
+        print(f"Processed matches: {len(ranked_matches)} ranked, {len(global_matches)} global")
 
         return render_template('profile_stats.html',
                                user=user,
@@ -443,6 +519,8 @@ def profile_stats():
 
     except Exception as e:
         print(f"Error in profile_stats route: {e}")
+        import traceback
+        traceback.print_exc()
         flash('An error occurred loading your statistics.', 'error')
         return redirect(url_for('profile'))
 
