@@ -363,19 +363,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize the player modal
     const playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
 
-    // Set up click events for featured players
+    // Set up click events for featured players - use the same function as leaderboard
     const featuredPlayers = document.querySelectorAll('.featured-player');
     featuredPlayers.forEach(player => {
         player.addEventListener('click', function() {
             const playerId = this.dataset.playerId;
             if (playerId) {
-                showPlayerDetails(playerId, playerModal);
+                showPlayerDetails(playerId); // Use the same function as in main.js
             } else {
                 console.error("No player ID found for this element", this);
             }
         });
     });
 });
-
 </script>
 {% endblock %}
