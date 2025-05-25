@@ -29,7 +29,7 @@ DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')
 # Discord OAuth configuration
 DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
-DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'http://localhost:5000/auth/discord/callback')
+DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', '')
 
 # Initialize Discord OAuth
 discord_oauth = DiscordOAuth(
