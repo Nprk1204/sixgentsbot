@@ -255,6 +255,7 @@ def get_leaderboard():
     """API endpoint to get leaderboard data with pagination - default to global"""
     return get_leaderboard_by_type('global')
 
+
 @app.route('/api/leaderboard/<board_type>')
 @cached(timeout=60)
 def get_leaderboard_by_type(board_type):
@@ -324,8 +325,10 @@ def get_leaderboard_by_type(board_type):
                        .sort(sort_field, -1)
                        .skip(skip).limit(per_page))
 
-    # Calculate additional stats
+    # Get recent MMR changes for each player
     for player in top_players:
+        player_id = player.get("id")
+
         if board_type == "global":
             matches = player.get("global_matches", 0)
             wins = player.get("global_wins", 0)
@@ -371,11 +374,9 @@ def get_leaderboard_by_type(board_type):
         else:
             player["streak_display"] = "—"
 
-        # Add enhanced streak displays for global stats
-        if board_type == "global":
-            player["global_streak_display"] = player["streak_display"]
-            player["global_longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
-            player["global_longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
+        # Get the most recent MMR change for this player
+        recent_mmr_change = get_recent_mmr_change(player_id, board_type == "global")
+        player["recent_mmr_change"] = recent_mmr_change
 
         # Remove the datetime object before jsonifying
         if "last_updated" in player:
@@ -392,6 +393,82 @@ def get_leaderboard_by_type(board_type):
             "pages": (total_players + per_page - 1) // per_page
         }
     })
+
+
+def get_recent_mmr_change(player_id, is_global=False):
+    """Get the most recent MMR change for a player"""
+    try:
+        # Find the most recent completed match for this player
+        query = {
+            "$or": [
+                {"team1.id": player_id},
+                {"team2.id": player_id}
+            ],
+            "status": "completed",
+            "mmr_changes": {"$exists": True, "$ne": []}
+        }
+
+        # Filter by match type if specified
+        if is_global is not None:
+            query["is_global"] = is_global
+
+        recent_match = matches_collection.find_one(
+            query,
+            sort=[("completed_at", -1)]
+        )
+
+        if not recent_match or "mmr_changes" not in recent_match:
+            return {
+                "change": 0,
+                "display": "—",
+                "class": "text-muted"
+            }
+
+        # Find this player's MMR change in the match
+        for mmr_change in recent_match.get("mmr_changes", []):
+            if mmr_change.get("player_id") == player_id:
+                # Check if this is the right type of match for the MMR change
+                if is_global and mmr_change.get("is_global", False):
+                    change = mmr_change.get("mmr_change", 0)
+                elif not is_global and not mmr_change.get("is_global", False):
+                    change = mmr_change.get("mmr_change", 0)
+                else:
+                    continue
+
+                # Format the display
+                if change > 0:
+                    return {
+                        "change": change,
+                        "display": f"+{change}",
+                        "class": "text-success"
+                    }
+                elif change < 0:
+                    return {
+                        "change": change,
+                        "display": str(change),
+                        "class": "text-danger"
+                    }
+                else:
+                    return {
+                        "change": 0,
+                        "display": "0",
+                        "class": "text-muted"
+                    }
+
+        # No MMR change found for this player
+        return {
+            "change": 0,
+            "display": "—",
+            "class": "text-muted"
+        }
+
+    except Exception as e:
+        print(f"Error getting recent MMR change for player {player_id}: {str(e)}")
+        return {
+            "change": 0,
+            "display": "—",
+            "class": "text-muted"
+        }
 
 
 @app.route('/api/player/<player_id>')

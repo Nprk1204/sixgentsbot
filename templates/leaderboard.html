@@ -55,6 +55,7 @@
             <div>MMR</div>
             <div>Win Rate</div>
             <div>W-L</div>
+            <div>Last ±</div>
             <div>Streak</div>
         </div>
 
@@ -219,6 +220,9 @@ function displayPlayers(players, startIndex) {
         // Format win-loss record as single string
         const winLossRecord = `${player.wins || 0}-${player.losses || 0}`;
 
+        // Format MMR change
+        const mmrChange = player.recent_mmr_change || { display: "—", class: "text-muted" };
+
         // Create individual column divs for better alignment
         playerRow.innerHTML = `
             <div class="rank-column">
@@ -235,6 +239,9 @@ function displayPlayers(players, startIndex) {
             </div>
             <div class="record-column">
                 <span class="win-loss-record">${winLossRecord}</span>
+            </div>
+            <div class="mmr-change-column">
+                <span class="mmr-change ${mmrChange.class}">${mmrChange.display}</span>
             </div>
             <div class="streak-column">
                 <span class="streak-display">${player.streak_display || '—'}</span>
