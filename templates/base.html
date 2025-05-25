@@ -16,6 +16,9 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
+    <!-- Chart.js for graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 
@@ -30,8 +33,43 @@
     <!-- Header -->
     <header class="main-header">
         <div class="container">
-            <h1 class="site-title">Rocket League Six Gents</h1>
-            <p class="site-subtitle">Discord Bot Leaderboard & Stats</p>
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <h1 class="site-title">Rocket League Six Gents</h1>
+                    <p class="site-subtitle">Discord Bot Leaderboard & Stats</p>
+                </div>
+                <div class="auth-section">
+                    {% if current_user %}
+                        <div class="user-info d-flex align-items-center gap-3">
+                            <div class="user-avatar">
+                                {% if current_user.avatar %}
+                                    <img src="https://cdn.discordapp.com/avatars/{{ current_user.id }}/{{ current_user.avatar }}.png?size=40"
+                                         alt="Avatar" class="rounded-circle" width="40" height="40">
+                                {% else %}
+                                    <div class="default-avatar rounded-circle d-flex align-items-center justify-content-center"
+                                         style="width: 40px; height: 40px; background: var(--primary);">
+                                        <i class="fas fa-user text-white"></i>
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div class="user-details">
+                                <div class="user-name text-light fw-bold">
+                                    {{ current_user.global_name or current_user.username }}
+                                </div>
+                                <div class="user-actions">
+                                    <a href="{{ url_for('discord_logout') }}" class="btn btn-sm btn-outline-light">
+                                        <i class="fas fa-sign-out-alt me-1"></i> Logout
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    {% else %}
+                        <a href="{{ url_for('discord_login') }}" class="btn btn-primary">
+                            <i class="fab fa-discord me-2"></i> Login with Discord
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </header>
 
@@ -50,14 +88,32 @@
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link {% if request.path == '/leaderboard' %}active{% endif %}" href="{{ url_for('leaderboard') }}">
+                            <a class="nav-link {% if request.path.startswith('/leaderboard') %}active{% endif %}" href="{{ url_for('leaderboard') }}">
                                 <i class="fas fa-trophy"></i> Leaderboard
                             </a>
                         </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.path == '/rank-check' %}active{% endif %}" href="{{ url_for('rank_check') }}">
-                                <i class="fas fa-check-circle"></i> Rank Check
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle {% if request.path.startswith('/profile') %}active{% endif %}"
+                               href="#" id="profileDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                <i class="fas fa-user"></i> Profile
                             </a>
+                            <ul class="dropdown-menu" aria-labelledby="profileDropdown">
+                                {% if current_user %}
+                                    <li><a class="dropdown-item" href="{{ url_for('profile') }}">
+                                        <i class="fas fa-user-circle me-2"></i> My Profile
+                                    </a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('profile_stats') }}">
+                                        <i class="fas fa-chart-line me-2"></i> Detailed Stats
+                                    </a></li>
+                                    <li><a class="dropdown-item" href="{{ url_for('profile_rank_check') }}">
+                                        <i class="fas fa-check-circle me-2"></i> Rank Verification
+                                    </a></li>
+                                {% else %}
+                                    <li><a class="dropdown-item" href="{{ url_for('discord_login') }}">
+                                        <i class="fab fa-discord me-2"></i> Login to view profile
+                                    </a></li>
+                                {% endif %}
+                            </ul>
                         </li>
                     </ul>
                 </div>
@@ -65,12 +121,26 @@
         </nav>
     </div>
 
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="container">
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
     <!-- Main Content -->
     <div class="container">
         {% block content %}{% endblock %}
     </div>
 
-        <!-- Footer -->
+    <!-- Footer -->
     <footer class="main-footer">
         <div class="container">
             <div class="row">
@@ -84,7 +154,9 @@
                     <ul class="footer-links">
                         <li><a href="{{ url_for('home') }}">Home</a></li>
                         <li><a href="{{ url_for('leaderboard') }}">Leaderboard</a></li>
-                        <li><a href="{{ url_for('rank_check') }}">Rank Check</a></li>
+                        {% if current_user %}
+                            <li><a href="{{ url_for('profile') }}">Profile</a></li>
+                        {% endif %}
                     </ul>
                 </div>
             </div>
@@ -108,13 +180,6 @@
 
     <!-- Additional JS -->
     {% block extra_js %}{% endblock %}
-
-    <!-- Discord Auth Status -->
-    <div class="auth-container">
-        {% if discord_user %}
-            <span>Welcome, {{ discord_user.name }}!</span>
-        {% endif %}
-    </div>
 
     <script>
         // Initialize tooltips

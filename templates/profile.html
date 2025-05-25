@@ -1,0 +1,980 @@
+{% extends "base.html" %}
+
+{% block title %}My Profile - Rocket League 6 Gents{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <div class="content-header">
+        <h2><i class="fas fa-user-circle me-2"></i> My Profile</h2>
+    </div>
+
+    <div class="row">
+        <div class="col-lg-4">
+            <!-- User Info Card -->
+            <div class="card bg-dark-medium mb-4">
+                <div class="card-body text-center">
+                    <div class="mb-3">
+                        {% if user.avatar %}
+                            <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png?size=128"
+                                 alt="Avatar" class="rounded-circle" width="128" height="128">
+                        {% else %}
+                            <div class="default-avatar rounded-circle d-flex align-items-center justify-content-center mx-auto"
+                                 style="width: 128px; height: 128px; background: var(--primary);">
+                                <i class="fas fa-user fa-3x text-white"></i>
+                            </div>
+                        {% endif %}
+                    </div>
+                    <h4 class="mb-2">{{ user.global_name or user.username }}</h4>
+                    <p class="text-muted mb-3">Discord ID: {{ user.id }}</p>
+
+                    {% if user.guild_member %}
+                        <div class="guild-info">
+                            <h6 class="text-primary mb-2">Server Member</h6>
+                            {% if user.guild_member.roles %}
+                                <div class="roles mb-2">
+                                    <small class="text-muted">Roles:</small>
+                                    <!-- Role display would go here if needed -->
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Quick Actions Card -->
+            <div class="card bg-dark-medium">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-bolt me-2"></i> Quick Actions</h5>
+                </div>
+                <div class="card-body">
+                    <div class="d-grid gap-2">
+                        <a href="{{ url_for('profile_stats') }}" class="btn btn-primary">
+                            <i class="fas fa-chart-line me-2"></i> View Detailed Stats
+                        </a>
+                        <a href="{{ url_for('profile_rank_check') }}" class="btn btn-secondary">
+                            <i class="fas fa-check-circle me-2"></i> Verify Rank
+                        </a>
+                        <a href="{{ url_for('leaderboard') }}" class="btn btn-outline-primary">
+                            <i class="fas fa-trophy me-2"></i> View Leaderboard
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <!-- Profile Overview -->
+            <div class="card bg-dark-medium mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> Profile Overview</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="feature-card p-3 rounded mb-3" style="background: rgba(0, 168, 255, 0.1); border-left: 4px solid var(--primary);">
+                                <h6 class="text-primary mb-2">
+                                    <i class="fas fa-chart-line me-2"></i> Detailed Statistics
+                                </h6>
+                                <p class="mb-2">View comprehensive performance analytics, MMR history, match trends, and more.</p>
+                                <a href="{{ url_for('profile_stats') }}" class="btn btn-sm btn-primary">View Stats</a>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="feature-card p-3 rounded mb-3" style="background: rgba(255, 126, 49, 0.1); border-left: 4px solid var(--secondary);">
+                                <h6 class="text-secondary mb-2">
+                                    <i class="fas fa-check-circle me-2"></i> Rank Verification
+                                </h6>
+                                <p class="mb-2">Verify your Rocket League rank to get the appropriate Discord role and starting MMR.</p>
+                                <a href="{{ url_for('profile_rank_check') }}" class="btn btn-sm btn-secondary">Verify Rank</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Activity -->
+            <div class="card bg-dark-medium">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="fas fa-clock me-2"></i> Welcome to 6 Gents!</h5>
+                </div>
+                <div class="card-body">
+                    <div class="text-center py-4">
+                        <i class="fas fa-rocket fa-3x text-primary mb-3"></i>
+                        <h5>Ready to Get Started?</h5>
+                        <p class="text-muted mb-4">
+                            Welcome to the Rocket League 6 Gents system! Here you can track your performance,
+                            verify your rank, and compete with other players.
+                        </p>
+                        <div class="row">
+                            <div class="col-md-4 mb-2">
+                                <div class="step-indicator">
+                                    <div class="step-number bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2"
+                                         style="width: 40px; height: 40px;">1</div>
+                                    <h6>Verify Your Rank</h6>
+                                    <small class="text-muted">Get the right Discord role</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <div class="step-indicator">
+                                    <div class="step-number bg-secondary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2"
+                                         style="width: 40px; height: 40px;">2</div>
+                                    <h6>Join the Queue</h6>
+                                    <small class="text-muted">Use Discord bot commands</small>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-2">
+                                <div class="step-indicator">
+                                    <div class="step-number bg-success text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2"
+                                         style="width: 40px; height: 40px;">3</div>
+                                    <h6>Track Progress</h6>
+                                    <small class="text-muted">View your stats here</small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+<!-- profile_stats.html -->
+{% extends "base.html" %}
+
+{% block title %}My Stats - Rocket League 6 Gents{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <div class="content-header">
+        <h2><i class="fas fa-chart-line me-2"></i> Detailed Statistics</h2>
+        <div class="user-indicator">
+            <i class="fas fa-user me-1"></i> {{ user.global_name or user.username }}
+        </div>
+    </div>
+
+    {% if not player_data or (player_data.matches == 0 and player_data.global_matches == 0) %}
+        <!-- No Stats Available -->
+        <div class="card bg-dark-medium">
+            <div class="card-body text-center py-5">
+                <i class="fas fa-chart-line fa-4x text-muted mb-4"></i>
+                <h4>No Statistics Available</h4>
+                <p class="text-muted mb-4">
+                    You haven't played any matches yet! Join the queue in Discord to start building your stats.
+                </p>
+                <div class="row justify-content-center">
+                    <div class="col-md-6">
+                        <div class="getting-started-card p-4 rounded" style="background: rgba(0, 168, 255, 0.1); border: 1px solid var(--border);">
+                            <h6 class="text-primary mb-3">Getting Started</h6>
+                            <ol class="text-start">
+                                <li class="mb-2">Join our Discord server</li>
+                                <li class="mb-2">Use <code>/join</code> to join the queue</li>
+                                <li class="mb-2">Play matches and report results</li>
+                                <li>Watch your stats grow here!</li>
+                            </ol>
+                            <a href="{{ url_for('profile_rank_check') }}" class="btn btn-primary btn-sm mt-2">
+                                <i class="fas fa-check-circle me-1"></i> Verify Your Rank First
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <!-- Stats Available -->
+        <ul class="nav nav-tabs mb-4" id="statsTabsNav" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="overview-tab" data-bs-toggle="tab"
+                        data-bs-target="#overview" type="button" role="tab">
+                    <i class="fas fa-tachometer-alt me-1"></i> Overview
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="ranked-stats-tab" data-bs-toggle="tab"
+                        data-bs-target="#ranked-stats" type="button" role="tab">
+                    <i class="fas fa-trophy me-1"></i> Ranked Stats
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="global-stats-tab" data-bs-toggle="tab"
+                        data-bs-target="#global-stats" type="button" role="tab">
+                    <i class="fas fa-globe me-1"></i> Global Stats
+                </button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="statsTabsContent">
+            <!-- Overview Tab -->
+            <div class="tab-pane fade show active" id="overview" role="tabpanel">
+                <div class="row">
+                    <div class="col-lg-6">
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">Ranked Performance</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-primary">{{ player_data.mmr or 0 }}</h3>
+                                            <small class="text-muted">Current MMR</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-success">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</h3>
+                                            <small class="text-muted">Win Rate</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <div class="text-center">
+                                    <span class="badge bg-info me-2">{{ player_data.matches or 0 }} Matches</span>
+                                    <span class="badge bg-success me-2">{{ player_data.wins or 0 }} Wins</span>
+                                    <span class="badge bg-danger">{{ player_data.losses or 0 }} Losses</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-header">
+                                <h5 class="mb-0">Global Performance</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-primary">{{ player_data.global_mmr or 300 }}</h3>
+                                            <small class="text-muted">Global MMR</small>
+                                        </div>
+                                    </div>
+                                    <div class="col-6">
+                                        <div class="stat-item text-center p-3">
+                                            <h3 class="text-success">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</h3>
+                                            <small class="text-muted">Win Rate</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                <hr>
+                                <div class="text-center">
+                                    <span class="badge bg-info me-2">{{ player_data.global_matches or 0 }} Matches</span>
+                                    <span class="badge bg-success me-2">{{ player_data.global_wins or 0 }} Wins</span>
+                                    <span class="badge bg-danger">{{ player_data.global_losses or 0 }} Losses</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Performance Charts -->
+                {% if ranked_matches or global_matches %}
+                <div class="card bg-dark-medium">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i> MMR Progress</h5>
+                    </div>
+                    <div class="card-body">
+                        <canvas id="mmrChart" height="100"></canvas>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Ranked Stats Tab -->
+            <div class="tab-pane fade" id="ranked-stats" role="tabpanel">
+                {% if player_data.matches > 0 %}
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="stat-card primary">
+                                <div class="stat-card-value">{{ player_data.mmr or 0 }}</div>
+                                <div class="stat-card-title">Current MMR</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card secondary">
+                                <div class="stat-card-value">{{ player_data.matches or 0 }}</div>
+                                <div class="stat-card-title">Total Matches</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card accent">
+                                <div class="stat-card-value">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</div>
+                                <div class="stat-card-title">Win Rate</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-card-value">{{ player_data.current_streak or 0 }}</div>
+                                <div class="stat-card-title">Current Streak</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Ranked chart would go here -->
+                    {% if ranked_matches %}
+                    <div class="card bg-dark-medium mt-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">Ranked MMR History</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="rankedChart" height="100"></canvas>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-trophy fa-3x text-muted mb-3"></i>
+                        <h5>No Ranked Matches</h5>
+                        <p class="text-muted">You haven't played any ranked matches yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Global Stats Tab -->
+            <div class="tab-pane fade" id="global-stats" role="tabpanel">
+                {% if player_data.global_matches > 0 %}
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="stat-card primary">
+                                <div class="stat-card-value">{{ player_data.global_mmr or 300 }}</div>
+                                <div class="stat-card-title">Global MMR</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card secondary">
+                                <div class="stat-card-value">{{ player_data.global_matches or 0 }}</div>
+                                <div class="stat-card-title">Global Matches</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card accent">
+                                <div class="stat-card-value">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</div>
+                                <div class="stat-card-title">Win Rate</div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <div class="stat-card-value">{{ player_data.global_current_streak or 0 }}</div>
+                                <div class="stat-card-title">Current Streak</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Global chart would go here -->
+                    {% if global_matches %}
+                    <div class="card bg-dark-medium mt-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">Global MMR History</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="globalChart" height="100"></canvas>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="text-center py-5">
+                        <i class="fas fa-globe fa-3x text-muted mb-3"></i>
+                        <h5>No Global Matches</h5>
+                        <p class="text-muted">You haven't played any global matches yet.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Chart configuration and data
+const chartData = {
+    ranked: {{ ranked_matches | tojsonfilter | safe }},
+    global: {{ global_matches | tojsonfilter | safe }}
+};
+
+// Chart.js default configuration
+Chart.defaults.color = '#f1f1f1';
+Chart.defaults.borderColor = '#2a303c';
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Combined MMR chart
+    const mmrCtx = document.getElementById('mmrChart');
+    if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {
+        const datasets = [];
+
+        if (chartData.ranked.length > 0) {
+            datasets.push({
+                label: 'Ranked MMR',
+                data: chartData.ranked.map(match => ({
+                    x: match.date,
+                    y: match.new_mmr
+                })),
+                borderColor: '#00a8ff',
+                backgroundColor: 'rgba(0, 168, 255, 0.1)',
+                tension: 0.3
+            });
+        }
+
+        if (chartData.global.length > 0) {
+            datasets.push({
+                label: 'Global MMR',
+                data: chartData.global.map(match => ({
+                    x: match.date,
+                    y: match.new_mmr
+                })),
+                borderColor: '#ff7e31',
+                backgroundColor: 'rgba(255, 126, 49, 0.1)',
+                tension: 0.3
+            });
+        }
+
+        new Chart(mmrCtx, {
+            type: 'line',
+            data: { datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
+                            displayFormats: {
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'MMR'
+                        },
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top'
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        callbacks: {
+                            title: function(tooltipItems) {
+                                return new Date(tooltipItems[0].parsed.x).toLocaleDateString();
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+    }
+
+    // Individual ranked chart
+    const rankedCtx = document.getElementById('rankedChart');
+    if (rankedCtx && chartData.ranked.length > 0) {
+        new Chart(rankedCtx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Ranked MMR',
+                    data: chartData.ranked.map(match => ({
+                        x: match.date,
+                        y: match.new_mmr
+                    })),
+                    borderColor: '#00a8ff',
+                    backgroundColor: 'rgba(0, 168, 255, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
+                            displayFormats: {
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'MMR'
+                        },
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+
+    // Individual global chart
+    const globalCtx = document.getElementById('globalChart');
+    if (globalCtx && chartData.global.length > 0) {
+        new Chart(globalCtx, {
+            type: 'line',
+            data: {
+                datasets: [{
+                    label: 'Global MMR',
+                    data: chartData.global.map(match => ({
+                        x: match.date,
+                        y: match.new_mmr
+                    })),
+                    borderColor: '#ff7e31',
+                    backgroundColor: 'rgba(255, 126, 49, 0.1)',
+                    tension: 0.3,
+                    fill: true
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
+                            displayFormats: {
+                                day: 'MMM DD',
+                                week: 'MMM DD',
+                                month: 'MMM YYYY'
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'MMR'
+                        },
+                        beginAtZero: false
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    }
+                }
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
+
+<!-- profile_rank_check.html -->
+{% extends "base.html" %}
+
+{% block title %}Rank Verification - Rocket League 6 Gents{% endblock %}
+
+{% block content %}
+<div class="content-container">
+    <div class="content-header">
+        <h2><i class="fas fa-check-circle me-2"></i> Rank Verification</h2>
+        <div class="user-indicator">
+            <i class="fas fa-user me-1"></i> {{ user.global_name or user.username }}
+        </div>
+    </div>
+
+    {% if rank_data %}
+        <!-- Already Verified -->
+        <div class="alert alert-success">
+            <i class="fas fa-check-circle me-2"></i>
+            <strong>Rank Already Verified!</strong>
+            You are verified as <strong>{{ rank_data.tier }}</strong> with starting MMR of <strong>{{ rank_data.mmr }}</strong>.
+            <br>
+            <small class="text-muted">Verified on: {{ rank_data.timestamp.strftime('%Y-%m-%d %H:%M') if rank_data.timestamp else 'Unknown' }}</small>
+        </div>
+
+        <div class="card bg-dark-medium mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Current Verification Status</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="rank-display p-3 rounded" style="background: rgba(0, 168, 255, 0.1); border-left: 4px solid var(--primary);">
+                            <h6 class="text-primary mb-2">
+                                <i class="fas fa-trophy me-2"></i> {{ rank_data.tier }}
+                            </h6>
+                            <p class="mb-1"><strong>Rank:</strong> {{ rank_data.rank or rank_data.tier }}</p>
+                            <p class="mb-1"><strong>Starting MMR:</strong> {{ rank_data.mmr }}</p>
+                            <p class="mb-0"><strong>Global MMR:</strong> {{ rank_data.global_mmr or 300 }}</p>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="verification-info p-3 rounded" style="background: rgba(255, 126, 49, 0.1); border-left: 4px solid var(--secondary);">
+                            <h6 class="text-secondary mb-2">
+                                <i class="fas fa-info-circle me-2"></i> What's Next?
+                            </h6>
+                            <p class="mb-2">You can now join the 6 Mans queue in Discord!</p>
+                            <p class="mb-1"><strong>Commands:</strong></p>
+                            <ul class="mb-0 small">
+                                <li><code>/join</code> - Join the queue</li>
+                                <li><code>/status</code> - Check queue status</li>
+                                <li><code>/rank</code> - View your current rank</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card bg-dark-medium">
+            <div class="card-header">
+                <h5 class="mb-0">Re-verify Rank (Optional)</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted mb-3">
+                    If your Rocket League rank has significantly changed, you can update your verification below.
+                    This will update your Discord role and may adjust your starting MMR.
+                </p>
+                <button class="btn btn-outline-warning" id="showReverifyBtn">
+                    <i class="fas fa-sync-alt me-2"></i> Update My Rank
+                </button>
+            </div>
+        </div>
+
+        <div id="reverifySection" class="mt-4" style="display: none;">
+    {% endif %}
+
+    <!-- Rank Verification Form -->
+    <div class="row{% if rank_data %} mt-4{% endif %}">
+        <div class="col-lg-6">
+            <div class="card bg-dark-medium">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        {% if rank_data %}
+                            <i class="fas fa-sync-alt me-2"></i> Update Rank Verification
+                        {% else %}
+                            <i class="fas fa-check-circle me-2"></i> Verify Your Rank
+                        {% endif %}
+                    </h5>
+                </div>
+                <div class="card-body">
+                    {% if not rank_data %}
+                        <p class="text-muted mb-4">
+                            Select your current Rocket League competitive rank to get the appropriate Discord role and starting MMR.
+                        </p>
+                    {% endif %}
+
+                    <div class="mb-3">
+                        <label for="rlRank" class="form-label">Your Rocket League 3v3 Rank</label>
+                        <select class="form-select" id="rlRank">
+                            <option value="" selected disabled>Select your 3v3 competitive rank</option>
+                            <option value="rank_c" data-mmr="600" data-tier="Rank C" data-icon="/static/img/ranks/diamond_3.png">
+                                Bronze I - Diamond III
+                            </option>
+                            <option value="rank_b" data-mmr="1350" data-tier="Rank B" data-icon="/static/img/ranks/champion_3.png">
+                                Champion I - Champion III
+                            </option>
+                            <option value="rank_a" data-mmr="1850" data-tier="Rank A" data-icon="/static/img/ranks/ssl.png">
+                                Grand Champion I - Supersonic Legend
+                            </option>
+                        </select>
+                        <div id="rankPreview" class="mt-3 text-center d-none">
+                            <img id="rankImage" src="" alt="Rank Icon" class="img-fluid mb-2" style="max-width: 80px;">
+                            <h5 id="rankName" class="mb-0"></h5>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="button" id="verifyRankButton" class="btn btn-primary">
+                            <i class="fas fa-check-circle me-2"></i>
+                            {% if rank_data %}Update My Rank{% else %}Verify My Rank{% endif %}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {% if not rank_data %}
+                <div class="alert alert-info mt-3">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Since you're logged in with Discord, your role will be automatically assigned after verification!
+                </div>
+            {% endif %}
+        </div>
+
+        <div class="col-lg-6">
+            <h5 class="mb-3">Rank Tiers</h5>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <div class="rank-card">
+                        <div class="rank-header rank-a">
+                            <i class="fas fa-trophy fa-2x"></i>
+                        </div>
+                        <div class="rank-body">
+                            <h6 class="rank-title">Rank A</h6>
+                            <p class="rank-description">Grand Champion I & Above</p>
+                            <p class="rank-mmr">Starting MMR: 1850</p>
+                            <span class="badge bg-danger">Rank A Role</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="rank-card">
+                        <div class="rank-header rank-b">
+                            <i class="fas fa-award fa-2x"></i>
+                        </div>
+                        <div class="rank-body">
+                            <h6 class="rank-title">Rank B</h6>
+                            <p class="rank-description">Champion I - Champion III</p>
+                            <p class="rank-mmr">Starting MMR: 1350</p>
+                            <span class="badge bg-primary">Rank B Role</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="col-md-4 mb-3">
+                    <div class="rank-card">
+                        <div class="rank-header rank-c">
+                            <i class="fas fa-medal fa-2x"></i>
+                        </div>
+                        <div class="rank-body">
+                            <h6 class="rank-title">Rank C</h6>
+                            <p class="rank-description">Bronze I - Diamond III</p>
+                            <p class="rank-mmr">Starting MMR: 600</p>
+                            <span class="badge bg-success">Rank C Role</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card bg-dark-medium mt-4">
+                <div class="card-header">
+                    <h6 class="mb-0">Verification Result</h6>
+                </div>
+                <div class="card-body" id="verificationResult">
+                    <p class="text-center text-muted">
+                        {% if rank_data %}
+                            Update your rank above to see the new verification result.
+                        {% else %}
+                            Select your Rocket League rank and click "Verify My Rank" to see your results.
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {% if rank_data %}
+        </div> <!-- Close reverifySection -->
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Show/hide re-verification section
+    const showReverifyBtn = document.getElementById('showReverifyBtn');
+    const reverifySection = document.getElementById('reverifySection');
+
+    if (showReverifyBtn && reverifySection) {
+        showReverifyBtn.addEventListener('click', function() {
+            if (reverifySection.style.display === 'none') {
+                reverifySection.style.display = 'block';
+                showReverifyBtn.innerHTML = '<i class="fas fa-times me-2"></i> Cancel Update';
+                showReverifyBtn.className = 'btn btn-outline-secondary';
+            } else {
+                reverifySection.style.display = 'none';
+                showReverifyBtn.innerHTML = '<i class="fas fa-sync-alt me-2"></i> Update My Rank';
+                showReverifyBtn.className = 'btn btn-outline-warning';
+            }
+        });
+    }
+
+    // Rank verification logic
+    const verifyButton = document.getElementById('verifyRankButton');
+    const rankSelect = document.getElementById('rlRank');
+    const rankPreview = document.getElementById('rankPreview');
+
+    // Show rank preview when selection changes
+    if (rankSelect && rankPreview) {
+        rankSelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const imagePath = selectedOption.getAttribute('data-icon');
+            const text = selectedOption.text;
+
+            if (imagePath) {
+                const rankImage = document.getElementById('rankImage');
+                const rankName = document.getElementById('rankName');
+
+                if (rankImage && rankName) {
+                    rankImage.src = imagePath;
+                    rankImage.alt = text;
+                    rankName.textContent = text;
+                    rankPreview.classList.remove('d-none');
+                }
+            }
+        });
+    }
+
+    // Handle verification
+    if (verifyButton) {
+        verifyButton.addEventListener('click', function() {
+            const rankSelect = document.getElementById('rlRank');
+
+            if (!rankSelect.value) {
+                alert('Please select your Rocket League rank tier first');
+                return;
+            }
+
+            const selectedOption = rankSelect.options[rankSelect.selectedIndex];
+            const rankTier = selectedOption.getAttribute('data-tier');
+            const rankMMR = selectedOption.getAttribute('data-mmr');
+            const rankName = selectedOption.text;
+
+            // Show loading state
+            verifyButton.disabled = true;
+            verifyButton.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Verifying...';
+
+            // Show loading in result area
+            const resultDiv = document.getElementById('verificationResult');
+            if (resultDiv) {
+                resultDiv.innerHTML = `
+                    <div class="text-center py-3">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2">Verifying your rank...</p>
+                    </div>
+                `;
+            }
+
+            // Make API request
+            fetch('/api/profile/rank-check', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    manual_tier: rankTier,
+                    manual_mmr: rankMMR
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Show success result
+                    displayVerificationResult(data, resultDiv);
+
+                    // Update button
+                    verifyButton.classList.remove('btn-primary');
+                    verifyButton.classList.add('btn-success');
+                    verifyButton.innerHTML = '<i class="fas fa-check me-2"></i> Verification Complete';
+
+                    // Show page reload notice
+                    setTimeout(() => {
+                        if (confirm('Verification successful! Would you like to reload the page to see your updated status?')) {
+                            window.location.reload();
+                        }
+                    }, 2000);
+                } else {
+                    handleVerificationError(data.message || "Verification failed", verifyButton, resultDiv);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                handleVerificationError("Server error: " + error.message, verifyButton, resultDiv);
+            });
+        });
+    }
+});
+
+function displayVerificationResult(data, resultDiv) {
+    if (!resultDiv) return;
+
+    const rankColorClass = data.rank === 'Rank A' ? 'rank-a' :
+                          data.rank === 'Rank B' ? 'rank-b' : 'rank-c';
+    const badgeClass = data.rank === 'Rank A' ? 'bg-danger' :
+                      data.rank === 'Rank B' ? 'bg-primary' : 'bg-success';
+    const rankIcon = data.rank === 'Rank A' ? 'fas fa-trophy' :
+                    data.rank === 'Rank B' ? 'fas fa-award' : 'fas fa-medal';
+
+    let discordAlert = '';
+    if (data.role_assignment && data.role_assignment.success) {
+        discordAlert = `
+            <div class="alert alert-success mt-3">
+                <i class="fab fa-discord me-2"></i> Discord role assigned successfully!
+            </div>`;
+    } else {
+        discordAlert = `
+            <div class="alert alert-warning mt-3">
+                <i class="fab fa-discord me-2"></i> Could not assign Discord role automatically. Please contact an admin.
+            </div>`;
+    }
+
+    resultDiv.innerHTML = `
+        <div class="alert alert-success mb-3">
+            <i class="fas fa-check-circle me-2"></i> Rank verification successful!
+        </div>
+
+        <div class="rank-card">
+            <div class="rank-header ${rankColorClass}">
+                <i class="${rankIcon} fa-2x"></i>
+            </div>
+            <div class="rank-body">
+                <h6 class="rank-title">${data.rank}</h6>
+                <p class="rank-mmr">Starting MMR: ${data.mmr}</p>
+                <span class="badge ${badgeClass}">${data.rank} Role</span>
+            </div>
+        </div>
+
+        ${discordAlert}
+    `;
+}
+
+function handleVerificationError(message, button, resultDiv) {
+    // Reset button
+    if (button) {
+        button.disabled = false;
+        button.classList.remove('btn-success');
+        button.classList.add('btn-primary');
+        button.innerHTML = '<i class="fas fa-check-circle me-2"></i> Verify My Rank';
+    }
+
+    // Show error message
+    if (resultDiv) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle me-2"></i> Error: ${message}
+            </div>
+            <p class="mt-3">Please try again or contact an admin if the issue persists.</p>
+        `;
+    }
+}
+</script>
+{% endblock %}

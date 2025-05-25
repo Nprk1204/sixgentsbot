@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 import os
@@ -12,16 +12,32 @@ from dotenv import load_dotenv
 import functools
 import re
 
+# Import our Discord OAuth integration
+from discord_oauth import DiscordOAuth, login_required, get_current_user
+
 # Initialize Flask app
 app = Flask(__name__)
-app.secret_key = os.getenv('FLASK_SECRET_KEY', '')
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'your-secret-key-here')
 
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv('MONGO_URI')
 RLTRACKER_API_KEY = os.getenv('RLTRACKER_API_KEY', '')
 DISCORD_TOKEN = os.getenv('DISCORD_TOKEN', '')
-DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')  # Provide hardcoded fallback
+DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')
+
+# Discord OAuth configuration
+DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '')
+DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
+DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', 'http://localhost:5000/auth/discord/callback')
+
+# Initialize Discord OAuth
+discord_oauth = DiscordOAuth(
+    app=app,
+    client_id=DISCORD_CLIENT_ID,
+    client_secret=DISCORD_CLIENT_SECRET,
+    redirect_uri=DISCORD_REDIRECT_URI
+)
 
 # Debug environment variables
 print("\n=== ENVIRONMENT VARIABLES DEBUG ===")
@@ -29,6 +45,8 @@ print(f"DISCORD_TOKEN exists: {'Yes' if DISCORD_TOKEN else 'No'}")
 print(f"DISCORD_TOKEN length: {len(DISCORD_TOKEN) if DISCORD_TOKEN else 0}")
 print(f"DISCORD_GUILD_ID exists: {'Yes' if DISCORD_GUILD_ID else 'No'}")
 print(f"DISCORD_GUILD_ID value: '{DISCORD_GUILD_ID}'")
+print(f"DISCORD_CLIENT_ID exists: {'Yes' if DISCORD_CLIENT_ID else 'No'}")
+print(f"DISCORD_CLIENT_SECRET exists: {'Yes' if DISCORD_CLIENT_SECRET else 'No'}")
 print("===================================\n")
 
 
@@ -87,14 +105,13 @@ def cached(timeout=5 * 60, key_prefix='view/%s'):
 # Connect to MongoDB with error handling
 try:
     client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
-    # Ping the database to verify connection
     client.admin.command('ping')
     print("MongoDB connection successful!")
     db = client['sixgents_db']
     players_collection = db['players']
     matches_collection = db['matches']
     ranks_collection = db['ranks']
-    resets_collection = db['resets']  # New collection for tracking resets
+    resets_collection = db['resets']
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
@@ -126,6 +143,12 @@ except Exception as e:
         def delete_many(self, *args, **kwargs):
             return None
 
+        def insert_one(self, *args, **kwargs):
+            return None
+
+        def update_one(self, *args, **kwargs):
+            return None
+
 
     db = {'players': FallbackDB(), 'matches': FallbackDB(), 'ranks': FallbackDB(), 'resets': FallbackDB()}
     players_collection = db['players']
@@ -134,7 +157,81 @@ except Exception as e:
     resets_collection = db['resets']
 
 
-# Routes
+# Context processor to make current user available in all templates
+@app.context_processor
+def inject_user():
+    return dict(current_user=get_current_user())
+
+
+# Discord OAuth Routes
+@app.route('/auth/discord/login')
+def discord_login():
+    """Initiate Discord OAuth login"""
+    return redirect(discord_oauth.get_oauth_url())
+
+
+@app.route('/auth/discord/callback')
+def discord_callback():
+    """Handle Discord OAuth callback"""
+    code = request.args.get('code')
+    if not code:
+        flash('Authentication failed: No authorization code received', 'error')
+        return redirect(url_for('home'))
+
+    try:
+        # Exchange code for access token
+        token_data = discord_oauth.exchange_code(code)
+
+        if 'access_token' not in token_data:
+            flash('Authentication failed: Could not get access token', 'error')
+            return redirect(url_for('home'))
+
+        access_token = token_data['access_token']
+
+        # Get user information
+        user_info = discord_oauth.get_user_info(access_token)
+        if not user_info:
+            flash('Authentication failed: Could not get user information', 'error')
+            return redirect(url_for('home'))
+
+        # Get guild member information if guild ID is available
+        guild_member = None
+        if DISCORD_GUILD_ID:
+            guild_member = discord_oauth.get_guild_member(
+                access_token,
+                DISCORD_GUILD_ID,
+                user_info['id']
+            )
+
+        # Store user in session
+        session['discord_user'] = {
+            'id': user_info['id'],
+            'username': user_info['username'],
+            'global_name': user_info.get('global_name'),
+            'discriminator': user_info.get('discriminator'),
+            'avatar': user_info.get('avatar'),
+            'access_token': access_token,
+            'guild_member': guild_member
+        }
+
+        flash(f'Successfully logged in as {user_info["username"]}!', 'success')
+        return redirect(url_for('profile'))
+
+    except Exception as e:
+        print(f"Discord OAuth error: {e}")
+        flash('Authentication failed: An error occurred during login', 'error')
+        return redirect(url_for('home'))
+
+
+@app.route('/auth/discord/logout')
+def discord_logout():
+    """Log out the user"""
+    session.pop('discord_user', None)
+    flash('Successfully logged out!', 'info')
+    return redirect(url_for('home'))
+
+
+# Main Routes
 @app.route('/')
 def home():
     """Display the home page with stats and featured players"""
@@ -180,7 +277,7 @@ def home():
         matches = player.get("global_matches", 0)
         wins = player.get("global_wins", 0)
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
-        player["mmr"] = player.get("global_mmr", 0)  # For consistency in template
+        player["mmr"] = player.get("global_mmr", 0)
 
     # Get recent matches
     recent_matches = list(matches_collection.find(
@@ -233,29 +330,94 @@ def leaderboard():
 @cached(timeout=60)
 def leaderboard_by_type(board_type):
     """Display the leaderboard page for a specific type"""
-    # Validate board_type
     valid_types = ['global', 'rank-a', 'rank-b', 'rank-c', 'all']
     if board_type not in valid_types:
-        board_type = 'global'  # Default to global for invalid types
+        board_type = 'global'
 
     return render_template('leaderboard.html', board_type=board_type)
 
 
-@app.route('/rank-check')
-def rank_check():
-    """Display the rank check page"""
-    # Get all discord roles
-    roles = ["Rank A", "Rank B", "Rank C"]
-
-    return render_template('rank_check.html', roles=roles)
-
-
-@cached(timeout=60)
-def get_leaderboard():
-    """API endpoint to get leaderboard data with pagination - default to global"""
-    return get_leaderboard_by_type('global')
+@app.route('/profile')
+@login_required
+def profile():
+    """Display the user's profile page"""
+    user = get_current_user()
+    return render_template('profile.html', user=user)
 
 
+@app.route('/profile/stats')
+@login_required
+def profile_stats():
+    """Display detailed player stats"""
+    user = get_current_user()
+
+    # Get player data from database
+    player_data = players_collection.find_one({"id": user['id']})
+
+    if not player_data:
+        # No stats available
+        return render_template('profile_stats.html', user=user, player_data=None, ranked_matches=[], global_matches=[])
+
+    # Get match history for performance graphs
+    match_history = list(matches_collection.find({
+        "$or": [
+            {"team1.id": user['id']},
+            {"team2.id": user['id']}
+        ],
+        "status": "completed"
+    }).sort("completed_at", 1))  # Sort ascending for chronological order
+
+    # Process match history for graphs
+    ranked_matches = []
+    global_matches = []
+
+    for match in match_history:
+        # Determine if player won
+        player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
+        winner = match.get("winner")
+        player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+
+        match_data = {
+            'date': match.get('completed_at').isoformat() if match.get('completed_at') else '',
+            'won': player_won,
+            'match_id': match.get('match_id', ''),
+        }
+
+        # Find MMR change for this player
+        for mmr_change in match.get("mmr_changes", []):
+            if mmr_change.get("player_id") == user['id']:
+                if match.get("is_global"):
+                    if mmr_change.get("is_global", False):
+                        match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                        match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
+                        global_matches.append(match_data)
+                else:
+                    if not mmr_change.get("is_global", False):
+                        match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                        match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
+                        ranked_matches.append(match_data)
+                break
+
+    return render_template('profile_stats.html',
+                           user=user,
+                           player_data=player_data,
+                           ranked_matches=ranked_matches,
+                           global_matches=global_matches)
+
+
+@app.route('/profile/rank-check')
+@login_required
+def profile_rank_check():
+    """Display rank check page for authenticated user"""
+    user = get_current_user()
+
+    # Check if user already has rank verification
+    rank_data = ranks_collection.find_one({"discord_id": user['id']})
+
+    return render_template('profile_rank_check.html', user=user, rank_data=rank_data)
+
+
+# API Routes
 @app.route('/api/leaderboard/<board_type>')
 @cached(timeout=60)
 def get_leaderboard_by_type(board_type):
@@ -263,43 +425,32 @@ def get_leaderboard_by_type(board_type):
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 25, type=int)
 
-    # Limit per_page to reasonable values
     if per_page > 100:
         per_page = 100
 
-    # Define query and sort field based on board type
     query = {}
     sort_field = "mmr"
     mmr_field = "mmr"
 
     if board_type == "global":
-        # For global leaderboard, filter players with global matches
         query = {"global_matches": {"$gt": 0}}
         sort_field = "global_mmr"
         mmr_field = "global_mmr"
     elif board_type == "rank-a":
-        # For Rank A, filter players with MMR >= 1600
         query = {"mmr": {"$gte": 1600}, "matches": {"$gt": 0}}
     elif board_type == "rank-b":
-        # For Rank B, filter players with MMR between 1100 and 1599
         query = {"mmr": {"$gte": 1100, "$lt": 1600}, "matches": {"$gt": 0}}
     elif board_type == "rank-c":
-        # For Rank C, filter players with MMR < 1100
         query = {"mmr": {"$lt": 1100}, "matches": {"$gt": 0}}
     elif board_type != "all":
-        # Invalid board type, fallback to global
         board_type = "global"
         query = {"global_matches": {"$gt": 0}}
         sort_field = "global_mmr"
         mmr_field = "global_mmr"
 
-    # Get total count for pagination info
     total_players = players_collection.count_documents(query)
-
-    # Calculate skip value for pagination
     skip = (page - 1) * per_page
 
-    # Get players with pagination - Add current_streak field
     projection = {
         "_id": 0,
         "id": 1,
@@ -313,10 +464,10 @@ def get_leaderboard_by_type(board_type):
         "matches": 1,
         "global_matches": 1,
         "last_updated": 1,
-        "current_streak": 1,  # Add streak fields
+        "current_streak": 1,
         "longest_win_streak": 1,
         "longest_loss_streak": 1,
-        "global_current_streak": 1,  # Add global streak fields
+        "global_current_streak": 1,
         "global_longest_win_streak": 1,
         "global_longest_loss_streak": 1
     }
@@ -325,7 +476,7 @@ def get_leaderboard_by_type(board_type):
                        .sort(sort_field, -1)
                        .skip(skip).limit(per_page))
 
-    # Get recent MMR changes for each player
+    # Process players for display
     for player in top_players:
         player_id = player.get("id")
 
@@ -335,7 +486,6 @@ def get_leaderboard_by_type(board_type):
             current_streak = player.get("global_current_streak", 0)
             longest_win_streak = player.get("global_longest_win_streak", 0)
             longest_loss_streak = player.get("global_longest_loss_streak", 0)
-            # Add this field to standardize what's displayed
             player["mmr_display"] = player.get(mmr_field, 0)
         else:
             matches = player.get("matches", 0)
@@ -345,16 +495,14 @@ def get_leaderboard_by_type(board_type):
             longest_loss_streak = player.get("longest_loss_streak", 0)
             player["mmr_display"] = player.get(mmr_field, 0)
 
-        # Calculate win rate
         player["win_rate"] = round((wins / matches) * 100, 2) if matches > 0 else 0
 
-        # Format the last_updated date
         if "last_updated" in player and player["last_updated"]:
             player["last_match"] = player["last_updated"].strftime("%Y-%m-%d")
         else:
             player["last_match"] = "Unknown"
 
-        # Format streak for display - add emoji and enhanced styling for global
+        # Format streak for display
         if current_streak > 0:
             if current_streak >= 3:
                 if board_type == "global":
@@ -374,15 +522,13 @@ def get_leaderboard_by_type(board_type):
         else:
             player["streak_display"] = "—"
 
-        # Get the most recent MMR change for this player
+        # Get recent MMR change
         recent_mmr_change = get_recent_mmr_change(player_id, board_type == "global")
         player["recent_mmr_change"] = recent_mmr_change
 
-        # Remove the datetime object before jsonifying
         if "last_updated" in player:
             del player["last_updated"]
 
-    # Return with pagination info
     return jsonify({
         "players": top_players,
         "board_type": board_type,
@@ -398,7 +544,6 @@ def get_leaderboard_by_type(board_type):
 def get_recent_mmr_change(player_id, is_global=False):
     """Get the most recent MMR change for a player"""
     try:
-        # Find the most recent completed match for this player
         query = {
             "$or": [
                 {"team1.id": player_id},
@@ -408,7 +553,6 @@ def get_recent_mmr_change(player_id, is_global=False):
             "mmr_changes": {"$exists": True, "$ne": []}
         }
 
-        # Filter by match type if specified
         if is_global is not None:
             query["is_global"] = is_global
 
@@ -424,10 +568,8 @@ def get_recent_mmr_change(player_id, is_global=False):
                 "class": "text-muted"
             }
 
-        # Find this player's MMR change in the match
         for mmr_change in recent_match.get("mmr_changes", []):
             if mmr_change.get("player_id") == player_id:
-                # Check if this is the right type of match for the MMR change
                 if is_global and mmr_change.get("is_global", False):
                     change = mmr_change.get("mmr_change", 0)
                 elif not is_global and not mmr_change.get("is_global", False):
@@ -435,7 +577,6 @@ def get_recent_mmr_change(player_id, is_global=False):
                 else:
                     continue
 
-                # Format the display
                 if change > 0:
                     return {
                         "change": change,
@@ -455,7 +596,6 @@ def get_recent_mmr_change(player_id, is_global=False):
                         "class": "text-muted"
                     }
 
-        # No MMR change found for this player
         return {
             "change": 0,
             "display": "—",
@@ -535,7 +675,8 @@ def get_player(player_id):
 
         # Add extra ranked streak stats
         player["longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
-        player["longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
+        player[
+            "longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
 
         # Format streaks for display - GLOBAL STREAKS
         global_current_streak = player.get("global_current_streak", 0)
@@ -557,8 +698,10 @@ def get_player(player_id):
             player["global_streak_display"] = "No current streak"
 
         # Add extra global streak stats
-        player["global_longest_win_streak_display"] = f"{global_longest_win_streak} Wins" if global_longest_win_streak > 0 else "None"
-        player["global_longest_loss_streak_display"] = f"{abs(global_longest_loss_streak)} Losses" if global_longest_loss_streak < 0 else "None"
+        player[
+            "global_longest_win_streak_display"] = f"{global_longest_win_streak} Wins" if global_longest_win_streak > 0 else "None"
+        player[
+            "global_longest_loss_streak_display"] = f"{abs(global_longest_loss_streak)} Losses" if global_longest_loss_streak < 0 else "None"
 
         # Get recent matches for this player - handle potential errors
         try:
@@ -686,6 +829,74 @@ def search_players():
     return jsonify(results)
 
 
+# Profile-specific API routes
+@app.route('/api/profile/rank-check', methods=['POST'])
+@login_required
+def profile_rank_check_api():
+    """Handle rank check for authenticated user"""
+    user = get_current_user()
+    data = request.json
+
+    if not data:
+        return jsonify({"success": False, "message": "No data provided"}), 400
+
+    manual_tier = data.get('manual_tier')
+    manual_mmr = data.get('manual_mmr')
+
+    if not manual_tier or not manual_mmr:
+        return jsonify({"success": False, "message": "Missing tier or MMR data"}), 400
+
+    try:
+        # Store rank data
+        rank_document = {
+            "discord_username": user.get('global_name') or user.get('username'),
+            "discord_id": user['id'],
+            "rank": manual_tier,
+            "tier": manual_tier,
+            "mmr": int(manual_mmr),
+            "global_mmr": 300,
+            "timestamp": datetime.datetime.utcnow()
+        }
+
+        # Update or insert rank record
+        existing_rank = ranks_collection.find_one({"discord_id": user['id']})
+
+        if existing_rank:
+            update_data = rank_document.copy()
+            if "global_mmr" in existing_rank:
+                del update_data["global_mmr"]
+
+            ranks_collection.update_one(
+                {"discord_id": user['id']},
+                {"$set": update_data}
+            )
+        else:
+            ranks_collection.insert_one(rank_document)
+
+        # Try to assign Discord role
+        role_result = assign_discord_role(
+            username=user.get('global_name') or user.get('username'),
+            role_name=manual_tier,
+            discord_id=user['id']
+        )
+
+        return jsonify({
+            "success": True,
+            "message": "Rank verified successfully",
+            "rank": manual_tier,
+            "mmr": int(manual_mmr),
+            "role_assignment": role_result
+        })
+
+    except Exception as e:
+        print(f"Error in profile rank check: {str(e)}")
+        return jsonify({
+            "success": False,
+            "message": f"Error: {str(e)}"
+        }), 500
+
+
+# Rank verification functions (existing code)
 def get_tier_from_rank(rank):
     """Determine 6 Mans tier from Rocket League rank"""
     rank_lower = rank.lower()
@@ -710,170 +921,8 @@ def get_mmr_from_rank(rank):
         return 600  # Default MMR for Diamond and below
 
 
-@lru_cache(maxsize=100)
-def get_cached_rank(platform, username, cache_time=300):
-    """Get Rocket League rank with caching to avoid API rate limits"""
-    # Generate a cache key that includes timestamp rounded to cache_time
-    cache_key = f"{platform}:{username}:{int(time.time() / cache_time)}"
-    return fetch_rank_from_api(platform, username)
-
-
-def fetch_rank_from_api(platform, username):
-    """Fetch rank data from RLTracker or similar API"""
-    try:
-        # Example for RLTracker Network API
-        api_url = f"https://api.tracker.gg/api/v2/rocket-league/standard/profile/{platform}/{username}"
-
-        headers = {
-            "TRN-Api-Key": RLTRACKER_API_KEY,
-            "Accept": "application/json",
-            "Accept-Encoding": "gzip"
-        }
-
-        print(f"Fetching rank data for {username} on {platform} with API key: {RLTRACKER_API_KEY[:5]}...")
-
-        response = requests.get(api_url, headers=headers)
-
-        if response.status_code == 200:
-            data = response.json()
-
-            # For debugging
-            print("API Response received successfully")
-
-            # Parse the response to extract 3v3 competitive rank
-            rank_data = extract_3v3_rank(data)
-
-            return {
-                "success": True,
-                "username": username,
-                "platform": platform,
-                "rank": rank_data["rank"],
-                "tier": get_tier_from_rank(rank_data["rank"]),
-                "mmr": get_mmr_from_rank(rank_data["rank"]),
-                "profileUrl": f"https://rocketleague.tracker.network/rocket-league/profile/{platform}/{username}",
-                "timestamp": time.time()
-            }
-        else:
-            print(f"API Error: Status code {response.status_code}")
-            print(f"Response body: {response.text[:200]}")
-            return {
-                "success": False,
-                "error": f"API returned status code {response.status_code}",
-                "message": "Could not retrieve rank information"
-            }
-
-    except Exception as e:
-        print(f"Exception in fetch_rank_from_api: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e),
-            "message": "An error occurred while fetching rank data"
-        }
-
-def extract_3v3_rank(api_data):
-    """Extract 3v3 rank from API response data"""
-    try:
-        # Check if data exists
-        if "data" not in api_data:
-            print("No data found in API response")
-            return {"rank": "Unknown", "tierGroup": "Unknown"}
-
-        segments = api_data.get("data", {}).get("segments", [])
-
-        # For debugging
-        playlist_types = [segment.get("type") for segment in segments]
-        print(f"Found segment types: {playlist_types}")
-
-        # Try to find the ranked standard 3v3 playlist
-        for segment in segments:
-            if segment.get("type") == "playlist" and segment.get("metadata", {}).get("name") == "Ranked Standard 3v3":
-                tier = segment.get("stats", {}).get("tier", {}).get("metadata", {}).get("name", "Unranked")
-                division = segment.get("stats", {}).get("division", {}).get("metadata", {}).get("name", "I")
-
-                return {
-                    "rank": f"{tier} {division}",
-                    "tierGroup": tier.split()[0] if tier != "Unranked" else "Unranked"
-                }
-
-        # If we didn't find Ranked Standard 3v3, try looking for other playlists
-        for segment in segments:
-            if segment.get("type") == "playlist" and "Ranked" in segment.get("metadata", {}).get("name", ""):
-                tier = segment.get("stats", {}).get("tier", {}).get("metadata", {}).get("name", "Unranked")
-                division = segment.get("stats", {}).get("division", {}).get("metadata", {}).get("name", "I")
-
-                print(f"Found alternate playlist: {segment.get('metadata', {}).get('name')}")
-
-                return {
-                    "rank": f"{tier} {division}",
-                    "tierGroup": tier.split()[0] if tier != "Unranked" else "Unranked"
-                }
-
-        # If no ranked playlists found at all, use a fallback
-        return {"rank": "Unranked", "tierGroup": "Unranked"}
-
-    except Exception as e:
-        print(f"Error extracting rank: {str(e)}")
-        return {"rank": "Unknown", "tierGroup": "Unknown"}
-
-
-def store_rank_data(discord_username, game_username, platform, rank_data, discord_id=None):
-    """Store rank check data in the database"""
-    try:
-        # Debug print
-        print(f"Storing rank data for {discord_username} with MMR: {rank_data.get('mmr')}")
-        print(f"Game username: {game_username}")
-
-        # Create simplified rank document
-        rank_document = {
-            "discord_username": discord_username,
-            "discord_id": discord_id,  # Store the verified Discord ID if available
-            "game_username": game_username,
-            "platform": platform,
-            "rank": rank_data.get("rank"),
-            "tier": rank_data.get("tier"),
-            "mmr": rank_data.get("mmr"),  # This should be the MMR from manual input
-            "global_mmr": 300,  # Initialize global MMR at 300
-            "timestamp": datetime.datetime.utcnow()
-        }
-
-        # Debug print
-        print(f"Rank document to store: {rank_document}")
-
-        # Check if this user already has a rank record
-        existing_rank = ranks_collection.find_one({"discord_username": discord_username})
-
-        if existing_rank:
-            # Update existing record but preserve global_mmr if it exists
-            update_data = rank_document.copy()
-            if "global_mmr" in existing_rank:
-                del update_data["global_mmr"]
-
-            ranks_collection.update_one(
-                {"discord_username": discord_username},
-                {"$set": update_data}
-            )
-            print(f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
-        else:
-            # Insert new record
-            ranks_collection.insert_one(rank_document)
-            print(f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
-
-    except Exception as e:
-        print(f"Error storing rank data: {str(e)}")
-
-
 def assign_discord_role(username, role_name=None, role_id=None, discord_id=None):
-    """Improved Discord role assignment with better error handling and user matching
-
-    Args:
-        username: The Discord username (display name) to match
-        role_name: The name of the role to assign (e.g. "Rank A")
-        role_id: Optional role ID if known instead of name
-        discord_id: Optional Discord user ID for exact matching (preferred if available)
-
-    Returns:
-        Dict with success status and message
-    """
+    """Improved Discord role assignment with better error handling and user matching"""
     print("\n===== DISCORD ROLE ASSIGNMENT DEBUG =====")
     print(f"Attempting to assign role to user: {username}")
     print(f"Discord ID provided: {discord_id if discord_id else 'No'}")
@@ -922,7 +971,6 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         guild_data = guild_response.json()
         print(f"✅ Connected to server: {guild_data.get('name')}")
 
-        # ====== IMPROVED USER MATCHING ======
         # STEP 3: If Discord ID is provided, use that for exact matching first
         user_id = None
         matched_name = None
@@ -945,38 +993,15 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         # If Discord ID wasn't provided or didn't work, try username search
         if not user_id:
             print("\n3b. Finding user with username search...")
+            # First try to search by username directly using the search endpoint
+            search_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/search?query={username}&limit=10"
+            search_response = requests.get(search_url, headers=headers)
 
-        # First try to search by username directly using the search endpoint
-        # This is more efficient than fetching all members
-        search_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/search?query={username}&limit=10"
-        search_response = requests.get(search_url, headers=headers)
+            if search_response.status_code == 200:
+                search_results = search_response.json()
+                print(f"Found {len(search_results)} potential matches")
 
-        user_id = None
-        matched_name = None
-
-        if search_response.status_code == 200:
-            search_results = search_response.json()
-            print(f"Found {len(search_results)} potential matches")
-
-            # First try exact matches on username, global_name, or nickname
-            for member in search_results:
-                member_user = member.get('user', {})
-                member_username = member_user.get('username', '')
-                member_global_name = member_user.get('global_name', '')
-                member_nickname = member.get('nick', '')
-                member_id = member_user.get('id')
-
-                # Check for exact match first (case insensitive)
-                if (username.lower() == member_username.lower() or
-                        username.lower() == member_global_name.lower() or
-                        username.lower() == member_nickname.lower()):
-                    user_id = member_id
-                    matched_name = member_global_name or member_username
-                    print(f"✅ Found exact match: {matched_name} (ID: {user_id})")
-                    break
-
-            # If no exact match, try substring match but only if we have few results
-            if not user_id and len(search_results) <= 3:
+                # First try exact matches on username, global_name, or nickname
                 for member in search_results:
                     member_user = member.get('user', {})
                     member_username = member_user.get('username', '')
@@ -984,87 +1009,14 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
                     member_nickname = member.get('nick', '')
                     member_id = member_user.get('id')
 
-                    # Check if username is contained in any of the name fields
-                    if (username.lower() in member_username.lower() or
-                            username.lower() in member_global_name.lower() or
-                            username.lower() in member_nickname.lower()):
+                    # Check for exact match first (case insensitive)
+                    if (username.lower() == member_username.lower() or
+                            username.lower() == member_global_name.lower() or
+                            username.lower() == member_nickname.lower()):
                         user_id = member_id
                         matched_name = member_global_name or member_username
-                        print(f"✅ Found partial match: {matched_name} (ID: {user_id})")
+                        print(f"✅ Found exact match: {matched_name} (ID: {user_id})")
                         break
-        else:
-            print(f"⚠️ Search endpoint failed: {search_response.status_code}")
-            print(f"Falling back to member list retrieval")
-
-        # If search didn't work, fall back to fetching members directly
-        if not user_id:
-            print("\nFalling back to member list retrieval...")
-            members_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members?limit=1000"
-            members_response = requests.get(members_url, headers=headers)
-
-            if members_response.status_code != 200:
-                print(f"❌ Failed to get members: {members_response.status_code}")
-                print(f"Response: {members_response.text[:200]}")
-                return {"success": False, "message": "Failed to retrieve guild members"}
-
-            members = members_response.json()
-            print(f"Retrieved {len(members)} members to search through")
-
-            # First try exact matches
-            for member in members:
-                member_user = member.get('user', {})
-                member_username = member_user.get('username', '')
-                member_global_name = member_user.get('global_name', '')
-                member_nickname = member.get('nick', '')
-                member_id = member_user.get('id')
-
-                if (username.lower() == member_username.lower() or
-                        username.lower() == member_global_name.lower() or
-                        username.lower() == member_nickname.lower()):
-                    user_id = member_id
-                    matched_name = member_global_name or member_username
-                    print(f"✅ Found exact match in member list: {matched_name} (ID: {user_id})")
-                    break
-
-            # Only if no exact match is found, try partial match
-            if not user_id:
-                # Create a scoring system for partial matches
-                potential_matches = []
-
-                for member in members:
-                    member_user = member.get('user', {})
-                    member_username = member_user.get('username', '')
-                    member_global_name = member_user.get('global_name', '')
-                    member_nickname = member.get('nick', '')
-                    member_id = member_user.get('id')
-
-                    score = 0
-                    # Exact substring match in username
-                    if username.lower() in member_username.lower():
-                        score += 3
-                    # Exact substring match in global name
-                    if member_global_name and username.lower() in member_global_name.lower():
-                        score += 4  # Slightly higher weight for global name
-                    # Exact substring match in nickname
-                    if member_nickname and username.lower() in member_nickname.lower():
-                        score += 5  # Highest weight for nickname
-
-                    if score > 0:
-                        potential_matches.append({
-                            'id': member_id,
-                            'name': member_global_name or member_username,
-                            'score': score
-                        })
-
-                # Sort potential matches by score (highest first)
-                potential_matches.sort(key=lambda x: x['score'], reverse=True)
-
-                # If we have matches, use the highest scoring one
-                if potential_matches:
-                    best_match = potential_matches[0]
-                    user_id = best_match['id']
-                    matched_name = best_match['name']
-                    print(f"✅ Found best partial match: {matched_name} (ID: {user_id}, Score: {best_match['score']})")
 
         # If we still couldn't find the user
         if not user_id:
@@ -1084,14 +1036,6 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         roles = roles_response.json()
         print(f"✅ Found {len(roles)} roles in the server")
 
-        # Print all roles for debugging
-        print("\nServer roles:")
-        for role in roles:
-            role_id_value = role.get('id')
-            role_name_value = role.get('name')
-            role_position = role.get('position')
-            print(f"  Role: '{role_name_value}' (ID: {role_id_value}, Position: {role_position})")
-
         # Find the bot member to get its roles
         bot_member_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{bot_id}"
         bot_member_response = requests.get(bot_member_url, headers=headers)
@@ -1110,7 +1054,6 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
                 bot_highest_role_position = role.get('position', 0)
 
         print(f"\nBot's highest role position: {bot_highest_role_position}")
-        print(f"Bot roles: {bot_roles}")
 
         # STEP 5: Find target role (by name or ID)
         print("\n5. Finding target role...")
@@ -1132,24 +1075,6 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             if not target_role_id:
                 print(f"❌ No role found with name: '{role_name}'")
                 return {"success": False, "message": f"Role '{role_name}' not found"}
-        elif target_role_id:
-            # Verify the ID exists
-            role_found = False
-            for role in roles:
-                if role.get('id') == target_role_id:
-                    target_role_position = role.get('position')
-                    target_role_name = role.get('name')
-                    print(
-                        f"✅ Found role by ID: '{target_role_name}' (ID: {target_role_id}, Position: {target_role_position})")
-                    role_found = True
-                    break
-
-            if not role_found:
-                print(f"❌ No role found with ID: '{target_role_id}'")
-                return {"success": False, "message": "Role ID not found"}
-        else:
-            print("❌ No role name or ID provided")
-            return {"success": False, "message": "No role specified"}
 
         # STEP 6: Check role hierarchy
         print("\n6. Checking role hierarchy...")
@@ -1179,52 +1104,16 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
 
         # STEP 8: Assign the role
         print("\n8. Attempting to assign role...")
+        assign_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{target_role_id}"
+        assign_response = requests.put(assign_url, headers=headers)
 
-        # Implement retry logic with backoff
-        max_retries = 3
-        base_delay = 1  # in seconds
-
-        for attempt in range(max_retries):
-            assign_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{target_role_id}"
-            assign_response = requests.put(assign_url, headers=headers)
-
-            if assign_response.status_code in [204, 200]:
-                print(f"✅ Role assignment successful! Status code: {assign_response.status_code}")
-                return {"success": True,
-                        "message": f"Role '{target_role_name}' assigned successfully to {matched_name}"}
-
-            # Handle rate limiting
-            if assign_response.status_code == 429:
-                retry_after = int(assign_response.headers.get('Retry-After', base_delay * (2 ** attempt)))
-                print(f"Rate limited. Waiting {retry_after} seconds before retry...")
-                time.sleep(retry_after)
-                continue
-
-            # Other errors
+        if assign_response.status_code in [204, 200]:
+            print(f"✅ Role assignment successful! Status code: {assign_response.status_code}")
+            return {"success": True, "message": f"Role '{target_role_name}' assigned successfully to {matched_name}"}
+        else:
             print(f"❌ Role assignment failed: {assign_response.status_code}")
             print(f"Response: {assign_response.text[:500]}")
-
-            if assign_response.status_code == 403:
-                print("This is likely a permissions issue. Check that your bot has 'Manage Roles' permission.")
-
-                # Try to get detailed error message
-                try:
-                    error_data = assign_response.json()
-                    error_message = error_data.get('message', 'Unknown error')
-                    print(f"Error message: {error_message}")
-                    return {"success": False, "message": f"Permission denied: {error_message}"}
-                except:
-                    pass
-
-                return {"success": False, "message": "Permission denied. Check bot's role hierarchy and permissions."}
-
-            # Wait before retrying (if not the last attempt)
-            if attempt < max_retries - 1:
-                delay = base_delay * (2 ** attempt)  # Exponential backoff
-                print(f"Retrying in {delay} seconds... (Attempt {attempt + 1}/{max_retries})")
-                time.sleep(delay)
-            else:
-                return {"success": False, "message": f"Failed to assign role after {max_retries} attempts"}
+            return {"success": False, "message": f"Failed to assign role: {assign_response.status_code}"}
 
     except Exception as e:
         import traceback
@@ -1235,88 +1124,14 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         print("\n===== ROLE ASSIGNMENT COMPLETED =====\n")
 
 
-def handle_verify_rank_check(discord_username, tier, discord_id=None):
-    """
-    Main handler for rank verification and role assignment
-
-    Args:
-        discord_username: The Discord username to assign the role to
-        tier: The tier/role to assign (e.g., "Rank A", "Rank B", "Rank C")
-        discord_id: Optional. Direct Discord user ID when available (preferred method)
-
-    Returns:
-        Dictionary with success status and message
-    """
-    print(f"\n====== VERIFY RANK CHECK ======")
-    print(f"Processing verification for user: {discord_username}")
-    print(f"Discord ID provided: {discord_id if discord_id else 'No'}")
-    print(f"Requested tier: {tier}")
-
-    # Verify we have all required information
-    if not discord_username or not tier:
-        print("❌ Missing required information")
-        return {
-            "success": False,
-            "message": "Both Discord username and tier are required"
-        }
-
-    # Validate tier format
-    if tier not in ["Rank A", "Rank B", "Rank C"]:
-        print(f"❌ Invalid tier format: {tier}")
-        return {
-            "success": False,
-            "message": f"Invalid tier: {tier}. Must be 'Rank A', 'Rank B', or 'Rank C'."
-        }
-
-    # Check environment variables
-    if not DISCORD_TOKEN:
-        print("❌ DISCORD_TOKEN not found in environment")
-        return {
-            "success": False,
-            "message": "Missing Discord bot token in server configuration"
-        }
-
-    if not DISCORD_GUILD_ID:
-        print("❌ DISCORD_GUILD_ID not found in environment")
-        return {
-            "success": False,
-            "message": "Missing Discord guild ID in server configuration"
-        }
-
-    print("✅ All required information is present")
-
-    # Perform the Discord role assignment - passing the Discord ID if available
-    assignment_result = assign_discord_role(
-        username=discord_username, 
-        role_name=tier,
-        discord_id=discord_id
-    )
-
-    if not assignment_result["success"]:
-        print(f"❌ Role assignment failed: {assignment_result['message']}")
-        # Create a response that will be displayed to the user
-        return {
-            "success": False,
-            "message": "Could not assign Discord role automatically. Please contact an admin.",
-            "error_details": assignment_result['message'],
-            "role_assignment": assignment_result
-        }
-
-    print(f"✅ Role assignment successful: {assignment_result['message']}")
-    return {
-        "success": True,
-        "message": f"Successfully assigned {tier} role to {discord_username}",
-        "role_assignment": assignment_result
-    }
-
-# Modified rank-check API endpoint to extract and use Discord ID
+# Legacy rank check API endpoint (keep for backwards compatibility)
 @app.route('/api/rank-check', methods=['GET'])
 def check_rank():
     """API endpoint to check Rocket League rank with Discord username verification"""
     platform = request.args.get('platform', '')
     username = request.args.get('username', '')
     discord_username = request.args.get('discord_username', '')
-    discord_id = request.args.get('discord_id', '')  # Get Discord ID if provided
+    discord_id = request.args.get('discord_id', '')
     manual_tier = request.args.get('manual_tier', '')
     manual_mmr = request.args.get('manual_mmr', '')
 
@@ -1335,7 +1150,7 @@ def check_rank():
         print(f"Using manually provided tier: {manual_tier}")
         # Use provided MMR if available, otherwise fallback
         mmr = int(manual_mmr) if manual_mmr and manual_mmr.isdigit() else get_mmr_from_rank(manual_tier)
-        print(f"Using MMR: {mmr}")  # Debug MMR value
+        print(f"Using MMR: {mmr}")
 
         manual_result = {
             "success": True,
@@ -1344,31 +1159,26 @@ def check_rank():
             "rank": manual_tier,
             "tier": manual_tier,
             "mmr": mmr,
-            "global_mmr": 300,  # Initialize Global MMR at 300
+            "global_mmr": 300,
             "timestamp": time.time(),
             "manual_verification": True
         }
-
-        # NEW: Add debug print to confirm MMR
-        print(f"DEBUG: Setting MMR to {mmr} for player with Discord username {discord_username}")
 
         # Handle Discord role assignment if username provided
         role_result = {"success": False, "message": "No Discord username provided"}
 
         if discord_username:
             print(f"Storing manual rank data for Discord user: {discord_username}")
-            # Pass the Discord ID if available
             store_rank_data(discord_username, username or discord_username, platform or "unknown", manual_result,
                             discord_id=discord_id)
 
-            # Try the role assignment - pass discord_id as well when available
+            # Try the role assignment
             role_result = assign_discord_role(
                 username=discord_username,
                 role_name=manual_tier,
                 discord_id=discord_id
             )
 
-            # Store the result
             manual_result["role_assignment"] = role_result
 
         return jsonify(manual_result)
@@ -1383,7 +1193,6 @@ def check_rank():
         tier = mock_data.get("tier")
         store_rank_data(discord_username, username or discord_username, platform, mock_data, discord_id=discord_id)
 
-        # Direct call to assign_discord_role with the discord_id if available
         role_result = assign_discord_role(
             username=discord_username,
             role_name=tier,
@@ -1395,71 +1204,52 @@ def check_rank():
     return jsonify(mock_data)
 
 
-@app.route('/api/user-rank/<discord_username>')
-def get_user_rank(discord_username):
-    """Get stored rank data for a user"""
+def store_rank_data(discord_username, game_username, platform, rank_data, discord_id=None):
+    """Store rank check data in the database"""
     try:
-        # Find rank record
-        rank_data = ranks_collection.find_one({"discord_username": discord_username}, {"_id": 0})
+        print(f"Storing rank data for {discord_username} with MMR: {rank_data.get('mmr')}")
+        print(f"Game username: {game_username}")
 
-        if not rank_data:
-            return jsonify({"success": False, "message": "No rank data found for this user"}), 404
+        # Create simplified rank document
+        rank_document = {
+            "discord_username": discord_username,
+            "discord_id": discord_id,
+            "game_username": game_username,
+            "platform": platform,
+            "rank": rank_data.get("rank"),
+            "tier": rank_data.get("tier"),
+            "mmr": rank_data.get("mmr"),
+            "global_mmr": 300,
+            "timestamp": datetime.datetime.utcnow()
+        }
 
-        # Format timestamp for output
-        if "timestamp" in rank_data:
-            rank_data["checked_at"] = rank_data["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
-            del rank_data["timestamp"]
+        print(f"Rank document to store: {rank_document}")
 
-        return jsonify({
-            "success": True,
-            "rank_data": rank_data
-        })
+        # Check if this user already has a rank record
+        existing_rank = ranks_collection.find_one({"discord_username": discord_username})
 
-    except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"Error retrieving rank data: {str(e)}"
-        }), 500
+        if existing_rank:
+            # Update existing record but preserve global_mmr if it exists
+            update_data = rank_document.copy()
+            if "global_mmr" in existing_rank:
+                del update_data["global_mmr"]
 
-
-# NEW API ENDPOINT: Get the timestamp of the last leaderboard reset
-@app.route('/api/reset-timestamp', methods=['GET'])
-def get_last_reset_timestamp():
-    """Get the timestamp of the last reset (leaderboard or verification)"""
-    try:
-        # Find the most recent reset of any type
-        last_reset = resets_collection.find_one(
-            {"type": {"$in": ["leaderboard_reset", "verification_reset"]}},
-            sort=[("timestamp", -1)]
-        )
-
-        if last_reset:
-            # Convert timestamp to ISO format string
-            timestamp_str = last_reset["timestamp"].isoformat() if isinstance(last_reset["timestamp"],
-                                                                            datetime.datetime) else str(
-                last_reset["timestamp"])
-
-            return jsonify({
-                "success": True,
-                "last_reset": timestamp_str,
-                "reset_type": last_reset.get("type", "unknown")
-            })
+            ranks_collection.update_one(
+                {"discord_username": discord_username},
+                {"$set": update_data}
+            )
+            print(f"Updated rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
         else:
-            return jsonify({
-                "success": False,
-                "last_reset": None,
-                "message": "No reset events found"
-            })
+            # Insert new record
+            ranks_collection.insert_one(rank_document)
+            print(f"Created new rank record for {discord_username} with MMR: {rank_data.get('mmr')}")
+
     except Exception as e:
-        return jsonify({
-            "success": False,
-            "message": f"Error retrieving reset timestamp: {str(e)}"
-        }), 500
+        print(f"Error storing rank data: {str(e)}")
 
 
 def get_mock_rank_data(username, platform):
     """Generate varied mock data for testing"""
-    # Use username to deterministically generate different ranks
     import hashlib
 
     # Generate a hash based on username for consistency
@@ -1503,10 +1293,71 @@ def get_mock_rank_data(username, platform):
     }
 
 
+@app.route('/api/user-rank/<discord_username>')
+def get_user_rank(discord_username):
+    """Get stored rank data for a user"""
+    try:
+        # Find rank record
+        rank_data = ranks_collection.find_one({"discord_username": discord_username}, {"_id": 0})
+
+        if not rank_data:
+            return jsonify({"success": False, "message": "No rank data found for this user"}), 404
+
+        # Format timestamp for output
+        if "timestamp" in rank_data:
+            rank_data["checked_at"] = rank_data["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            del rank_data["timestamp"]
+
+        return jsonify({
+            "success": True,
+            "rank_data": rank_data
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving rank data: {str(e)}"
+        }), 500
+
+
+@app.route('/api/reset-timestamp', methods=['GET'])
+def get_last_reset_timestamp():
+    """Get the timestamp of the last reset (leaderboard or verification)"""
+    try:
+        # Find the most recent reset of any type
+        last_reset = resets_collection.find_one(
+            {"type": {"$in": ["leaderboard_reset", "verification_reset"]}},
+            sort=[("timestamp", -1)]
+        )
+
+        if last_reset:
+            # Convert timestamp to ISO format string
+            timestamp_str = last_reset["timestamp"].isoformat() if isinstance(last_reset["timestamp"],
+                                                                              datetime.datetime) else str(
+                last_reset["timestamp"])
+
+            return jsonify({
+                "success": True,
+                "last_reset": timestamp_str,
+                "reset_type": last_reset.get("type", "unknown")
+            })
+        else:
+            return jsonify({
+                "success": False,
+                "last_reset": None,
+                "message": "No reset events found"
+            })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"Error retrieving reset timestamp: {str(e)}"
+        }), 500
+
+
 @app.route('/api/reset-leaderboard', methods=['POST'])
 def reset_leaderboard():
     """Reset leaderboard data including ranks"""
-    # Check for authorization (you might want to add an admin password or token)
+    # Check for authorization
     auth_token = request.headers.get('Authorization')
     if not auth_token or auth_token != os.getenv('ADMIN_TOKEN', 'admin-secret-token'):
         return jsonify({"success": False, "message": "Unauthorized"}), 401
@@ -1582,7 +1433,8 @@ def reset_verification():
             "type": "verification_reset",
             "timestamp": reset_timestamp,
             "performed_by": request.json.get("admin_id", "unknown") if request.json else "unknown",
-            "reason": request.json.get("reason", "Rank verification reset") if request.json else "Rank verification reset"
+            "reason": request.json.get("reason",
+                                       "Rank verification reset") if request.json else "Rank verification reset"
         })
 
         return jsonify({
@@ -1597,6 +1449,7 @@ def reset_verification():
             "success": False,
             "message": f"Error resetting verification: {str(e)}"
         }), 500
+
 
 @app.route('/api/verify-rank', methods=['POST'])
 def verify_rank():
@@ -1637,6 +1490,7 @@ def verify_rank():
             "success": False,
             "message": f"Error: {str(e)}"
         }), 500
+
 
 @app.errorhandler(404)
 def page_not_found(e):
