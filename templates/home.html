@@ -359,183 +359,22 @@
 
 {% block extra_js %}
 <script>
+// This script runs after main.js, so showPlayerDetails should be available globally
 document.addEventListener('DOMContentLoaded', function() {
-    // Set up click events for featured players
+    // Simple setup for featured players - use the global function
     const featuredPlayers = document.querySelectorAll('.featured-player');
     featuredPlayers.forEach(player => {
         player.addEventListener('click', function() {
             const playerId = this.dataset.playerId;
-            if (playerId) {
-                // Use the global showPlayerDetails function from main.js
-                if (typeof window.showPlayerDetails === 'function') {
-                    window.showPlayerDetails(playerId);
-                } else if (typeof showPlayerDetails === 'function') {
-                    showPlayerDetails(playerId);
-                } else {
-                    console.error("showPlayerDetails function not found");
-                    // Fallback to the old implementation temporarily
-                    showPlayerDetailsLocal(playerId);
-                }
+            if (playerId && typeof window.showPlayerDetails === 'function') {
+                window.showPlayerDetails(playerId);
             } else {
-                console.error("No player ID found for this element", this);
+                console.error("showPlayerDetails function not available or no player ID");
             }
         });
     });
+
+    console.log(`Set up ${featuredPlayers.length} featured player click handlers`);
 });
-
-// Fallback function in case the main one isn't available
-function showPlayerDetailsLocal(playerId) {
-    // First check if the modal element exists
-    const modalElement = document.getElementById('playerModal');
-    if (!modalElement) {
-        console.error("Player modal element not found");
-        return;
-    }
-
-    // Create modal instance
-    let playerModal;
-    if (typeof bootstrap !== 'undefined') {
-        playerModal = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
-    } else {
-        console.error("Bootstrap is not available");
-        return;
-    }
-
-    // Clean playerId
-    if (playerId.includes(':')) {
-        playerId = playerId.split(':')[0];
-    }
-
-    const modalContent = document.getElementById('playerModalContent');
-    if (!modalContent) {
-        console.error("Modal content element not found");
-        return;
-    }
-
-    // Show loading
-    modalContent.innerHTML = `
-        <div class="text-center">
-            <div class="spinner-border text-light" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p>Loading player data...</p>
-        </div>
-    `;
-
-    // Show modal
-    playerModal.show();
-
-    // Fetch and display player data with both tabs
-    fetch(`/api/player/${playerId}`)
-        .then(response => response.json())
-        .then(player => {
-            if (player.error) {
-                modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
-                return;
-            }
-
-            // Update modal title
-            const modalTitle = document.getElementById('playerModalLabel');
-            if (modalTitle) {
-                modalTitle.textContent = player.name || 'Player Details';
-            }
-
-            // Create the complete tabs content (same as leaderboard.html)
-            let content = `
-                <ul class="nav nav-tabs mb-4" id="playerStatsTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="ranked-tab" data-bs-toggle="tab"
-                                data-bs-target="#ranked-stats" type="button" role="tab"
-                                aria-controls="ranked-stats" aria-selected="true">
-                            Ranked Stats
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="global-tab" data-bs-toggle="tab"
-                                data-bs-target="#global-stats" type="button" role="tab"
-                                aria-controls="global-stats" aria-selected="false">
-                            Global Stats
-                        </button>
-                    </li>
-                </ul>
-
-                <div class="tab-content" id="playerStatsContent">
-                    <!-- Ranked Stats Tab -->
-                    <div class="tab-pane fade show active" id="ranked-stats" role="tabpanel" aria-labelledby="ranked-tab">
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <div class="mmr-display">
-                                            <h4 class="mmr-label">MMR</h4>
-                                            <div class="mmr-value">${player.mmr || 0}</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-8">
-                                        <div class="stats-grid">
-                                            <div class="stat-item">
-                                                <h5>Win Rate</h5>
-                                                <span class="stat-value">${player.win_rate || 0}%</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Record</h5>
-                                                <span class="stat-value">${player.wins || 0}-${player.losses || 0}</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Matches</h5>
-                                                <span class="stat-value">${player.matches || 0}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Global Stats Tab -->
-                    <div class="tab-pane fade" id="global-stats" role="tabpanel" aria-labelledby="global-tab">
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-md-4">
-                                        <div class="mmr-display global">
-                                            <h4 class="mmr-label">MMR</h4>
-                                            <div class="mmr-value">${player.global_mmr || 300}</div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-8">
-                                        <div class="stats-grid">
-                                            <div class="stat-item">
-                                                <h5>Win Rate</h5>
-                                                <span class="stat-value">${player.global_win_rate || 0}%</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Record</h5>
-                                                <span class="stat-value">${player.global_wins || 0}-${player.global_losses || 0}</span>
-                                            </div>
-                                            <div class="stat-item">
-                                                <h5>Matches</h5>
-                                                <span class="stat-value">${player.global_matches || 0}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            modalContent.innerHTML = content;
-        })
-        .catch(error => {
-            console.error('Error fetching player details:', error);
-            modalContent.innerHTML = `
-                <div class="alert alert-danger">
-                    <p><strong>Error loading player data:</strong> ${error.message}</p>
-                    <p>Please try again later or contact an administrator if the problem persists.</p>
-                </div>`;
-        });
-}
 </script>
 {% endblock %}
