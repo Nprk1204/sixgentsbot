@@ -2354,27 +2354,30 @@ img {
     border-radius: 8px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
     margin-top: 0.5rem;
+    padding: 0.5rem; /* Add padding to the menu container */
 }
 
 .dropdown-item {
     color: var(--text);
-    padding: 0.75rem 1rem;
+    padding: 0.5rem 0.75rem; /* Reduced padding */
     transition: all 0.2s ease;
-    border-radius: 6px;
-    margin: 0.25rem 0.5rem;
+    border-radius: 4px; /* Smaller border radius */
+    margin: 0.125rem 0; /* Smaller margin */
+    display: flex;
+    align-items: center;
 }
 
 .dropdown-item:hover,
 .dropdown-item:focus {
-    background-color: rgba(0, 168, 255, 0.1);
+    background-color: rgba(0, 168, 255, 0.15); /* More subtle background */
     color: var(--primary);
-    transform: translateX(2px);
+    transform: none; /* Remove the translateX transform */
 }
 
 .dropdown-item i {
     width: 16px;
     text-align: center;
-}
+    margin-right: 0.5rem; /* Ensure consistent spacing */
 
 /* Profile Specific Animations */
 .profile-card-enter {
