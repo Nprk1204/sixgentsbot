@@ -1643,9 +1643,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     # Defer response as this operation could take time
     await interaction.response.defer()
 
-    # Send initial status update
-    await interaction.followup.send("🔄 Starting leaderboard reset... This may take a few minutes.")
-
     # Create backup collection name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_collection_name = f"players_backup_{timestamp}"
@@ -1717,8 +1714,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         matches_removed = matches_result.deleted_count
 
     else:  # "all" - Complete reset including Discord roles
-        await interaction.followup.send("🔄 Complete reset starting... Backing up data and removing Discord roles...")
-
         # 1. Make backup of rank verification data
         ranks_collection = db.get_collection('ranks')
         all_ranks = list(ranks_collection.find())
@@ -1740,10 +1735,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
         if not rank_roles:
             print("❌ NO RANK ROLES FOUND!")
-            await interaction.followup.send("⚠️ Warning: No rank roles found in the guild.")
         else:
             print(f"Found {len(rank_roles)} rank roles")
-            await interaction.followup.send(f"🔄 Found {len(rank_roles)} rank roles. Processing members...")
 
             # Get ALL guild members (not just from database)
             all_guild_members = []
@@ -1803,12 +1796,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
                     processed_count += 1
 
-                    # Send progress updates every 25 members
-                    if processed_count % 25 == 0:
-                        await interaction.followup.send(
-                            f"🔄 Processed {processed_count} members... Removed roles from {roles_removed_count} members so far."
-                        )
-
                 except Exception as e:
                     error_msg = f"Error processing member {member.display_name}: {e}"
                     print(f"❌ {error_msg}")
@@ -1821,7 +1808,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             # If we couldn't find many members with roles, also check database players
             if roles_removed_count == 0 and all_players:
                 print("No members found with roles via guild cache, checking database players...")
-                await interaction.followup.send("🔄 Checking database players for role removal...")
 
                 for player in all_players:
                     player_id = player.get("id")
