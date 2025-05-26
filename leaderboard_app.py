@@ -943,14 +943,14 @@ def get_player(player_id):
                         streak = change.get("streak", 0)
                         if streak > 0:
                             if streak >= 3:
-                                match["streak_display"] = f"🔥 {streak} Win"
+                                match["streak_display"] = f"🔥 {streak}"
                             else:
-                                match["streak_display"] = f"{streak} Win"
+                                match["streak_display"] = f"{streak}"
                         elif streak < 0:
                             if streak <= -3:
-                                match["streak_display"] = f"❄️ {abs(streak)} Loss"
+                                match["streak_display"] = f"❄️ {abs(streak)}"
                             else:
-                                match["streak_display"] = f"{abs(streak)} Loss"
+                                match["streak_display"] = f"{abs(streak)}"
                         else:
                             match["streak_display"] = "No streak"
 
