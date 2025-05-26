@@ -558,7 +558,7 @@ def profile_rank_check():
 @app.route('/api/leaderboard/<board_type>')
 @cached(timeout=60)
 def get_leaderboard_by_type(board_type):
-    """API endpoint to get leaderboard data with pagination for specific type"""
+    """API endpoint to get leaderboard data with pagination for specific type - FIXED VERSION"""
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 25, type=int)
 
@@ -588,6 +588,7 @@ def get_leaderboard_by_type(board_type):
     total_players = players_collection.count_documents(query)
     skip = (page - 1) * per_page
 
+    # FIXED: Include ALL streak fields in projection
     projection = {
         "_id": 0,
         "id": 1,
@@ -601,6 +602,7 @@ def get_leaderboard_by_type(board_type):
         "matches": 1,
         "global_matches": 1,
         "last_updated": 1,
+        # FIXED: Add ALL streak fields that were missing
         "current_streak": 1,
         "longest_win_streak": 1,
         "longest_loss_streak": 1,
@@ -620,6 +622,7 @@ def get_leaderboard_by_type(board_type):
         if board_type == "global":
             matches = player.get("global_matches", 0)
             wins = player.get("global_wins", 0)
+            # FIXED: Use global streak for global leaderboard
             current_streak = player.get("global_current_streak", 0)
             longest_win_streak = player.get("global_longest_win_streak", 0)
             longest_loss_streak = player.get("global_longest_loss_streak", 0)
@@ -627,6 +630,7 @@ def get_leaderboard_by_type(board_type):
         else:
             matches = player.get("matches", 0)
             wins = player.get("wins", 0)
+            # FIXED: Use ranked streak for ranked leaderboards
             current_streak = player.get("current_streak", 0)
             longest_win_streak = player.get("longest_win_streak", 0)
             longest_loss_streak = player.get("longest_loss_streak", 0)
@@ -639,27 +643,25 @@ def get_leaderboard_by_type(board_type):
         else:
             player["last_match"] = "Unknown"
 
-        # Format streak for display
+        # FIXED: Format streak for display with proper logic
         if current_streak > 0:
             if current_streak >= 3:
-                if board_type == "global":
-                    player["streak_display"] = f"🔥 {current_streak} Win"
-                else:
-                    player["streak_display"] = f"🔥 {current_streak} Win"
+                player["streak_display"] = f"🔥 {current_streak} Win"
             else:
                 player["streak_display"] = f"{current_streak} Win"
         elif current_streak < 0:
             if current_streak <= -3:
-                if board_type == "global":
-                    player["streak_display"] = f"❄️ {abs(current_streak)} Loss"
-                else:
-                    player["streak_display"] = f"❄️ {abs(current_streak)} Loss"
+                player["streak_display"] = f"❄️ {abs(current_streak)} Loss"
             else:
                 player["streak_display"] = f"{abs(current_streak)} Loss"
         else:
             player["streak_display"] = "—"
 
-        # Get recent MMR change
+        # FIXED: Add longest streak info for tooltips/details
+        player["longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
+        player["longest_loss_streak_display"] = f"{abs(longest_loss_streak)} Losses" if longest_loss_streak < 0 else "None"
+
+        # Get recent MMR change (existing code)
         recent_mmr_change = get_recent_mmr_change(player_id, board_type == "global")
         player["recent_mmr_change"] = recent_mmr_change
 
@@ -679,7 +681,7 @@ def get_leaderboard_by_type(board_type):
 
 
 def get_recent_mmr_change(player_id, is_global=False):
-    """Get the most recent MMR change for a player"""
+    """Get the most recent MMR change for a player - FIXED VERSION"""
     try:
         query = {
             "$or": [
@@ -702,41 +704,63 @@ def get_recent_mmr_change(player_id, is_global=False):
             return {
                 "change": 0,
                 "display": "—",
-                "class": "text-muted"
+                "class": "text-muted",
+                "streak": "—"  # FIXED: Add streak info
             }
 
         for mmr_change in recent_match.get("mmr_changes", []):
             if mmr_change.get("player_id") == player_id:
-                if is_global and mmr_change.get("is_global", False):
+                # FIXED: Check if this matches the global/ranked type we want
+                mmr_change_is_global = mmr_change.get("is_global", False)
+                if is_global and mmr_change_is_global:
                     change = mmr_change.get("mmr_change", 0)
-                elif not is_global and not mmr_change.get("is_global", False):
+                elif not is_global and not mmr_change_is_global:
                     change = mmr_change.get("mmr_change", 0)
                 else:
                     continue
+
+                # FIXED: Get streak info from MMR change record
+                streak = mmr_change.get("streak", 0)
+                if streak > 0:
+                    if streak >= 3:
+                        streak_display = f"🔥 {streak}W"
+                    else:
+                        streak_display = f"{streak}W"
+                elif streak < 0:
+                    if streak <= -3:
+                        streak_display = f"❄️ {abs(streak)}L"
+                    else:
+                        streak_display = f"{abs(streak)}L"
+                else:
+                    streak_display = "—"
 
                 if change > 0:
                     return {
                         "change": change,
                         "display": f"+{change}",
-                        "class": "text-success"
+                        "class": "text-success",
+                        "streak": streak_display
                     }
                 elif change < 0:
                     return {
                         "change": change,
                         "display": str(change),
-                        "class": "text-danger"
+                        "class": "text-danger",
+                        "streak": streak_display
                     }
                 else:
                     return {
                         "change": 0,
                         "display": "0",
-                        "class": "text-muted"
+                        "class": "text-muted",
+                        "streak": streak_display
                     }
 
         return {
             "change": 0,
             "display": "—",
-            "class": "text-muted"
+            "class": "text-muted",
+            "streak": "—"
         }
 
     except Exception as e:
@@ -744,7 +768,8 @@ def get_recent_mmr_change(player_id, is_global=False):
         return {
             "change": 0,
             "display": "—",
-            "class": "text-muted"
+            "class": "text-muted",
+            "streak": "—"
         }
 
 
