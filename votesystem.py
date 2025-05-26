@@ -93,17 +93,18 @@ class VoteSystem:
         if match_id in self.active_votes:
             self.cancel_voting(match_id=match_id)
 
-        # Initialize voting state for this match
+        # Initialize voting state for this match with three vote types
         self.active_votes[match_id] = {
             'message': None,
             'channel': channel,
             'match_id': match_id,
             'voters': set(),
             'user_votes': {},
-            'random_votes': 0,
+            'balanced_votes': 0,  # New: MMR-balanced teams
+            'random_votes': 0,  # Updated: Truly random teams
             'captains_votes': 0,
-            'view': None,  # Store the View object
-            'player_ids': [p.get('id') for p in players]  # Store player IDs
+            'view': None,
+            'player_ids': [p.get('id') for p in players]
         }
 
         # Get mentions of match players
@@ -115,35 +116,45 @@ class VoteSystem:
                 mention += " [BOT]"
             player_mentions.append(mention)
 
-        # Create and send vote message with buttons
+        # Create and send vote message with three buttons
         embed = discord.Embed(
             title="🗳️ Team Selection Vote",
             description=(
                     f"Match ID: `{match_id}`\n\n"
                     "Vote for team selection method:\n\n"
+                    "**⚖️ Balanced Teams** - Teams balanced by MMR\n"
+                    "**🎲 Random Teams** - Completely random teams\n"
+                    "**👑 Captains Pick** - Captains draft players\n\n"
                     "Match players: " + ", ".join(player_mentions) + "\n"
                                                                      "All 6 players must vote! (30 second timeout)"
             ),
             color=0x3498db
         )
 
-        # Create buttons
+        # Create three buttons
+        balanced_button = Button(style=discord.ButtonStyle.primary, custom_id="balanced", label="Balanced Teams",
+                                 emoji="⚖️")
         random_button = Button(style=discord.ButtonStyle.primary, custom_id="random", label="Random Teams", emoji="🎲")
         captains_button = Button(style=discord.ButtonStyle.primary, custom_id="captains", label="Captains Pick",
                                  emoji="👑")
 
         # Create View with 30 second timeout
         view = View(timeout=30)
+        view.add_item(balanced_button)
         view.add_item(random_button)
         view.add_item(captains_button)
 
         # Set up button callbacks
+        async def balanced_callback(interaction):
+            await self.handle_button_vote(interaction, "balanced")
+
         async def random_callback(interaction):
             await self.handle_button_vote(interaction, "random")
 
         async def captains_callback(interaction):
             await self.handle_button_vote(interaction, "captains")
 
+        balanced_button.callback = balanced_callback
         random_button.callback = random_callback
         captains_button.callback = captains_callback
 
@@ -192,28 +203,38 @@ class VoteSystem:
         old_vote = vote_state['user_votes'].get(user_id)
         if old_vote and old_vote != vote_type:
             # Remove old vote count
-            if old_vote == "random":
+            if old_vote == "balanced":
+                vote_state['balanced_votes'] -= 1
+            elif old_vote == "random":
                 vote_state['random_votes'] -= 1
-            else:
+            else:  # captains
                 vote_state['captains_votes'] -= 1
 
         # Update user's vote
         vote_state['user_votes'][user_id] = vote_type
 
         # Add new vote count
-        if vote_type == "random":
+        if vote_type == "balanced":
+            if not old_vote or old_vote != vote_type:
+                vote_state['balanced_votes'] += 1
+        elif vote_type == "random":
             if not old_vote or old_vote != vote_type:
                 vote_state['random_votes'] += 1
-        else:
+        else:  # captains
             if not old_vote or old_vote != vote_type:
                 vote_state['captains_votes'] += 1
 
         # Acknowledge the interaction
+        vote_display = {
+            "balanced": "Balanced Teams",
+            "random": "Random Teams",
+            "captains": "Captains Pick"
+        }
+
         if new_vote:
-            await interaction.response.send_message(f"You voted for {vote_type.capitalize()} teams!", ephemeral=True)
+            await interaction.response.send_message(f"You voted for {vote_display[vote_type]}!", ephemeral=True)
         else:
-            await interaction.response.send_message(f"Changed your vote to {vote_type.capitalize()} teams!",
-                                                    ephemeral=True)
+            await interaction.response.send_message(f"Changed your vote to {vote_display[vote_type]}!", ephemeral=True)
 
         # Update vote message
         await self.update_vote_message(match_id)
@@ -241,6 +262,7 @@ class VoteSystem:
             description=(
                 f"Match ID: `{match_id}`\n\n"
                 "Vote for team selection method:\n\n"
+                f"⚖️ Balanced Teams: **{vote_state['balanced_votes']}** votes\n"
                 f"🎲 Random Teams: **{vote_state['random_votes']}** votes\n"
                 f"👑 Captains Pick: **{vote_state['captains_votes']}** votes\n\n"
                 f"Votes received: **{total_votes}/6**\n"
@@ -307,7 +329,8 @@ class VoteSystem:
         players = match.get('players', [])
 
         print(f"Finalizing vote for match {match_id} - {len(vote_state['voters'])}/6 players voted")
-        print(f"Random votes: {vote_state['random_votes']}, Captains votes: {vote_state['captains_votes']}")
+        print(
+            f"Balanced votes: {vote_state['balanced_votes']}, Random votes: {vote_state['random_votes']}, Captains votes: {vote_state['captains_votes']}")
 
         # Disable the buttons in the view
         if vote_state['view']:
@@ -317,8 +340,10 @@ class VoteSystem:
             if vote_state['message']:
                 await vote_state['message'].edit(view=vote_state['view'])
 
-        # Determine winner (default to random if tied or no votes)
-        if vote_state['captains_votes'] > vote_state['random_votes']:
+        # Determine winner (highest vote count wins, default to balanced if tied)
+        max_votes = max(vote_state['balanced_votes'], vote_state['random_votes'], vote_state['captains_votes'])
+
+        if vote_state['captains_votes'] == max_votes and vote_state['captains_votes'] > 0:
             # Captains wins - update match status and start captains selection
             self.queue_manager.update_match_status(match_id, "selection")
 
@@ -337,24 +362,28 @@ class VoteSystem:
                 # Execute the captain selection
                 await self.captains_system.execute_captain_selection(channel, match_id)
             else:
-                # Fallback to random teams if captains_system is not set
-                await channel.send("Captains system not available. Falling back to random teams...")
-                await self.create_balanced_random_teams(channel, match_id)
+                # Fallback to balanced teams if captains_system is not set
+                await channel.send("Captains system not available. Falling back to balanced teams...")
+                await self.create_balanced_teams(channel, match_id)
+        elif vote_state['random_votes'] == max_votes and vote_state['random_votes'] > 0:
+            # Random teams wins - create truly random teams
+            await self.create_random_teams(channel, match_id)
+            # Cancel this vote
+            self.cancel_voting(match_id=match_id)
         else:
-            # Random teams wins - create balanced random teams with the original match ID
-            await self.create_balanced_random_teams(channel, match_id)
-
+            # Balanced teams wins (default case or tied votes)
+            await self.create_balanced_teams(channel, match_id)
             # Cancel this vote
             self.cancel_voting(match_id=match_id)
 
-    async def create_balanced_random_teams(self, channel, match_id):
-        """Create balanced random teams based on MMR"""
+    async def create_random_teams(self, channel, match_id):
+        """Create truly random teams (no MMR balancing)"""
         # Normalize match ID
         match_id = str(match_id).strip()
         if len(match_id) > 8:
             match_id = match_id[:6]
 
-        print(f"Creating balanced random teams for match ID: {match_id}")
+        print(f"Creating truly random teams for match ID: {match_id}")
 
         # Get the match
         match = self.queue_manager.get_match_by_id(match_id)
@@ -364,6 +393,102 @@ class VoteSystem:
 
         players = match.get('players', [])
         is_global = match.get('is_global', False)
+
+        if len(players) != 6:
+            await channel.send(f"Error: Expected 6 players, but found {len(players)}!")
+            return
+
+        # Shuffle players completely randomly
+        shuffled_players = players.copy()
+        random.shuffle(shuffled_players)
+
+        # Split into two teams of 3 players each
+        team1 = shuffled_players[:3]
+        team2 = shuffled_players[3:6]
+
+        print(f"Random teams created:")
+        print(f"Team 1: {[p.get('name', 'Unknown') for p in team1]}")
+        print(f"Team 2: {[p.get('name', 'Unknown') for p in team2]}")
+
+        # Format team mentions
+        team1_mentions = []
+        team2_mentions = []
+
+        for player in team1:
+            mention = player.get('mention', player.get('name', 'Unknown'))
+            if player.get('id', '').startswith('9000'):
+                mention += " [BOT]"
+            team1_mentions.append(mention)
+
+        for player in team2:
+            mention = player.get('mention', player.get('name', 'Unknown'))
+            if player.get('id', '').startswith('9000'):
+                mention += " [BOT]"
+            team2_mentions.append(mention)
+
+        # Create the match in the database
+        try:
+            db_match_id = self.match_system.create_match(
+                match_id,
+                team1,
+                team2,
+                str(channel.id),
+                is_global=is_global
+            )
+            print(f"Random teams match created/updated in database with ID: {db_match_id}")
+        except Exception as e:
+            print(f"Error creating random teams match in database: {str(e)}")
+            await channel.send(f"Error creating match: {str(e)}")
+            return
+
+        # Update match with teams in queue manager
+        self.queue_manager.assign_teams_to_match(match_id, team1, team2)
+
+        # Ensure players are properly tracked
+        for player in team1 + team2:
+            player_id = str(player.get('id', ''))
+            if player_id:
+                self.queue_manager.player_matches[player_id] = match_id
+
+        # Create an embed for team announcement
+        embed = discord.Embed(
+            title="Match Created! (Random Teams)",
+            color=0x9b59b6  # Purple color for random teams
+        )
+
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+        embed.add_field(name="Team 1", value=", ".join(team1_mentions), inline=False)
+        embed.add_field(name="Team 2", value=", ".join(team2_mentions), inline=False)
+        embed.add_field(
+            name="Report Results",
+            value=f"Play your match and report the result using `/report {match_id} win` or `/report {match_id} loss`",
+            inline=False
+        )
+
+        # Send team announcement as embed
+        await channel.send(embed=embed)
+
+    async def create_balanced_teams(self, channel, match_id):
+        """Create balanced teams based on MMR (formerly create_balanced_random_teams)"""
+        # Normalize match ID
+        match_id = str(match_id).strip()
+        if len(match_id) > 8:
+            match_id = match_id[:6]
+
+        print(f"Creating balanced teams for match ID: {match_id}")
+
+        # Get the match
+        match = self.queue_manager.get_match_by_id(match_id)
+        if not match:
+            await channel.send(f"Error: Match with ID {match_id} no longer exists!")
+            return
+
+        players = match.get('players', [])
+        is_global = match.get('is_global', False)
+
+        if len(players) != 6:
+            await channel.send(f"Error: Expected 6 players, but found {len(players)}!")
+            return
 
         # Get MMR for each player (real or dummy)
         player_mmrs = []
@@ -423,28 +548,35 @@ class VoteSystem:
         team2_mmr = 0
 
         # Assign players to teams for balance (snake draft - highest, 2nd highest to team 2, etc.)
-        while player_mmrs:
-            # Get highest MMR player
-            if player_mmrs:
-                if team1_mmr <= team2_mmr:
-                    player, mmr = player_mmrs.pop(0)  # Take from front (highest MMR)
-                    team1.append(player)
-                    team1_mmr += mmr
-                else:
-                    player, mmr = player_mmrs.pop(0)  # Take from front (highest MMR)
-                    team2.append(player)
-                    team2_mmr += mmr
+        # We need to ensure exactly 3 players per team
+        for i, (player, mmr) in enumerate(player_mmrs):
+            if len(team1) < 3 and (len(team2) >= 3 or team1_mmr <= team2_mmr):
+                team1.append(player)
+                team1_mmr += mmr
+            else:
+                team2.append(player)
+                team2_mmr += mmr
 
-            # Get lowest MMR player if any remain
-            if player_mmrs:
-                if team1_mmr <= team2_mmr:
-                    player, mmr = player_mmrs.pop(-1)  # Take from end (lowest MMR)
-                    team1.append(player)
-                    team1_mmr += mmr
-                else:
-                    player, mmr = player_mmrs.pop(-1)  # Take from end (lowest MMR)
-                    team2.append(player)
-                    team2_mmr += mmr
+        # Ensure we have exactly 3 players on each team
+        if len(team1) != 3 or len(team2) != 3:
+            print(f"Warning: Team sizes incorrect. Team1: {len(team1)}, Team2: {len(team2)}")
+            # Fix by moving players if needed
+            while len(team1) > 3:
+                player = team1.pop()
+                team2.append(player)
+            while len(team2) > 3:
+                player = team2.pop()
+                team1.append(player)
+            while len(team1) < 3 and len(team2) > 3:
+                player = team2.pop()
+                team1.append(player)
+            while len(team2) < 3 and len(team1) > 3:
+                player = team1.pop()
+                team2.append(player)
+
+        print(f"Balanced teams created:")
+        print(f"Team 1: {[p.get('name', 'Unknown') for p in team1]} (3 players)")
+        print(f"Team 2: {[p.get('name', 'Unknown') for p in team2]} (3 players)")
 
         # Format team mentions
         team1_mentions = []
@@ -466,30 +598,18 @@ class VoteSystem:
         team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
         team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
 
-        # Important: Check if this match already exists in the database
-        existing_match = self.match_system.matches.find_one({"match_id": match_id})
-        if existing_match:
-            print(f"Match {match_id} already exists in database with status: {existing_match.get('status')}")
-        else:
-            print(f"Match {match_id} does not exist in matches collection yet")
-
-        # Debug log teams before assignment
-        print(f"Assigning balanced teams to match {match_id}")
-        print(f"Team 1: {[p.get('name', 'Unknown') for p in team1]}")
-        print(f"Team 2: {[p.get('name', 'Unknown') for p in team2]}")
-
-        # Use the match system to create or update the match record
+        # Create the match in the database
         try:
             db_match_id = self.match_system.create_match(
-                match_id,  # Use the original match ID
+                match_id,
                 team1,
                 team2,
                 str(channel.id),
                 is_global=is_global
             )
-            print(f"Match created/updated in database with ID: {db_match_id}")
+            print(f"Balanced teams match created/updated in database with ID: {db_match_id}")
         except Exception as e:
-            print(f"Error creating match in database: {str(e)}")
+            print(f"Error creating balanced teams match in database: {str(e)}")
             await channel.send(f"Error creating match: {str(e)}")
             return
 
@@ -502,14 +622,10 @@ class VoteSystem:
             if player_id:
                 self.queue_manager.player_matches[player_id] = match_id
 
-        # Calculate average MMR per team for display
-        team1_avg_mmr = round(team1_mmr / len(team1), 1) if team1 else 0
-        team2_avg_mmr = round(team2_mmr / len(team2), 1) if team2 else 0
-
         # Create an embed for team announcement
         embed = discord.Embed(
-            title="Match Created! (Balanced Random Teams)",
-            color=0xe74c3c
+            title="Match Created! (Balanced Teams)",
+            color=0xe67e22  # Orange color for balanced teams
         )
 
         embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
@@ -523,6 +639,3 @@ class VoteSystem:
 
         # Send team announcement as embed
         await channel.send(embed=embed)
-
-        # Cancel this vote
-        self.cancel_voting(match_id=match_id)
