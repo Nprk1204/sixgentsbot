@@ -273,6 +273,23 @@ const chartData = {
 Chart.defaults.color = '#f1f1f1';
 Chart.defaults.borderColor = '#2a303c';
 
+// Helper function to format chart data with match numbers
+function formatChartDataSimple(matches, label, color) {
+    if (!matches || matches.length === 0) return null;
+
+    return {
+        label: label,
+        data: matches.map((match, index) => ({
+            x: index + 1, // Use match number instead of date
+            y: match.new_mmr || 0
+        })),
+        borderColor: color,
+        backgroundColor: color.replace(')', ', 0.1)').replace('rgb', 'rgba'),
+        tension: 0.3,
+        fill: false
+    };
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Chart data:', chartData);
 
@@ -281,192 +298,216 @@ document.addEventListener('DOMContentLoaded', function() {
     if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {
         const datasets = [];
 
+        // Add ranked data if available
         if (chartData.ranked.length > 0) {
-            datasets.push({
-                label: 'Ranked MMR',
-                data: chartData.ranked.map(match => ({
-                    x: match.date,
-                    y: match.new_mmr
-                })),
-                borderColor: '#00a8ff',
-                backgroundColor: 'rgba(0, 168, 255, 0.1)',
-                tension: 0.3
-            });
+            const rankedDataset = formatChartDataSimple(chartData.ranked, 'Ranked MMR', '#00a8ff');
+            if (rankedDataset) datasets.push(rankedDataset);
         }
 
+        // Add global data if available
         if (chartData.global.length > 0) {
-            datasets.push({
-                label: 'Global MMR',
-                data: chartData.global.map(match => ({
-                    x: match.date,
-                    y: match.new_mmr
-                })),
-                borderColor: '#ff7e31',
-                backgroundColor: 'rgba(255, 126, 49, 0.1)',
-                tension: 0.3
-            });
+            const globalDataset = formatChartDataSimple(chartData.global, 'Global MMR', '#ff7e31');
+            if (globalDataset) datasets.push(globalDataset);
         }
 
-        new Chart(mmrCtx, {
-            type: 'line',
-            data: { datasets: datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
-                            displayFormats: {
-                                day: 'MMM DD',
-                                week: 'MMM DD',
-                                month: 'MMM YYYY'
+        if (datasets.length > 0) {
+            new Chart(mmrCtx, {
+                type: 'line',
+                data: { datasets: datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Match Number',
+                                color: '#f1f1f1'
+                            },
+                            ticks: {
+                                color: '#f1f1f1',
+                                stepSize: 1
+                            },
+                            grid: {
+                                color: '#2a303c'
                             }
                         },
-                        title: {
-                            display: true,
-                            text: 'Date'
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'MMR',
+                                color: '#f1f1f1'
+                            },
+                            ticks: {
+                                color: '#f1f1f1'
+                            },
+                            grid: {
+                                color: '#2a303c'
+                            },
+                            beginAtZero: false
                         }
                     },
-                    y: {
-                        title: {
+                    plugins: {
+                        legend: {
                             display: true,
-                            text: 'MMR'
+                            position: 'top',
+                            labels: {
+                                color: '#f1f1f1'
+                            }
                         },
-                        beginAtZero: false
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        callbacks: {
-                            title: function(tooltipItems) {
-                                return new Date(tooltipItems[0].parsed.x).toLocaleDateString();
+                        tooltip: {
+                            mode: 'index',
+                            intersect: false,
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#f1f1f1',
+                            bodyColor: '#f1f1f1',
+                            borderColor: '#2a303c',
+                            borderWidth: 1,
+                            callbacks: {
+                                title: function(tooltipItems) {
+                                    if (tooltipItems && tooltipItems[0]) {
+                                        return `Match ${tooltipItems[0].parsed.x}`;
+                                    }
+                                    return '';
+                                }
                             }
                         }
+                    },
+                    interaction: {
+                        mode: 'nearest',
+                        axis: 'x',
+                        intersect: false
                     }
-                },
-                interaction: {
-                    mode: 'nearest',
-                    axis: 'x',
-                    intersect: false
                 }
-            }
-        });
+            });
+        }
     }
 
     // Individual ranked chart
     const rankedCtx = document.getElementById('rankedChart');
     if (rankedCtx && chartData.ranked.length > 0) {
-        new Chart(rankedCtx, {
-            type: 'line',
-            data: {
-                datasets: [{
-                    label: 'Ranked MMR',
-                    data: chartData.ranked.map(match => ({
-                        x: match.date,
-                        y: match.new_mmr
-                    })),
-                    borderColor: '#00a8ff',
-                    backgroundColor: 'rgba(0, 168, 255, 0.1)',
-                    tension: 0.3,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
-                            displayFormats: {
-                                day: 'MMM DD',
-                                week: 'MMM DD',
-                                month: 'MMM YYYY'
+        const rankedDataset = formatChartDataSimple(chartData.ranked, 'Ranked MMR', '#00a8ff');
+        if (rankedDataset) {
+            rankedDataset.fill = true;
+
+            new Chart(rankedCtx, {
+                type: 'line',
+                data: {
+                    datasets: [rankedDataset]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Match Number',
+                                color: '#f1f1f1'
+                            },
+                            ticks: {
+                                color: '#f1f1f1',
+                                stepSize: 1
+                            },
+                            grid: {
+                                color: '#2a303c'
                             }
                         },
-                        title: {
-                            display: true,
-                            text: 'Date'
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'MMR',
+                                color: '#f1f1f1'
+                            },
+                            ticks: {
+                                color: '#f1f1f1'
+                            },
+                            grid: {
+                                color: '#2a303c'
+                            },
+                            beginAtZero: false
                         }
                     },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'MMR'
+                    plugins: {
+                        legend: {
+                            display: false
                         },
-                        beginAtZero: false
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#f1f1f1',
+                            bodyColor: '#f1f1f1',
+                            borderColor: '#2a303c',
+                            borderWidth: 1
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 
     // Individual global chart
     const globalCtx = document.getElementById('globalChart');
     if (globalCtx && chartData.global.length > 0) {
-        new Chart(globalCtx, {
-            type: 'line',
-            data: {
-                datasets: [{
-                    label: 'Global MMR',
-                    data: chartData.global.map(match => ({
-                        x: match.date,
-                        y: match.new_mmr
-                    })),
-                    borderColor: '#ff7e31',
-                    backgroundColor: 'rgba(255, 126, 49, 0.1)',
-                    tension: 0.3,
-                    fill: true
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            parser: 'YYYY-MM-DDTHH:mm:ss.SSSZ',
-                            displayFormats: {
-                                day: 'MMM DD',
-                                week: 'MMM DD',
-                                month: 'MMM YYYY'
+        const globalDataset = formatChartDataSimple(chartData.global, 'Global MMR', '#ff7e31');
+        if (globalDataset) {
+            globalDataset.fill = true;
+
+            new Chart(globalCtx, {
+                type: 'line',
+                data: {
+                    datasets: [globalDataset]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            type: 'linear',
+                            title: {
+                                display: true,
+                                text: 'Match Number',
+                                color: '#f1f1f1'
+                            },
+                            ticks: {
+                                color: '#f1f1f1',
+                                stepSize: 1
+                            },
+                            grid: {
+                                color: '#2a303c'
                             }
                         },
-                        title: {
-                            display: true,
-                            text: 'Date'
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'MMR',
+                                color: '#f1f1f1'
+                            },
+                            ticks: {
+                                color: '#f1f1f1'
+                            },
+                            grid: {
+                                color: '#2a303c'
+                            },
+                            beginAtZero: false
                         }
                     },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'MMR'
+                    plugins: {
+                        legend: {
+                            display: false
                         },
-                        beginAtZero: false
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
+                        tooltip: {
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleColor: '#f1f1f1',
+                            bodyColor: '#f1f1f1',
+                            borderColor: '#2a303c',
+                            borderWidth: 1
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
     }
 });
 </script>
