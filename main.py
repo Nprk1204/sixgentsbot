@@ -302,8 +302,63 @@ async def queue_slash(interaction: discord.Interaction):
         print(f"Created rank record for {player.display_name} with tier {tier}")
 
     # Use the queue manager to add player
-    response = await system_coordinator.queue_manager.add_player(player, interaction.channel)
-    await interaction.response.send_message(response)
+    response_message = await system_coordinator.queue_manager.add_player(player, interaction.channel)
+
+    # Create embed for queue join response
+    embed = discord.Embed(
+        title="Queue Status",
+        color=0x00ff00  # Green for successful join
+    )
+
+    # Get current queue status
+    status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
+    queue_count = status_data['queue_count']
+
+    # Set embed description based on response
+    if "joined the queue" in response_message:
+        embed.description = f"{player.mention} has joined the queue! There are **{queue_count}/6** players"
+        embed.add_field(
+            name="Queue Progress",
+            value=f"{'🟢' * queue_count}{'⚪' * (6 - queue_count)} ({queue_count}/6)",
+            inline=False
+        )
+
+        if queue_count < 6:
+            embed.add_field(
+                name="Status",
+                value=f"Waiting for **{6 - queue_count}** more player(s)",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Status",
+                value="🎉 **Queue is FULL!** Match starting soon...",
+                inline=False
+            )
+
+    elif "already in the queue" in response_message:
+        embed.color = 0xffa500  # Orange for already in queue
+        embed.description = f"{player.mention}, you're already in the queue!"
+        embed.add_field(
+            name="Current Queue",
+            value=f"**{queue_count}/6** players waiting",
+            inline=False
+        )
+
+    elif "already in an active match" in response_message:
+        embed.color = 0xff0000  # Red for error
+        embed.description = f"{player.mention}, you're already in an active match!"
+        embed.add_field(
+            name="Finish Your Match",
+            value="Complete your current match before joining another queue",
+            inline=False
+        )
+
+    # Add timestamp
+    embed.timestamp = datetime.datetime.now()
+    embed.set_footer(text=f"Channel: #{interaction.channel.name}")
+
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="leave", description="Leave the queue")
@@ -317,8 +372,66 @@ async def leave_slash(interaction: discord.Interaction):
         return
 
     # Use the queue manager to remove player
-    response = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
-    await interaction.response.send_message(response)
+    response_message = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
+
+    # Create embed for leave response
+    embed = discord.Embed(
+        title="Queue Status",
+        color=0xff9900  # Orange for leaving
+    )
+
+    # Get current queue status
+    status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
+    queue_count = status_data['queue_count']
+
+    # Set embed description based on response
+    if "has left the queue" in response_message:
+        embed.description = f"{interaction.user.mention} has left the queue!"
+        embed.add_field(
+            name="Updated Queue",
+            value=f"**{queue_count}/6** players remaining",
+            inline=False
+        )
+
+        if queue_count > 0:
+            embed.add_field(
+                name="Queue Progress",
+                value=f"{'🟢' * queue_count}{'⚪' * (6 - queue_count)} ({queue_count}/6)",
+                inline=False
+            )
+            embed.add_field(
+                name="Status",
+                value=f"Waiting for **{6 - queue_count}** more player(s)",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Status",
+                value="Queue is now empty",
+                inline=False
+            )
+
+    elif "not in the queue" in response_message:
+        embed.color = 0xf1c40f  # Yellow for not in queue
+        embed.description = f"{interaction.user.mention}, you're not currently in the queue!"
+        embed.add_field(
+            name="Current Queue",
+            value=f"**{queue_count}/6** players waiting",
+            inline=False
+        )
+
+        if queue_count > 0:
+            embed.add_field(
+                name="Join Queue",
+                value="Use `/queue` to join the current queue",
+                inline=False
+            )
+
+    # Add timestamp
+    embed.timestamp = datetime.datetime.now()
+    embed.set_footer(text=f"Channel: #{interaction.channel.name}")
+
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="status", description="Shows the current queue status")
@@ -1345,13 +1458,13 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         'report': 'Report your match results (win/loss) using your match ID',
         'leaderboard': 'View a link to the full leaderboard website with rankings and stats',
         'rank': 'Check your personal stats, MMR, and rank (or view another player\'s)',
-        'sub': 'Substitute a player in an active match (for match participants or admins)',
         'streak': 'View your current win/loss streak and streak history',
 
         # Admin/Mod Commands
         'adjustmmr': 'Manually adjust a player\'s MMR (ranked or global)',
         'adminreport': 'Force report match results by specifying the winning team',
         'clearqueue': 'Remove all players from the current channel\'s queue',
+        'sub': 'Substitute a player in an active match',
         'forcestart': 'Force start a match with dummy players if needed',
         'removeactivematches': 'Cancel all active matches in the current channel',
         'removematch': 'Remove/reverse the results of a completed match',
@@ -1367,33 +1480,33 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
 
     # Group commands by category
     queue_commands = ['queue', 'leave', 'status']
-    match_commands = ['report', 'leaderboard', 'rank', 'sub', 'streak']
-    admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'removeactivematches',
+    match_commands = ['report', 'leaderboard', 'rank', 'streak']
+    admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'sub', 'forcestart', 'removeactivematches',
                       'removematch', 'resetleaderboard', 'resetplayer', 'resetstreak', 'topstreaks', 'streakstats']
     utility_commands = ['help']
 
     # Add command fields grouped by category with improved formatting
     embed.add_field(
         name="📋 Queue Management",
-        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in queue_commands]),
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in queue_commands]),
         inline=False
     )
 
     embed.add_field(
         name="🎮 Match & Player Commands",
-        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in match_commands]),
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in match_commands]),
         inline=False
     )
 
     embed.add_field(
         name="🛠️ Admin/Moderator Commands",
-        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in admin_commands]),
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in admin_commands]),
         inline=False
     )
 
     embed.add_field(
         name="❓ Utility Commands",
-        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in utility_commands]),
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in utility_commands]),
         inline=False
     )
 
@@ -1416,14 +1529,13 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     embed.add_field(
         name="🔥 Dynamic Streak System:",
         value=(
-            "**NEW Enhanced Streak Tracking!**\n\n"
-            "• **Win Streaks (3+)**: Earn bonus MMR with 🔥 fire indicator\n"
-            "• **Loss Streaks (3+)**: Increased MMR penalties with ❄️ cold indicator\n"
+            "**Enhanced Streak Tracking**\n"
+            "• **Win Streaks (3+)**: Bonus MMR with 🔥 indicator\n"
+            "• **Loss Streaks (3+)**: MMR penalties with ❄️ indicator\n"
             "• **Streak Multipliers**: Longer streaks = bigger impact (up to +50%)\n"
             "• **Dual Tracking**: Separate streaks for ranked and global matches\n"
-            "• **Live Monitoring**: Use `/streak` to check your current streak status\n"
-            "• **Leaderboards**: Admins can view top streaks with `/topstreaks`\n"
-            "• **Server Stats**: Track community trends with `/streakstats`"
+            "• **Live Monitoring**: Use `/streak` to check current status\n"
+            "• **Leaderboards**: View top streaks with `/topstreaks`"
         ),
         inline=False
     )
@@ -1437,18 +1549,6 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
             "**Rank C** (600-1099 MMR) - Developing players\n"
             "**Global Queue** - Mixed ranks, separate MMR system\n\n"
             "*Players must verify their Rocket League rank before joining queues*"
-        ),
-        inline=False
-    )
-
-    # Add permission info
-    embed.add_field(
-        name="🔐 Command Permissions:",
-        value=(
-            "**Queue Commands**: Available to all verified players\n"
-            "**Match Commands**: Available to all players\n"
-            "**Admin Commands**: Require Administrator permissions or 6mod role\n"
-            "**Channel Restrictions**: Most commands work only in designated channels"
         ),
         inline=False
     )
