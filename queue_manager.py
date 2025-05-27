@@ -28,7 +28,7 @@ class QueueManager:
         self.player_matches = {}  # player_id -> match_id (tracking which match a player is in)
 
         # Systems for team selection
-        self.vote_systems = {}  # channel_id -> VoteSystem
+        self.vote_systems = {}  # channel_name -> VoteSystem (NEW: added this)
         self.captains_systems = {}  # channel_id -> CaptainsSystem
 
         # Background tasks
@@ -365,6 +365,15 @@ class QueueManager:
         if channel_id in self.channel_queues:
             # Remove the first 6 players
             self.channel_queues[channel_id] = self.channel_queues[channel_id][6:]
+
+        # FIX: Automatically start voting after creating the match
+        channel_name = channel.name.lower()
+        if channel_name in self.vote_systems:
+            vote_system = self.vote_systems[channel_name]
+            # Start voting in the background (don't await here to avoid blocking)
+            if self.bot:
+                self.bot.loop.create_task(vote_system.start_vote(channel))
+                print(f"Auto-starting vote for match {match_id} in channel {channel.name}")
 
         # Return the match ID
         return match_id

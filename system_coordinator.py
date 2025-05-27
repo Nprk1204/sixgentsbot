@@ -86,6 +86,8 @@ class SystemCoordinator:
                     # Connect vote system for this channel
                     if channel_name in self.vote_systems:
                         self.queue_manager.set_vote_system(channel_id, self.vote_systems[channel_name])
+                        # ALSO set it by channel name for easier access
+                        self.queue_manager.vote_systems[channel_name] = self.vote_systems[channel_name]
                         print(f"Connected vote system for {channel.name}")
 
                     # Connect captains system for this channel
