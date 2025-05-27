@@ -236,6 +236,7 @@ async def on_reaction_add(reaction, user):
 
 
 # Queue commands
+# Updated queue command with embed
 @bot.tree.command(name="queue", description="Join the queue for 6 mans")
 async def queue_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
@@ -319,7 +320,7 @@ async def queue_slash(interaction: discord.Interaction):
         embed.description = f"{player.mention} has joined the queue! There are **{queue_count}/6** players"
         embed.add_field(
             name="Queue Progress",
-            value=f"{'🟢' * queue_count}{'⚪' * (6 - queue_count)} ({queue_count}/6)",
+            value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
             inline=False
         )
 
@@ -336,7 +337,7 @@ async def queue_slash(interaction: discord.Interaction):
                 inline=False
             )
 
-    elif "already in the queue" in response_message:
+    elif "already in the queue" in response_message or "already in queue" in response_message:
         embed.color = 0xffa500  # Orange for already in queue
         embed.description = f"{player.mention}, you're already in the queue!"
         embed.add_field(
@@ -344,13 +345,32 @@ async def queue_slash(interaction: discord.Interaction):
             value=f"**{queue_count}/6** players waiting",
             inline=False
         )
+        embed.add_field(
+            name="Queue Progress",
+            value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
+            inline=False
+        )
 
-    elif "already in an active match" in response_message:
+    elif "already in an active match" in response_message or "already in match" in response_message:
         embed.color = 0xff0000  # Red for error
         embed.description = f"{player.mention}, you're already in an active match!"
         embed.add_field(
             name="Finish Your Match",
             value="Complete your current match before joining another queue",
+            inline=False
+        )
+    else:
+        # Fallback for any other response
+        embed.color = 0x7289da  # Default discord color
+        embed.description = response_message
+        embed.add_field(
+            name="Current Queue",
+            value=f"**{queue_count}/6** players waiting",
+            inline=False
+        )
+        embed.add_field(
+            name="Queue Progress",
+            value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
             inline=False
         )
 
@@ -361,6 +381,7 @@ async def queue_slash(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
+# Updated leave command with embed
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
@@ -396,7 +417,7 @@ async def leave_slash(interaction: discord.Interaction):
         if queue_count > 0:
             embed.add_field(
                 name="Queue Progress",
-                value=f"{'🟢' * queue_count}{'⚪' * (6 - queue_count)} ({queue_count}/6)",
+                value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
                 inline=False
             )
             embed.add_field(
