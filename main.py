@@ -139,6 +139,22 @@ def is_command_channel(channel):
     return channel.name.lower() in allowed_channels
 
 
+def has_admin_or_mod_permissions(user, guild):
+    """
+    Check if user has admin permissions OR the "6mod" role
+    """
+    # Check if user has administrator permissions
+    if user.guild_permissions.administrator:
+        return True
+
+    # Check if user has the "6mod" role
+    mod_role = discord.utils.get(guild.roles, name="6mod")
+    if mod_role and mod_role in user.roles:
+        return True
+
+    return False
+
+
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 try:
@@ -578,9 +594,10 @@ async def adminreport_slash(interaction: discord.Interaction, match_id: str, tea
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Validate team number
@@ -964,9 +981,10 @@ async def clearqueue_slash(interaction: discord.Interaction):
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Get current queue status
@@ -1017,9 +1035,10 @@ async def forcestart_slash(interaction: discord.Interaction):
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     channel_id = str(interaction.channel.id)
@@ -1149,9 +1168,10 @@ async def removeactivematches_slash(interaction: discord.Interaction):
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     channel_id = str(interaction.channel.id)
@@ -1309,97 +1329,135 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
 
     # Create an embed for the command list
     embed = discord.Embed(
-        title="Rocket League 6 Mans Bot Commands",
-        description="Use `/help <command>` for more details on a specific command",
+        title="🚀 Rocket League 6 Mans Bot Commands",
+        description="Your complete guide to 6 Mans commands. Use `/help <command>` for detailed information on any specific command.",
         color=0x00ff00
     )
 
-    # Define commands and descriptions
+    # Define commands and descriptions with better, more detailed descriptions
     commands_dict = {
-        'adjustmmr': 'Admin command to adjust a player\'s MMR',
-        'adminreport': 'Admin command to report match results',
-        'clearqueue': 'Clear all players from the current queue (Admin only)',
-        'forcestart': 'Force start a match with dummy players if needed (Admin only)',
-        'removeactivematches': 'Remove all active matches in the current channel (Admin only)',
-        'help': 'Display help information',
-        'leaderboard': 'Shows a link to the leaderboard website',
-        'queue': 'Join the queue for 6 mans',
-        'leave': 'Leave the queue',
-        'purgechat': 'Clear chat messages',
-        'rank': 'Check your rank and stats (or another member\'s)',
-        'removematch': 'Remove the results of a match (Admin only)',
-        'report': 'Report match results',
-        'resetleaderboard': 'Reset the leaderboard (Admin only)',
-        'status': 'Shows the current queue status',
-        'sub': 'Substitute players in an active match',
-        'ping': 'Check if the bot is connected',
-        'streak': 'Check your current streak or another player\'s streak',
-        'topstreaks': 'Show players with the highest win or loss streaks (Admin only)'
+        # Queue Commands
+        'queue': 'Join the queue for 6 mans matches in your current channel',
+        'leave': 'Leave the current queue if you\'re in one',
+        'status': 'View current queue status, players waiting, and active matches',
+
+        # Match Commands
+        'report': 'Report your match results (win/loss) using your match ID',
+        'leaderboard': 'View a link to the full leaderboard website with rankings and stats',
+        'rank': 'Check your personal stats, MMR, and rank (or view another player\'s)',
+        'sub': 'Substitute a player in an active match (for match participants or admins)',
+        'streak': 'View your current win/loss streak and streak history',
+
+        # Admin/Mod Commands
+        'adjustmmr': 'Manually adjust a player\'s MMR (ranked or global)',
+        'adminreport': 'Force report match results by specifying the winning team',
+        'clearqueue': 'Remove all players from the current channel\'s queue',
+        'forcestart': 'Force start a match with dummy players if needed',
+        'removeactivematches': 'Cancel all active matches in the current channel',
+        'removematch': 'Remove/reverse the results of a completed match',
+        'resetleaderboard': 'Reset leaderboard data (global, ranked, or complete reset)',
+        'resetplayer': 'Completely reset all data for a specific player',
+        'resetstreak': 'Reset a player\'s current streak or all streak records',
+        'topstreaks': 'View leaderboards for highest win/loss streaks',
+        'streakstats': 'View server-wide streak statistics and analytics',
+
+        # Utility
+        'help': 'Display this help menu or get details about specific commands'
     }
 
     # Group commands by category
     queue_commands = ['queue', 'leave', 'status']
     match_commands = ['report', 'leaderboard', 'rank', 'sub', 'streak']
     admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'forcestart', 'removeactivematches',
-                     'removematch', 'resetleaderboard', 'purgechat', 'topstreaks']
-    utility_commands = ['help', 'ping']
+                      'removematch', 'resetleaderboard', 'resetplayer', 'resetstreak', 'topstreaks', 'streakstats']
+    utility_commands = ['help']
 
-    # Add command fields grouped by category
+    # Add command fields grouped by category with improved formatting
     embed.add_field(
-        name="📋 Queue Commands",
-        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in queue_commands]),
+        name="📋 Queue Management",
+        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in queue_commands]),
         inline=False
     )
 
     embed.add_field(
-        name="🎮 Match Commands",
-        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in match_commands]),
+        name="🎮 Match & Player Commands",
+        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in match_commands]),
         inline=False
     )
 
     embed.add_field(
-        name="🛠️ Admin Commands",
-        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in admin_commands]),
+        name="🛠️ Admin/Moderator Commands",
+        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in admin_commands]),
         inline=False
     )
 
     embed.add_field(
-        name="🔧 Utility Commands",
-        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in utility_commands]),
+        name="❓ Utility Commands",
+        value="\n".join([f"**`/{cmd}`** - {commands_dict[cmd]}" for cmd in utility_commands]),
         inline=False
     )
 
-    # Add "How It Works" section
+    # Add "How 6 Mans Works" section with improved formatting
     embed.add_field(
-        name="How 6 Mans Works:",
+        name="📖 How 6 Mans Works:",
         value=(
-            "1. Join the queue with `/queue` in a rank channel\n"
-            "2. When 6 players join, voting starts automatically\n"
-            "3. Vote by clicking on the team selection buttons\n"
-            "4. Teams will be created based on the vote results\n"
-            "5. After the match, report the results with `/report <match_id> win` or `/report <match_id> loss`\n"
-            "6. Check the leaderboard with `/leaderboard` or view your stats with `/rank`\n"
-            "7. Track your win/loss streaks with `/streak` command"
+            "**1.** Use `/queue` in a rank channel (rank-a, rank-b, rank-c, or global)\n"
+            "**2.** When 6 players join, automated team voting begins\n"
+            "**3.** Click voting buttons to select your preferred team setup\n"
+            "**4.** Teams are finalized based on community votes\n"
+            "**5.** Play your match and report results with `/report <match_id> win/loss`\n"
+            "**6.** Check updated rankings with `/leaderboard` or personal stats with `/rank`\n"
+            "**7.** Track your performance streaks with `/streak`"
         ),
         inline=False
     )
 
-    # Add "Streak System" section
+    # Enhanced streak system section
     embed.add_field(
-        name="🔥 Streak System:",
+        name="🔥 Dynamic Streak System:",
         value=(
-            "**NEW!** 6 Mans now has a dynamic streak system for both ranked and global matches!\n\n"
-            "• Win streaks of 3+ games give **bonus MMR** with 🔥 fire indicator\n"
-            "• Loss streaks of 3+ games have **MMR penalties** with ❄️ snowflake indicator\n"
-            "• The longer your streak, the bigger the impact (up to +50%)\n"
-            "• Streaks are tracked separately for ranked and global matches\n"
-            "• Check your streak status with `/streak`\n"
-            "• Admins can view top streaks with `/topstreaks`"
+            "**NEW Enhanced Streak Tracking!**\n\n"
+            "• **Win Streaks (3+)**: Earn bonus MMR with 🔥 fire indicator\n"
+            "• **Loss Streaks (3+)**: Increased MMR penalties with ❄️ cold indicator\n"
+            "• **Streak Multipliers**: Longer streaks = bigger impact (up to +50%)\n"
+            "• **Dual Tracking**: Separate streaks for ranked and global matches\n"
+            "• **Live Monitoring**: Use `/streak` to check your current streak status\n"
+            "• **Leaderboards**: Admins can view top streaks with `/topstreaks`\n"
+            "• **Server Stats**: Track community trends with `/streakstats`"
         ),
         inline=False
     )
 
-    embed.set_footer(text="Type /help <command> for more info on a specific command")
+    # Add rank system explanation
+    embed.add_field(
+        name="🏆 Rank System:",
+        value=(
+            "**Rank A** (1600+ MMR) - Expert players\n"
+            "**Rank B** (1100-1599 MMR) - Intermediate players\n"
+            "**Rank C** (600-1099 MMR) - Developing players\n"
+            "**Global Queue** - Mixed ranks, separate MMR system\n\n"
+            "*Players must verify their Rocket League rank before joining queues*"
+        ),
+        inline=False
+    )
+
+    # Add permission info
+    embed.add_field(
+        name="🔐 Command Permissions:",
+        value=(
+            "**Queue Commands**: Available to all verified players\n"
+            "**Match Commands**: Available to all players\n"
+            "**Admin Commands**: Require Administrator permissions or 6mod role\n"
+            "**Channel Restrictions**: Most commands work only in designated channels"
+        ),
+        inline=False
+    )
+
+    # Enhanced footer
+    embed.set_footer(
+        text="💡 Pro tip: Use /help <command> for detailed info • Questions? Ask a moderator!"
+    )
+
     await interaction.response.send_message(embed=embed)
 
 
@@ -1454,9 +1512,10 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Determine which MMR to adjust
@@ -1622,9 +1681,10 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Check confirmation
@@ -1977,9 +2037,10 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Check confirmation
@@ -2261,8 +2322,12 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
         )
         return
 
-    # Check if user has permissions (admin or match participant)
-    is_admin = interaction.user.guild_permissions.administrator
+    # Check if user has permissions
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
+        return
 
     # Look up the match
     match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
@@ -2671,9 +2736,10 @@ async def topstreaks_slash(
         return
 
     # Check if user has admin permissions
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                ephemeral=True)
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Validate limit
@@ -2820,9 +2886,10 @@ async def resetstreak_slash(interaction: discord.Interaction, member: discord.Me
                 return
 
             # Check if user has admin permissions
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                        ephemeral=True)
+            if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+                await interaction.response.send_message(
+                    "You need administrator permissions or the 6mod role to use this command.",
+                    ephemeral=True)
                 return
 
             player_id = str(member.id)
@@ -2885,9 +2952,10 @@ async def streakstats_slash(interaction: discord.Interaction):
                 return
 
             # Check if user has admin permissions
-            if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message("You need administrator permissions to use this command.",
-                                                        ephemeral=True)
+            if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+                await interaction.response.send_message(
+                    "You need administrator permissions or the 6mod role to use this command.",
+                    ephemeral=True)
                 return
 
             # Start deferred response since this might take time
