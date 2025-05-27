@@ -239,9 +239,12 @@ async def on_reaction_add(reaction, user):
 # Updated queue command with better error handling
 @bot.tree.command(name="queue", description="Join the queue for 6 mans")
 async def queue_slash(interaction: discord.Interaction):
+    # CRITICAL: Respond immediately to prevent timeout
+    await interaction.response.defer()
+
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
@@ -273,7 +276,7 @@ async def queue_slash(interaction: discord.Interaction):
             value="Visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         return
 
     # If player has role but no database record, create one based on their role
@@ -364,7 +367,7 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         return
 
     elif response_message.startswith("SUCCESS:"):
@@ -402,7 +405,7 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         return
 
     else:
@@ -430,15 +433,18 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
 
-# Updated leave command with better error handling
+# Updated leave command with immediate response to prevent timeout
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
+    # CRITICAL: Respond immediately to prevent timeout
+    await interaction.response.defer()
+
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
@@ -469,7 +475,7 @@ async def leave_slash(interaction: discord.Interaction):
             value="Visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         return
 
     # Use the queue manager to remove player
@@ -555,7 +561,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         return
 
     elif response_message.startswith("QUEUE_ERROR:"):
@@ -618,7 +624,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         return
 
     elif response_message.startswith("SUCCESS:"):
@@ -661,7 +667,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         return
 
     elif response_message.startswith("ERROR:"):
@@ -676,7 +682,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
         return
 
     else:
@@ -706,7 +712,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
 
 @bot.tree.command(name="status", description="Shows the current queue status")
