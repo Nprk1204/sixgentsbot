@@ -338,13 +338,19 @@ class VoteSystem:
                 item.disabled = True
 
             if vote_state['message']:
-                await vote_state['message'].edit(view=vote_state['view'])
+                try:
+                    await vote_state['message'].edit(view=vote_state['view'])
+                except:
+                    print("Failed to edit vote message during finalization")
 
-        # Determine winner (highest vote count wins, default to balanced if tied)
+        # UPDATED TIE-BREAKING LOGIC: Captains > Balanced > Random
         max_votes = max(vote_state['balanced_votes'], vote_state['random_votes'], vote_state['captains_votes'])
 
         if vote_state['captains_votes'] == max_votes and vote_state['captains_votes'] > 0:
-            # Captains wins - update match status and start captains selection
+            # Captains wins (highest priority)
+            print(f"Captains mode selected with {vote_state['captains_votes']} votes")
+
+            # Update match status and start captains selection
             self.queue_manager.update_match_status(match_id, "selection")
 
             # Cancel this vote
@@ -365,13 +371,24 @@ class VoteSystem:
                 # Fallback to balanced teams if captains_system is not set
                 await channel.send("Captains system not available. Falling back to balanced teams...")
                 await self.create_balanced_teams(channel, match_id)
+
+        elif vote_state['balanced_votes'] == max_votes and vote_state['balanced_votes'] > 0:
+            # Balanced wins (second priority) - this now beats Random in ties
+            print(f"Balanced teams selected with {vote_state['balanced_votes']} votes")
+            await self.create_balanced_teams(channel, match_id)
+            # Cancel this vote
+            self.cancel_voting(match_id=match_id)
+
         elif vote_state['random_votes'] == max_votes and vote_state['random_votes'] > 0:
-            # Random teams wins - create truly random teams
+            # Random wins (lowest priority) - only if it has more votes than Balanced
+            print(f"Random teams selected with {vote_state['random_votes']} votes")
             await self.create_random_teams(channel, match_id)
             # Cancel this vote
             self.cancel_voting(match_id=match_id)
+
         else:
-            # Balanced teams wins (default case or tied votes)
+            # Default case: no votes or all zero votes - default to Balanced
+            print("No votes received or all votes are zero - defaulting to Balanced teams")
             await self.create_balanced_teams(channel, match_id)
             # Cancel this vote
             self.cancel_voting(match_id=match_id)
