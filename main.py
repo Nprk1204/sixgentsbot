@@ -392,6 +392,34 @@ async def leave_slash(interaction: discord.Interaction):
         )
         return
 
+    # Check if the player has completed rank verification FIRST
+    player = interaction.user
+    player_id = str(player.id)
+
+    # Get all rank roles
+    rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+    rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+    rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+    has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
+
+    # Check if player has a rank entry in the database OR has a rank role
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+
+    # If no verification, show rank verification required embed
+    if not (rank_record or has_rank_role):
+        embed = discord.Embed(
+            title="Rank Verification Required",
+            description="You need to verify your Rocket League rank before joining the queue.",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="How to Verify",
+            value="Visit the rank check page on the website to complete verification.",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Use the queue manager to remove player
     response_message = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
 
@@ -892,7 +920,10 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     # Get player data
     player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
-    # If no player data exists, create a placeholder profile based on their rank role
+    # Check if this is the user checking their own rank
+    is_self_check = member.id == interaction.user.id
+
+    # If no player data exists, check for rank verification
     if not player_data:
         # Check if player has a rank verification or role
         rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
@@ -914,11 +945,33 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
                 tier = "Rank C"
                 mmr = 600
             else:
-                # No role or verification found
-                await interaction.response.send_message(
-                    f"{member.mention} hasn't verified their rank yet. Please use the rank verification system to get started!",
-                    ephemeral=True
-                )
+                # No role or verification found - show rank verification required embed
+                if is_self_check:
+                    # Show rank verification required embed for self
+                    embed = discord.Embed(
+                        title="Rank Verification Required",
+                        description="You need to verify your Rocket League rank to see your stats.",
+                        color=0xf1c40f
+                    )
+                    embed.add_field(
+                        name="How to Verify",
+                        value="Visit the rank check page on the website to complete verification.",
+                        inline=False
+                    )
+                    embed.add_field(
+                        name="What You Get",
+                        value="• Your starting MMR based on your Rocket League rank\n• Access to all queues\n• Stat tracking\n• Leaderboard placement",
+                        inline=False
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                else:
+                    # Show simple message for checking other unverified users
+                    embed = discord.Embed(
+                        title="No Rank Data",
+                        description=f"{member.mention} hasn't verified their rank yet.",
+                        color=0x95a5a6
+                    )
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
         else:
             # Use data from rank record
