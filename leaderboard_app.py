@@ -270,7 +270,7 @@ def home():
         "wins": 1,
         "losses": 1,
         "matches": 1
-    }).sort("mmr", -1).limit(5))
+    }).sort("mmr", -1).limit(6))
 
     # Calculate win rates for featured players
     for player in featured_players:
@@ -287,7 +287,7 @@ def home():
         "global_wins": 1,
         "global_losses": 1,
         "global_matches": 1
-    }).sort("global_mmr", -1).limit(5))
+    }).sort("global_mmr", -1).limit(6))
 
     # Calculate win rates for featured global players
     for player in featured_global_players:
@@ -300,7 +300,7 @@ def home():
     recent_matches = list(matches_collection.find(
         {"status": "completed"},
         {"_id": 0}
-    ).sort("completed_at", -1).limit(5))
+    ).sort("completed_at", -1).limit(6))
 
     # Format match data for display
     formatted_matches = []

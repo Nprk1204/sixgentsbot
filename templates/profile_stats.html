@@ -389,7 +389,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (rankedCtx && chartData.ranked.length > 0) {
         const rankedDataset = formatChartDataSimple(chartData.ranked, 'Ranked MMR', '#00a8ff');
         if (rankedDataset) {
-            rankedDataset.fill = true;
 
             new Chart(rankedCtx, {
                 type: 'line',
@@ -452,7 +451,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (globalCtx && chartData.global.length > 0) {
         const globalDataset = formatChartDataSimple(chartData.global, 'Global MMR', '#ff7e31');
         if (globalDataset) {
-            globalDataset.fill = true;
 
             new Chart(globalCtx, {
                 type: 'line',

@@ -2439,8 +2439,8 @@ img {
     }
 
     .verification-status.verified {
-        background: linear-gradient(135deg, rgba(67, 181, 129, 0.1) 0%, rgba(67, 181, 129, 0.05) 100%);
-        border: 1px solid rgba(67, 181, 129, 0.3);
+    background: linear-gradient(135deg, rgba(67, 181, 129, 0.05) 0%, rgba(67, 181, 129, 0.02) 100%);
+    border: 1px solid rgba(67, 181, 129, 0.15);
     }
 
     .verification-status.pending {
