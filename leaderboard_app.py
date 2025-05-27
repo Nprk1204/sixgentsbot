@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 import functools
 import re
 import json
-# Remove the conflicting import: from datetime import datetime
+import threading
 
 # Import our Discord OAuth integration
 from discord_oauth import DiscordOAuth, login_required, get_current_user
@@ -32,6 +32,36 @@ DISCORD_GUILD_ID = os.getenv('DISCORD_GUILD_ID', '')
 DISCORD_CLIENT_ID = os.getenv('DISCORD_CLIENT_ID', '')
 DISCORD_CLIENT_SECRET = os.getenv('DISCORD_CLIENT_SECRET', '')
 DISCORD_REDIRECT_URI = os.getenv('DISCORD_REDIRECT_URI', '')
+BOT_KEEPALIVE_URL = os.getenv('BOT_KEEPALIVE_URL', '')
+
+
+def ping_discord_bot():
+    """Ping the Discord bot every 10 minutes to keep it alive on Render"""
+    while True:
+        try:
+            if BOT_KEEPALIVE_URL:
+                response = requests.get(BOT_KEEPALIVE_URL, timeout=10)
+                if response.status_code == 200:
+                    print(f"✅ Bot ping successful at {datetime.datetime.now()}")
+                else:
+                    print(f"⚠️ Bot ping returned {response.status_code}")
+            else:
+                print("⚠️ BOT_KEEPALIVE_URL not configured")
+        except Exception as e:
+            print(f"❌ Bot ping failed: {e}")
+
+        # Wait 10 minutes (600 seconds) before next ping
+        time.sleep(600)
+
+
+def start_bot_keepalive():
+    """Start the bot keepalive background thread"""
+    if BOT_KEEPALIVE_URL:
+        keepalive_thread = threading.Thread(target=ping_discord_bot, daemon=True)
+        keepalive_thread.start()
+        print(f"🤖 Bot keepalive started - pinging {BOT_KEEPALIVE_URL} every 10 minutes")
+    else:
+        print("⚠️ BOT_KEEPALIVE_URL not set - bot keepalive disabled")
 
 # Initialize Discord OAuth
 discord_oauth = DiscordOAuth(
@@ -114,6 +144,9 @@ try:
     matches_collection = db['matches']
     ranks_collection = db['ranks']
     resets_collection = db['resets']
+
+    start_bot_keepalive()
+
 except Exception as e:
     print(f"MongoDB connection error: {e}")
 
