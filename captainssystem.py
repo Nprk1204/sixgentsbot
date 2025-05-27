@@ -108,7 +108,7 @@ class CaptainsSystem:
         embed.add_field(name="Captain 2", value=captain2.get('mention', captain2.get('name', 'Unknown')), inline=True)
         embed.add_field(name="Available Players", value=", ".join(remaining_mentions), inline=False)
         embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
-        embed.set_footer(text="Captains will be contacted via DM to make their selections.")
+        embed.set_footer(text="Captains will be contacted for selections.")
 
         return embed
 
@@ -162,9 +162,29 @@ class CaptainsSystem:
                 await self.fallback_to_random(match_id)
                 return
 
-            # Initial message to players
-            await channel.send(
-                f"📨 DMing captains for team selection... {captain1.get('mention', captain1.get('name', 'Unknown'))} will pick first.")
+            # Test DM capability first
+            captain1_dm_works = await self.test_dm_capability(captain1_user)
+            captain2_dm_works = await self.test_dm_capability(captain2_user)
+
+            if not captain1_dm_works or not captain2_dm_works:
+                # List who can't receive DMs
+                failed_captains = []
+                if not captain1_dm_works:
+                    failed_captains.append(captain1.get('mention', captain1.get('name', 'Unknown')))
+                if not captain2_dm_works:
+                    failed_captains.append(captain2.get('mention', captain2.get('name', 'Unknown')))
+
+                await channel.send(
+                    f"❌ Cannot DM {', '.join(failed_captains)}. Using channel-based selection instead.\n"
+                    f"**Tip:** Enable DMs in Privacy Settings for faster future selections!"
+                )
+
+                # Use channel-based selection
+                await self.channel_based_captain_selection(channel, match_id)
+                return
+
+            # If we get here, both captains can receive DMs
+            await channel.send("✅ Both captains can receive DMs. Starting DM-based selection...")
 
             # Get player MMRs for display - pass channel for global vs ranked determination
             player_mmrs = await self.get_player_mmrs(remaining_players, channel)
@@ -220,56 +240,8 @@ class CaptainsSystem:
                 await channel.send(
                     f"🔄 Last player {last_player.get('name', 'Unknown')} automatically assigned to Team 1")
 
-                # Create the match in database and update status to in_progress
-                channel_id = selection_state.get('channel_id')
-                is_global = channel.name.lower() == "global"
-
-                try:
-                    # Create/update the match in the database
-                    db_match_id = self.match_system.create_match(
-                        match_id,
-                        captain1_team,
-                        captain2_team,
-                        channel_id,
-                        is_global=is_global
-                    )
-                    print(f"Captain selection: Created/updated match {db_match_id} in database")
-
-                    # Update the team assignments in queue_manager AND set status to in_progress
-                    self.queue_manager.assign_teams_to_match(match_id, captain1_team, captain2_team)
-
-                    # CRITICAL: Set match status to in_progress so it can be reported
-                    self.queue_manager.update_match_status(match_id, "in_progress")
-                    print(f"Captain selection: Updated match {match_id} status to in_progress")
-
-                    # Ensure all players are tracked
-                    for player in captain1_team + captain2_team:
-                        player_id = str(player.get('id', ''))
-                        if player_id:
-                            self.queue_manager.player_matches[player_id] = match_id
-                            print(
-                                f"Captain selection: Tracked player {player.get('name', 'Unknown')} in match {match_id}")
-
-                except Exception as e:
-                    print(f"Error creating/updating match during captain selection: {str(e)}")
-                    await channel.send(f"❌ Error finalizing match: {str(e)}")
-                    self.cancel_selection(match_id=match_id)
-                    return
-
-            # Create the match
-            channel_id = selection_state.get('channel_id')
-
-            # Update the team assignments in queue_manager
-            self.queue_manager.assign_teams_to_match(match_id, captain1_team, captain2_team)
-
-            # Create team announcement embed
-            embed = self.create_teams_embed(match_id, captain1, captain2, captain1_team, captain2_team)
-
-            # Send team announcement as embed
-            await channel.send(embed=embed)
-
-            # Clean up
-            self.cancel_selection(match_id=match_id)
+            # Finalize the match
+            await self.finalize_captain_match(channel, match_id)
 
         except Exception as e:
             import traceback
@@ -279,6 +251,293 @@ class CaptainsSystem:
             await channel.send(
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
             await self.fallback_to_random(match_id)
+
+    async def test_dm_capability(self, user):
+        """Test if we can DM a user"""
+        try:
+            test_embed = discord.Embed(
+                title="Captain Selection Test",
+                description="Testing DM capability...",
+                color=0x3498db
+            )
+            await user.send(embed=test_embed)
+            # Clean up the test message
+            try:
+                await user.send("✅ DM test successful! Captain selection starting...")
+            except:
+                pass
+            return True
+        except (discord.Forbidden, discord.HTTPException):
+            return False
+
+    async def channel_based_captain_selection(self, channel, match_id):
+        """Fallback: Channel-based captain selection with buttons"""
+        selection_state = self.active_selections[match_id]
+        captain1 = selection_state['captain1']
+        captain2 = selection_state['captain2']
+        remaining_players = selection_state['remaining_players']
+        captain1_team = selection_state['captain1_team']
+        captain2_team = selection_state['captain2_team']
+
+        await channel.send(
+            f"🔄 **Channel-Based Captain Selection**\n"
+            f"**Captain 1:** {captain1.get('mention')} - Pick **1** player\n"
+            f"**Captain 2:** {captain2.get('mention')} - Pick **2** players\n"
+            f"Use the buttons below to make your selections!"
+        )
+
+        # Get player MMRs for display
+        player_mmrs = await self.get_player_mmrs(remaining_players, channel)
+
+        # PHASE 1: Captain 1 selects in channel
+        selected_player = await self.channel_captain1_selection(channel, captain1, remaining_players, player_mmrs)
+
+        if selected_player is None:
+            await channel.send(f"⏱️ {captain1.get('mention')} didn't respond. Random selection...")
+            selected_player = random.choice(remaining_players)
+
+        # Update teams and remaining players
+        captain1_team.append(selected_player)
+        remaining_players.remove(selected_player)
+
+        await channel.send(
+            f"✅ **Captain 1** selected {selected_player.get('mention', selected_player.get('name'))}")
+
+        # PHASE 2: Captain 2 selects in channel
+        selected_players = await self.channel_captain2_selection(channel, captain2, remaining_players, player_mmrs)
+
+        if not selected_players or len(selected_players) < 2:
+            needed = 2 - len(selected_players or [])
+            for _ in range(needed):
+                if remaining_players:
+                    random_player = random.choice(remaining_players)
+                    selected_players = selected_players or []
+                    selected_players.append(random_player)
+                    remaining_players.remove(random_player)
+                    await channel.send(f"🔄 **Captain 2** randomly selected {random_player.get('name')}")
+
+        # Add selected players to team2
+        for player in selected_players:
+            captain2_team.append(player)
+            if player in remaining_players:
+                remaining_players.remove(player)
+            await channel.send(
+                f"✅ **Captain 2** selected {player.get('mention', player.get('name'))}")
+
+        # Last player goes to Team 1
+        if remaining_players:
+            last_player = remaining_players[0]
+            captain1_team.append(last_player)
+            await channel.send(
+                f"✅ Last player {last_player.get('mention', last_player.get('name'))} goes to Team 1")
+
+        # Finalize the match
+        await self.finalize_captain_match(channel, match_id)
+
+    async def channel_captain1_selection(self, channel, captain1, remaining_players, player_mmrs):
+        """Captain 1 selects using channel buttons"""
+        is_global = channel.name.lower() == "global"
+        mmr_type = "Global MMR" if is_global else "MMR"
+
+        embed = discord.Embed(
+            title=f"**{captain1.get('name')} - Your Turn to Pick!**",
+            description="Select **ONE** player by clicking a button below.",
+            color=0xf1c40f
+        )
+
+        # Add field showing available players
+        player_list = []
+        for i, player in enumerate(remaining_players):
+            player_id = player['id']
+            mmr = player_mmrs.get(player_id, "Unknown")
+            player_list.append(f"{i + 1}. {player['name']} ({mmr_type}: {mmr})")
+
+        embed.add_field(name="Available Players", value="\n".join(player_list), inline=False)
+        embed.set_footer(text="You have 60 seconds to choose.")
+
+        view = View(timeout=60)
+        result = {"selected_player": None}
+
+        # Add buttons for each player (max 25 buttons per view)
+        for i, player in enumerate(remaining_players):
+            if i >= 4:  # Discord limit of 25 buttons, but we'll use max 4 for clean layout
+                break
+
+            player_id = player['id']
+            mmr = player_mmrs.get(player_id, "Unknown")
+
+            button = Button(
+                style=discord.ButtonStyle.primary,
+                label=f"{player['name']} ({mmr})",
+                custom_id=f"c1_select_{i}"
+            )
+
+            async def button_callback(interaction, player_index=i):
+                # Only allow the captain to click
+                if interaction.user.id != int(captain1.get('id')):
+                    await interaction.response.send_message(
+                        "Only the captain can make this selection!", ephemeral=True)
+                    return
+
+                result["selected_player"] = remaining_players[player_index]
+                await interaction.response.send_message(
+                    f"✅ You selected **{remaining_players[player_index]['name']}**!")
+                view.stop()
+
+            button.callback = button_callback
+            view.add_item(button)
+
+        message = await channel.send(embed=embed, view=view)
+        await view.wait()
+
+        # Disable buttons after selection
+        for item in view.children:
+            item.disabled = True
+        try:
+            await message.edit(view=view)
+        except:
+            pass
+
+        return result["selected_player"]
+
+    async def channel_captain2_selection(self, channel, captain2, remaining_players, player_mmrs):
+        """Captain 2 selects using channel buttons"""
+        is_global = channel.name.lower() == "global"
+        mmr_type = "Global MMR" if is_global else "MMR"
+
+        embed = discord.Embed(
+            title=f"**{captain2.get('name')} - Your Turn to Pick!**",
+            description="Select **TWO** players by clicking buttons below. Click again to deselect.",
+            color=0x3498db
+        )
+
+        # Add field showing available players
+        player_list = []
+        for i, player in enumerate(remaining_players):
+            player_id = player['id']
+            mmr = player_mmrs.get(player_id, "Unknown")
+            player_list.append(f"{i + 1}. {player['name']} ({mmr_type}: {mmr})")
+
+        embed.add_field(name="Available Players", value="\n".join(player_list), inline=False)
+        embed.set_footer(text="You have 90 seconds to choose 2 players.")
+
+        view = View(timeout=90)
+        selected_indices = []
+        selected_players = []
+
+        # Add buttons for each player
+        for i, player in enumerate(remaining_players):
+            if i >= 4:  # Max 4 buttons for clean layout
+                break
+
+            player_id = player['id']
+            mmr = player_mmrs.get(player_id, "Unknown")
+
+            button = Button(
+                style=discord.ButtonStyle.primary,
+                label=f"{player['name']} ({mmr})",
+                custom_id=f"c2_select_{i}"
+            )
+
+            async def button_callback(interaction, player_index=i):
+                # Only allow the captain to click
+                if interaction.user.id != int(captain2.get('id')):
+                    await interaction.response.send_message(
+                        "Only the captain can make this selection!", ephemeral=True)
+                    return
+
+                if player_index in selected_indices:
+                    # Deselect
+                    selected_indices.remove(player_index)
+                    selected_players.remove(remaining_players[player_index])
+                    await interaction.response.send_message(
+                        f"❌ Removed **{remaining_players[player_index]['name']}** from selection")
+                elif len(selected_indices) < 2:
+                    # Select
+                    selected_indices.append(player_index)
+                    selected_players.append(remaining_players[player_index])
+
+                    if len(selected_indices) == 2:
+                        await interaction.response.send_message(
+                            f"✅ Final selection: **{selected_players[0]['name']}** and **{selected_players[1]['name']}**")
+                        view.stop()
+                    else:
+                        await interaction.response.send_message(
+                            f"✅ Selected **{remaining_players[player_index]['name']}**. Pick one more!")
+                else:
+                    await interaction.response.send_message(
+                        "You already selected 2 players! Deselect one first.", ephemeral=True)
+
+            button.callback = button_callback
+            view.add_item(button)
+
+        message = await channel.send(embed=embed, view=view)
+        await view.wait()
+
+        # Disable buttons after selection
+        for item in view.children:
+            item.disabled = True
+        try:
+            await message.edit(view=view)
+        except:
+            pass
+
+        return selected_players
+
+    async def finalize_captain_match(self, channel, match_id):
+        """Finalize the match after captain selection (DM or channel-based)"""
+        selection_state = self.active_selections[match_id]
+        captain1_team = selection_state['captain1_team']
+        captain2_team = selection_state['captain2_team']
+        captain1 = selection_state['captain1']
+        captain2 = selection_state['captain2']
+
+        # Create match in database and update status to in_progress
+        channel_id = str(channel.id)
+        is_global = channel.name.lower() == "global"
+
+        try:
+            # Create/update the match in the database
+            db_match_id = self.match_system.create_match(
+                match_id,
+                captain1_team,
+                captain2_team,
+                channel_id,
+                is_global=is_global
+            )
+            print(f"Captain selection: Created/updated match {db_match_id} in database")
+
+            # Update the team assignments in queue_manager AND set status to in_progress
+            self.queue_manager.assign_teams_to_match(match_id, captain1_team, captain2_team)
+
+            # CRITICAL: Set match status to in_progress so it can be reported
+            self.queue_manager.update_match_status(match_id, "in_progress")
+            print(f"Captain selection: Updated match {match_id} status to in_progress")
+
+            # Ensure all players are tracked
+            for player in captain1_team + captain2_team:
+                player_id = str(player.get('id', ''))
+                if player_id:
+                    self.queue_manager.player_matches[player_id] = match_id
+                    print(f"Captain selection: Tracked player {player.get('name', 'Unknown')} in match {match_id}")
+
+        except Exception as e:
+            print(f"Error creating/updating match during captain selection: {str(e)}")
+            await channel.send(f"❌ Error finalizing match: {str(e)}")
+            self.cancel_selection(match_id=match_id)
+            return
+
+        # Create team announcement embed
+        embed = self.create_teams_embed(match_id, captain1, captain2, captain1_team, captain2_team)
+
+        # Send team announcement as embed
+        await channel.send(embed=embed)
+
+        # Clean up
+        self.cancel_selection(match_id=match_id)
+
+    # ... [Keep all your existing methods: get_player_mmrs, captain1_selection, captain2_selection,
+    # create_teams_embed, calculate_team_mmr, fallback_to_random, etc. - they remain unchanged] ...
 
     async def get_player_mmrs(self, players, channel=None):
         """
@@ -523,6 +782,37 @@ class CaptainsSystem:
 
         return embed
 
+    def calculate_team_mmr_for_embed(self, team, is_global):
+        """Calculate team MMR for embed display"""
+        total_mmr = 0
+        player_count = 0
+
+        for player in team:
+            player_id = player['id']
+
+            # Handle dummy players
+            if player_id.startswith('9000') and 'dummy_mmr' in player:
+                total_mmr += player['dummy_mmr']
+                player_count += 1
+                continue
+
+            # Get real player MMR
+            player_data = self.match_system.players.find_one({"id": player_id})
+            if player_data:
+                if is_global:
+                    mmr = player_data.get("global_mmr", 300)
+                else:
+                    mmr = player_data.get("mmr", 600)
+                total_mmr += mmr
+                player_count += 1
+            else:
+                # Default values for new players
+                mmr = 300 if is_global else 600
+                total_mmr += mmr
+                player_count += 1
+
+        return round(total_mmr / player_count) if player_count > 0 else 0
+
     def calculate_team_mmr(self, team):
         """Calculate the average MMR for a team - FIXED to handle global vs ranked MMR"""
         total_mmr = 0
@@ -707,26 +997,16 @@ class CaptainsSystem:
         except asyncio.TimeoutError:
             return None
 
-    async def fallback_to_random(self, channel_id):
+    async def fallback_to_random(self, match_id):
         """Fall back to random team selection if captain selection fails"""
-        channel_id = str(channel_id)
-        print(f"Starting fallback_to_random for channel_id: {channel_id}")
+        print(f"Starting fallback_to_random for match_id: {match_id}")
 
-        # Get selection state for this channel
-        if channel_id not in self.active_selections:
-            print(f"No active selection found for channel_id: {channel_id}")
+        # Get selection state for this match
+        if match_id not in self.active_selections:
+            print(f"No active selection found for match_id: {match_id}")
             return
 
-        selection_state = self.active_selections[channel_id]
-
-        # Get the original match ID from the selection state
-        original_match_id = selection_state.get('match_id')
-        if not original_match_id:
-            print("No match ID found in selection state")
-            # If no match ID is found, generate a short consistent one
-            original_match_id = str(uuid.uuid4().hex)[:6]
-
-        print(f"Using match ID: {original_match_id} for fallback")
+        selection_state = self.active_selections[match_id]
 
         # Get the announcement channel
         channel = selection_state.get('announcement_channel')
@@ -763,14 +1043,14 @@ class CaptainsSystem:
 
         try:
             # Use the match system to create/update the match record
-            match_id = self.match_system.create_match(
-                original_match_id,  # Use the original match ID
+            db_match_id = self.match_system.create_match(
+                match_id,
                 team1,
                 team2,
-                channel_id,
+                str(channel.id),
                 is_global=is_global
             )
-            print(f"Fallback: Created match with ID {match_id}")
+            print(f"Fallback: Created match with ID {db_match_id}")
 
             # IMPORTANT: Update player_matches mapping in queue manager
             if self.queue_manager:
@@ -778,7 +1058,7 @@ class CaptainsSystem:
                 if match_id not in self.queue_manager.active_matches:
                     self.queue_manager.active_matches[match_id] = {
                         "match_id": match_id,
-                        "channel_id": channel_id,
+                        "channel_id": str(channel.id),
                         "team1": team1,
                         "team2": team2,
                         "status": "in_progress",
@@ -801,7 +1081,7 @@ class CaptainsSystem:
             print(f"Error creating match in fallback: {str(e)}")
             # Even if match creation fails, still try to send a message to the channel
             await channel.send(f"❌ Error creating match: {str(e)}")
-            self.cancel_selection(channel_id)
+            self.cancel_selection(match_id=match_id)
             return
 
         # Create an embed for team announcement
@@ -831,11 +1111,11 @@ class CaptainsSystem:
             except:
                 pass
 
-        # Clean up - REMOVE THE BUGGY CODE and just cancel the selection
+        # Clean up - cancel the selection
         try:
-            print(f"Fallback: Canceling selection for channel {channel_id}")
-            self.cancel_selection(channel_id)
+            print(f"Fallback: Canceling selection for match {match_id}")
+            self.cancel_selection(match_id=match_id)
         except Exception as e:
             print(f"Error in cleanup during fallback: {str(e)}")
             # Try to cancel the selection anyway
-            self.cancel_selection(channel_id)
+            self.cancel_selection(match_id=match_id)
