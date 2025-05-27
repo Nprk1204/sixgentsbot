@@ -220,6 +220,42 @@ class CaptainsSystem:
                 await channel.send(
                     f"🔄 Last player {last_player.get('name', 'Unknown')} automatically assigned to Team 1")
 
+                # Create the match in database and update status to in_progress
+                channel_id = selection_state.get('channel_id')
+                is_global = channel.name.lower() == "global"
+
+                try:
+                    # Create/update the match in the database
+                    db_match_id = self.match_system.create_match(
+                        match_id,
+                        captain1_team,
+                        captain2_team,
+                        channel_id,
+                        is_global=is_global
+                    )
+                    print(f"Captain selection: Created/updated match {db_match_id} in database")
+
+                    # Update the team assignments in queue_manager AND set status to in_progress
+                    self.queue_manager.assign_teams_to_match(match_id, captain1_team, captain2_team)
+
+                    # CRITICAL: Set match status to in_progress so it can be reported
+                    self.queue_manager.update_match_status(match_id, "in_progress")
+                    print(f"Captain selection: Updated match {match_id} status to in_progress")
+
+                    # Ensure all players are tracked
+                    for player in captain1_team + captain2_team:
+                        player_id = str(player.get('id', ''))
+                        if player_id:
+                            self.queue_manager.player_matches[player_id] = match_id
+                            print(
+                                f"Captain selection: Tracked player {player.get('name', 'Unknown')} in match {match_id}")
+
+                except Exception as e:
+                    print(f"Error creating/updating match during captain selection: {str(e)}")
+                    await channel.send(f"❌ Error finalizing match: {str(e)}")
+                    self.cancel_selection(match_id=match_id)
+                    return
+
             # Create the match
             channel_id = selection_state.get('channel_id')
 
@@ -446,9 +482,13 @@ class CaptainsSystem:
         team1_mentions = [player['mention'] for player in team1]
         team2_mentions = [player['mention'] for player in team2]
 
-        # Calculate average MMR for each team
-        team1_mmr = self.calculate_team_mmr(team1)
-        team2_mmr = self.calculate_team_mmr(team2)
+        # Determine if this is a global match based on match data
+        match = self.queue_manager.get_match_by_id(match_id)
+        is_global = match.get('is_global', False) if match else False
+
+        # Calculate average MMR for each team using the correct MMR type
+        team1_mmr = self.calculate_team_mmr_for_embed(team1, is_global)
+        team2_mmr = self.calculate_team_mmr_for_embed(team2, is_global)
 
         # Create embed
         embed = discord.Embed(
@@ -459,16 +499,17 @@ class CaptainsSystem:
         # Add match ID
         embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
 
-        # Add team 1 with average MMR
+        # Add team 1 with average MMR (show MMR type)
+        mmr_type = "Global MMR" if is_global else "MMR"
         embed.add_field(
-            name=f"Team 1 (Captain: {captain1['name']}) - Avg MMR: {team1_mmr}",
+            name=f"Team 1 (Captain: {captain1['name']}) - Avg {mmr_type}: {team1_mmr}",
             value=", ".join(team1_mentions),
             inline=False
         )
 
-        # Add team 2 with average MMR
+        # Add team 2 with average MMR (show MMR type)
         embed.add_field(
-            name=f"Team 2 (Captain: {captain2['name']}) - Avg MMR: {team2_mmr}",
+            name=f"Team 2 (Captain: {captain2['name']}) - Avg {mmr_type}: {team2_mmr}",
             value=", ".join(team2_mentions),
             inline=False
         )
@@ -476,14 +517,14 @@ class CaptainsSystem:
         # Add reporting instructions
         embed.add_field(
             name="Report Results",
-            value=f"Play your match and report the result using `/report <match id> win` or `/report <match id> loss`",
+            value=f"Play your match and report the result using `/report {match_id} win` or `/report {match_id} loss`",
             inline=False
         )
 
         return embed
 
     def calculate_team_mmr(self, team):
-        """Calculate the average MMR for a team"""
+        """Calculate the average MMR for a team - FIXED to handle global vs ranked MMR"""
         total_mmr = 0
         player_count = 0
 
@@ -492,7 +533,28 @@ class CaptainsSystem:
             print("Warning: Attempting to calculate MMR for empty team")
             return 0
 
-        print(f"Calculating MMR for team with {len(team)} players")
+        # CRITICAL: Determine if this is a global match by checking active selections
+        is_global = False
+        for match_id, selection_state in self.active_selections.items():
+            if selection_state.get('match_players') == team + selection_state.get('captain2_team', []):
+                # Check if the announcement channel is global
+                channel = selection_state.get('announcement_channel')
+                if channel and channel.name.lower() == "global":
+                    is_global = True
+                    break
+
+        # Alternative: Check if any of the teams combined match the current selection
+        if not is_global:
+            for match_id, selection_state in self.active_selections.items():
+                captain1_team = selection_state.get('captain1_team', [])
+                captain2_team = selection_state.get('captain2_team', [])
+                if team == captain1_team or team == captain2_team:
+                    channel = selection_state.get('announcement_channel')
+                    if channel and channel.name.lower() == "global":
+                        is_global = True
+                        break
+
+        print(f"Calculating {'Global' if is_global else 'Ranked'} MMR for team with {len(team)} players")
 
         for player in team:
             player_id = player['id']
@@ -514,30 +576,125 @@ class CaptainsSystem:
             # Get player data for real players
             player_data = self.match_system.players.find_one({"id": player_id})
             if player_data:
-                # For real players, use their stored MMR
-                mmr = player_data.get("mmr", 0)
-                print(f"Using stored MMR for {player.get('name', 'Unknown')}: {mmr}")
+                if is_global:
+                    # For global matches, use global MMR
+                    mmr = player_data.get("global_mmr", 300)
+                    print(f"Using global MMR for {player.get('name', 'Unknown')}: {mmr}")
+                else:
+                    # For regular ranked matches, use regular MMR
+                    mmr = player_data.get("mmr", 600)
+                    print(f"Using ranked MMR for {player.get('name', 'Unknown')}: {mmr}")
+
                 total_mmr += mmr
                 player_count += 1
             else:
                 # For new players, check rank record
                 rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                 if rank_record:
-                    tier = rank_record.get("tier", "Rank C")
-                    mmr = self.match_system.TIER_MMR.get(tier, 600)
-                    print(f"Using tier-based MMR for {player.get('name', 'Unknown')}: {mmr} (Tier: {tier})")
+                    if is_global:
+                        # Use global MMR from rank record or default
+                        mmr = rank_record.get("global_mmr", 300)
+                        print(f"Using global MMR from rank record for {player.get('name', 'Unknown')}: {mmr}")
+                    else:
+                        # Use tier-based MMR for ranked
+                        tier = rank_record.get("tier", "Rank C")
+                        mmr = self.match_system.TIER_MMR.get(tier, 600)
+                        print(f"Using tier-based MMR for {player.get('name', 'Unknown')}: {mmr} (Tier: {tier})")
+
                     total_mmr += mmr
                     player_count += 1
                 else:
-                    # Default MMR for players with no data
-                    mmr = 600
-                    print(f"Using default MMR for {player.get('name', 'Unknown')}: {mmr}")
+                    # Default MMR values
+                    if is_global:
+                        mmr = 300  # Default global MMR
+                        print(f"Using default global MMR for {player.get('name', 'Unknown')}: 300")
+                    else:
+                        mmr = 600  # Default ranked MMR
+                        print(f"Using default ranked MMR for {player.get('name', 'Unknown')}: 600")
+
                     total_mmr += mmr
                     player_count += 1
 
         # Return average MMR rounded to nearest integer
         avg_mmr = round(total_mmr / player_count) if player_count > 0 else 0
-        print(f"Team average MMR: {avg_mmr} (Total: {total_mmr}, Players: {player_count})")
+        print(
+            f"Team average {'Global' if is_global else 'Ranked'} MMR: {avg_mmr} (Total: {total_mmr}, Players: {player_count})")
+        return avg_mmr
+
+    async def calculate_team_mmr_for_display(self, team, is_global):
+        """Calculate the average MMR for a team for display purposes, considering global vs ranked"""
+        total_mmr = 0
+        player_count = 0
+
+        if not team:
+            print("Warning: Attempting to calculate MMR for empty team")
+            return 0
+
+        print(f"Calculating {'Global' if is_global else 'Ranked'} MMR for team with {len(team)} players")
+
+        for player in team:
+            player_id = player['id']
+            print(f"Processing player: {player.get('name', 'Unknown')} (ID: {player_id})")
+
+            # Check for dummy players with stored MMR
+            if player_id.startswith('9000') and 'dummy_mmr' in player:
+                mmr = player['dummy_mmr']
+                print(f"Using dummy_mmr for {player.get('name', 'Unknown')}: {mmr}")
+                total_mmr += mmr
+                player_count += 1
+                continue
+
+            # Skip dummy players without MMR
+            if player_id.startswith('9000') and 'dummy_mmr' not in player:
+                print(f"Skipping dummy player without MMR: {player.get('name', 'Unknown')}")
+                continue
+
+            # Get player data for real players
+            player_data = self.match_system.players.find_one({"id": player_id})
+            if player_data:
+                if is_global:
+                    # For global matches, use global MMR
+                    mmr = player_data.get("global_mmr", 300)
+                    print(f"Using global MMR for {player.get('name', 'Unknown')}: {mmr}")
+                else:
+                    # For ranked matches, use regular MMR
+                    mmr = player_data.get("mmr", 600)
+                    print(f"Using ranked MMR for {player.get('name', 'Unknown')}: {mmr}")
+
+                total_mmr += mmr
+                player_count += 1
+            else:
+                # For new players, check rank record
+                rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                if rank_record:
+                    if is_global:
+                        # Use global MMR from rank record or default
+                        mmr = rank_record.get("global_mmr", 300)
+                        print(f"Using global MMR from rank record for {player.get('name', 'Unknown')}: {mmr}")
+                    else:
+                        # Use tier-based MMR for ranked
+                        tier = rank_record.get("tier", "Rank C")
+                        mmr = self.match_system.TIER_MMR.get(tier, 600)
+                        print(f"Using tier-based MMR for {player.get('name', 'Unknown')}: {mmr} (Tier: {tier})")
+
+                    total_mmr += mmr
+                    player_count += 1
+                else:
+                    # Default MMR values
+                    if is_global:
+                        mmr = 300  # Default global MMR
+                        print(f"Using default global MMR for {player.get('name', 'Unknown')}: 300")
+                    else:
+                        mmr = 600  # Default ranked MMR
+                        print(f"Using default ranked MMR for {player.get('name', 'Unknown')}: 600")
+
+                    total_mmr += mmr
+                    player_count += 1
+
+        # Return average MMR rounded to nearest integer
+        avg_mmr = round(total_mmr / player_count) if player_count > 0 else 0
+        print(
+            f"Team average {'Global' if is_global else 'Ranked'} MMR: {avg_mmr} (Total: {total_mmr}, Players: {player_count})")
         return avg_mmr
 
     async def wait_for_captain_response(self, captain, timeout):
