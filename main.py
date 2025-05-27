@@ -460,7 +460,7 @@ async def leave_slash(interaction: discord.Interaction):
                 inline=False
             )
 
-    elif "not in the queue" in response_message:
+    elif "not in the queue" in response_message or "not in any queue" in response_message:
         embed.color = 0xf1c40f  # Yellow for not in queue
         embed.description = f"{interaction.user.mention}, you're not currently in the queue!"
         embed.add_field(
@@ -473,6 +473,87 @@ async def leave_slash(interaction: discord.Interaction):
             embed.add_field(
                 name="Join Queue",
                 value="Use `/queue` to join the current queue",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Join Queue",
+                value="Use `/queue` to start a new queue",
+                inline=False
+            )
+
+    elif "another channel's queue" in response_message:
+        embed.color = 0xe74c3c  # Red for wrong channel
+        embed.description = f"{interaction.user.mention}, you're not in this channel's queue!"
+        embed.add_field(
+            name="Current Queue",
+            value=f"**{queue_count}/6** players waiting in this channel",
+            inline=False
+        )
+        embed.add_field(
+            name="Your Queue",
+            value="You're queued in a different channel. Use `/leave` in that channel to leave your queue.",
+            inline=False
+        )
+
+    elif "cannot leave" in response_message:
+        embed.color = 0xe74c3c  # Red for cannot leave
+        embed.description = f"{interaction.user.mention}, you cannot leave right now!"
+
+        if "voting" in response_message:
+            embed.add_field(
+                name="Reason",
+                value="Team selection voting is in progress",
+                inline=False
+            )
+            embed.add_field(
+                name="What to do",
+                value="Wait for the vote to complete, then you'll be in a match",
+                inline=False
+            )
+        elif "selection" in response_message:
+            embed.add_field(
+                name="Reason",
+                value="Captain selection is in progress",
+                inline=False
+            )
+            embed.add_field(
+                name="What to do",
+                value="Wait for team selection to complete, then you'll be in a match",
+                inline=False
+            )
+        elif "active match" in response_message:
+            embed.add_field(
+                name="Reason",
+                value="You're currently in an active match",
+                inline=False
+            )
+            embed.add_field(
+                name="What to do",
+                value="Complete your match using `/report <match_id> win` or `/report <match_id> loss`",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="Reason",
+                value="You're in a match that needs to be completed",
+                inline=False
+            )
+
+    else:
+        # Fallback for any other response or edge cases
+        embed.color = 0x95a5a6  # Gray for unknown/other
+        embed.description = response_message
+        embed.add_field(
+            name="Current Queue",
+            value=f"**{queue_count}/6** players waiting",
+            inline=False
+        )
+
+        if queue_count == 0:
+            embed.add_field(
+                name="Start Playing",
+                value="Use `/queue` to join the queue and start playing!",
                 inline=False
             )
 
