@@ -646,14 +646,14 @@ def get_leaderboard_by_type(board_type):
         # FIXED: Format streak for display with proper logic
         if current_streak > 0:
             if current_streak >= 3:
-                player["streak_display"] = f"🔥 {current_streak} Win"
+                player["streak_display"] = f"🔥 {current_streak}"
             else:
-                player["streak_display"] = f"{current_streak} Win"
+                player["streak_display"] = f"{current_streak}"
         elif current_streak < 0:
             if current_streak <= -3:
-                player["streak_display"] = f"❄️ {abs(current_streak)} Loss"
+                player["streak_display"] = f"❄️ {abs(current_streak)}"
             else:
-                player["streak_display"] = f"{abs(current_streak)} Loss"
+                player["streak_display"] = f"{abs(current_streak)}"
         else:
             player["streak_display"] = "—"
 
