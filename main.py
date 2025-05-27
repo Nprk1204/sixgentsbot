@@ -1157,6 +1157,315 @@ async def clearqueue_slash(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
+@bot.tree.command(name="removematch", description="Remove/reverse a completed match and its MMR changes (Admin only)")
+@app_commands.describe(
+    match_id="The ID of the match to remove",
+    confirmation="Type 'CONFIRM' to confirm the removal"
+)
+async def removematch_slash(interaction: discord.Interaction, match_id: str, confirmation: str):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
+        return
+
+    # Check confirmation
+    if confirmation != "CONFIRM":
+        await interaction.response.send_message(
+            "❌ Match removal canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
+            ephemeral=True
+        )
+        return
+
+    # Clean and validate match ID
+    match_id = match_id.strip()
+    if len(match_id) > 8:
+        match_id = match_id[:6]
+
+    # Defer response as this operation could take time
+    await interaction.response.defer()
+
+    try:
+        # Look for the match in completed matches
+        match = system_coordinator.match_system.matches.find_one({
+            "match_id": match_id,
+            "status": "completed"
+        })
+
+        if not match:
+            await interaction.followup.send(f"❌ No completed match found with ID `{match_id}`.")
+            return
+
+        # Get match details for display
+        match_details = {
+            "match_id": match_id,
+            "team1": match.get("team1", []),
+            "team2": match.get("team2", []),
+            "winner": match.get("winner"),
+            "completed_at": match.get("completed_at"),
+            "mmr_changes": match.get("mmr_changes", []),
+            "is_global": match.get("is_global", False)
+        }
+
+        # Validate we have the necessary data
+        if not match_details["mmr_changes"]:
+            await interaction.followup.send(f"❌ Match `{match_id}` has no MMR changes to reverse.")
+            return
+
+        # Store original player stats for rollback verification
+        affected_players = []
+        rollback_summary = []
+
+        # Reverse MMR changes for each player
+        for mmr_change in match_details["mmr_changes"]:
+            player_id = mmr_change.get("player_id")
+            if not player_id:
+                continue
+
+            # Skip dummy players
+            if player_id.startswith('9000'):
+                continue
+
+            # Get current player data
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                rollback_summary.append(f"⚠️ Player {player_id} not found in database")
+                continue
+
+            # Get the MMR change details
+            mmr_change_amount = mmr_change.get("mmr_change", 0)
+            was_win = mmr_change.get("is_win", False)
+            was_global = mmr_change.get("is_global", False)
+            streak_at_time = mmr_change.get("streak", 0)
+
+            # Store current stats before changes
+            if was_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                current_wins = player_data.get("global_wins", 0)
+                current_losses = player_data.get("global_losses", 0)
+                current_matches = player_data.get("global_matches", 0)
+                current_streak = player_data.get("global_current_streak", 0)
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                current_wins = player_data.get("wins", 0)
+                current_losses = player_data.get("losses", 0)
+                current_matches = player_data.get("matches", 0)
+                current_streak = player_data.get("current_streak", 0)
+
+            # Calculate new values (reverse the changes)
+            new_mmr = current_mmr - mmr_change_amount  # Subtract the MMR change
+            new_matches = max(0, current_matches - 1)  # Decrease match count
+
+            if was_win:
+                new_wins = max(0, current_wins - 1)
+                new_losses = current_losses
+            else:
+                new_wins = current_wins
+                new_losses = max(0, current_losses - 1)
+
+            # ROBUST STREAK REVERSAL:
+            # The streak stored in MMR changes is what the player had AFTER the match
+            # We need to calculate what they had BEFORE by reversing the match outcome
+            streak_after_match = streak_at_time
+
+            if was_win:
+                # Player won this match
+                if streak_after_match > 0:
+                    # After winning, they have a positive streak
+                    if streak_after_match == 1:
+                        # This win started a new streak (they either had 0 or were on a loss streak)
+                        # Since we can't know if they had a loss streak before, we'll set to 0
+                        new_streak = 0
+                    else:
+                        # They already had a win streak, so before this win it was 1 less
+                        new_streak = streak_after_match - 1
+                else:
+                    # After winning they don't have a positive streak? This shouldn't happen
+                    # But if it does, assume they had no streak before
+                    new_streak = 0
+            else:
+                # Player lost this match
+                if streak_after_match < 0:
+                    # After losing, they have a negative streak
+                    if streak_after_match == -1:
+                        # This loss started a new streak (they either had 0 or were on a win streak)
+                        # Since we can't know if they had a win streak before, we'll set to 0
+                        new_streak = 0
+                    else:
+                        # They already had a loss streak, so before this loss it was 1 less negative
+                        new_streak = streak_after_match + 1
+                else:
+                    # After losing they don't have a negative streak? This shouldn't happen
+                    # But if it does, assume they had no streak before
+                    new_streak = 0
+
+            print(
+                f"Streak reversal for {player_id}: {current_streak} (current) <- {streak_after_match} (after match) -> {new_streak} (before match, {'win' if was_win else 'loss'} reversed)")
+
+            # Prepare update document
+            if was_global:
+                update_doc = {
+                    "$set": {
+                        "global_mmr": max(0, new_mmr),  # Don't go below 0
+                        "global_wins": new_wins,
+                        "global_losses": new_losses,
+                        "global_matches": new_matches,
+                        "global_current_streak": new_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+                mmr_type = "Global"
+            else:
+                update_doc = {
+                    "$set": {
+                        "mmr": max(0, new_mmr),  # Don't go below 0
+                        "wins": new_wins,
+                        "losses": new_losses,
+                        "matches": new_matches,
+                        "current_streak": new_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+                mmr_type = "Ranked"
+
+            # Apply the update
+            result = system_coordinator.match_system.players.update_one(
+                {"id": player_id},
+                update_doc
+            )
+
+            if result.modified_count > 0:
+                # Try to get player name from the match data
+                player_name = "Unknown"
+                for team in [match_details["team1"], match_details["team2"]]:
+                    for p in team:
+                        if p.get("id") == player_id:
+                            player_name = p.get("name", "Unknown")
+                            break
+                    if player_name != "Unknown":
+                        break
+
+                rollback_summary.append(
+                    f"✅ {player_name}: {mmr_type} MMR {current_mmr} → {max(0, new_mmr)} ({mmr_change_amount:+d} reversed), Streak {current_streak} → {new_streak}"
+                )
+                affected_players.append(player_name)
+            else:
+                rollback_summary.append(f"⚠️ Failed to update player {player_id}")
+
+        # Delete the match from the database
+        delete_result = system_coordinator.match_system.matches.delete_one({"match_id": match_id})
+
+        if delete_result.deleted_count == 0:
+            await interaction.followup.send(f"⚠️ Warning: Match `{match_id}` could not be deleted from database.")
+
+        # Create detailed response embed
+        embed = discord.Embed(
+            title="🗑️ Match Removed Successfully",
+            description=f"Match `{match_id}` has been removed and all MMR changes reversed.",
+            color=0xff9900
+        )
+
+        # Add match details
+        team1_names = [p.get("name", "Unknown") for p in match_details["team1"]]
+        team2_names = [p.get("name", "Unknown") for p in match_details["team2"]]
+
+        winner_team = "Team 1" if match_details["winner"] == 1 else "Team 2"
+        match_type = "Global" if match_details["is_global"] else "Ranked"
+
+        embed.add_field(
+            name="Match Details",
+            value=(
+                f"**Type:** {match_type}\n"
+                f"**Winner:** {winner_team}\n"
+                f"**Completed:** {match_details['completed_at'].strftime('%Y-%m-%d %H:%M') if match_details['completed_at'] else 'Unknown'}"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="Team 1",
+            value=", ".join(team1_names),
+            inline=True
+        )
+
+        embed.add_field(
+            name="Team 2",
+            value=", ".join(team2_names),
+            inline=True
+        )
+
+        # Add rollback summary
+        if rollback_summary:
+            # Split into chunks if too long
+            rollback_text = "\n".join(rollback_summary)
+            if len(rollback_text) > 1024:
+                # Split into multiple fields
+                chunks = []
+                current_chunk = []
+                current_length = 0
+
+                for line in rollback_summary:
+                    if current_length + len(line) + 1 > 1024:
+                        chunks.append("\n".join(current_chunk))
+                        current_chunk = [line]
+                        current_length = len(line)
+                    else:
+                        current_chunk.append(line)
+                        current_length += len(line) + 1
+
+                if current_chunk:
+                    chunks.append("\n".join(current_chunk))
+
+                for i, chunk in enumerate(chunks):
+                    field_name = f"MMR Changes Reversed {i + 1}/{len(chunks)}" if len(
+                        chunks) > 1 else "MMR Changes Reversed"
+                    embed.add_field(name=field_name, value=chunk, inline=False)
+            else:
+                embed.add_field(name="MMR Changes Reversed", value=rollback_text, inline=False)
+
+        embed.add_field(
+            name="Summary",
+            value=f"**Players Affected:** {len(affected_players)}\n**Database Records:** Match deleted",
+            inline=False
+        )
+
+        embed.set_footer(
+            text=f"Removed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        await interaction.followup.send(embed=embed)
+
+        # Send notification to affected players (optional)
+        if len(affected_players) <= 10:  # Only if reasonable number of players
+            notification_embed = discord.Embed(
+                title="Match Removed - MMR Restored",
+                description=f"Match `{match_id}` has been removed by an administrator and your MMR has been restored.",
+                color=0x00ff00
+            )
+
+            notification_embed.add_field(
+                name="What This Means",
+                value="• The match result has been reversed\n• Your MMR has been restored to pre-match values\n• Your win/loss record has been adjusted",
+                inline=False
+            )
+
+            await interaction.channel.send(embed=notification_embed)
+
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error removing match: {str(e)}")
+        print(f"Error in removematch command: {e}")
+        import traceback
+        traceback.print_exc()
+
 @bot.tree.command(name="forcestart",
                   description="Force start the team selection process with dummy players if needed (Admin only)")
 async def forcestart_slash(interaction: discord.Interaction):

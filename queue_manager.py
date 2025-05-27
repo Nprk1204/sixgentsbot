@@ -162,7 +162,7 @@ class QueueManager:
         player_mention = player.mention
         player_name = player.display_name
 
-        # Check if player is already in a match (including voting/selection phase)
+        # ENHANCED: Check if player is already in a match (including ALL phases)
         if player_id in self.player_matches:
             match_id = self.player_matches[player_id]
             match = self.active_matches.get(match_id)
@@ -177,7 +177,6 @@ class QueueManager:
                         return f"{player_mention} you are already in an active match (voting in progress) in this channel!"
                     else:
                         try:
-                            other_channel = self.bot.get_channel(int(match_channel_id))
                             other_channel_mention = f"<#{match_channel_id}>"
                             return f"{player_mention} you are already in an active match (voting in progress) in {other_channel_mention}."
                         except:
@@ -188,7 +187,6 @@ class QueueManager:
                         return f"{player_mention} you are already in an active match (captain selection in progress) in this channel!"
                     else:
                         try:
-                            other_channel = self.bot.get_channel(int(match_channel_id))
                             other_channel_mention = f"<#{match_channel_id}>"
                             return f"{player_mention} you are already in an active match (captain selection in progress) in {other_channel_mention}."
                         except:
@@ -199,7 +197,6 @@ class QueueManager:
                         return f"{player_mention} you are already in an active match in this channel! Use `/report {match_id} win` or `/report {match_id} loss` to complete the match."
                     else:
                         try:
-                            other_channel = self.bot.get_channel(int(match_channel_id))
                             other_channel_mention = f"<#{match_channel_id}>"
                             return f"{player_mention} you are already in an active match in {other_channel_mention}. Complete that match first."
                         except:
@@ -210,16 +207,49 @@ class QueueManager:
                     return f"{player_mention} you are in a completed match that needs to be reported! Use `/report {match_id} win` or `/report {match_id} loss` to complete the match."
 
                 else:
-                    # Unknown status - generic message
+                    # Unknown status - generic message but still block
                     if match_channel_id == channel_id:
                         return f"{player_mention} you are already in an active match in this channel!"
                     else:
                         try:
-                            other_channel = self.bot.get_channel(int(match_channel_id))
                             other_channel_mention = f"<#{match_channel_id}>"
                             return f"{player_mention} you are already in an active match in {other_channel_mention}."
                         except:
                             return f"{player_mention} you are already in an active match in another channel."
+
+        # ADDITIONAL CHECK: Look for matches in database where player might be stuck
+        # This catches cases where player_matches tracking might be out of sync
+        try:
+            db_match = self.active_matches_collection.find_one({
+                "$or": [
+                    {"team1.id": player_id},
+                    {"team2.id": player_id},
+                    {"players.id": player_id}
+                ],
+                "status": {"$in": ["voting", "selection", "in_progress", "completed"]}
+            })
+
+            if db_match:
+                db_match_id = db_match.get("match_id")
+                db_status = db_match.get("status")
+                db_channel_id = db_match.get("channel_id")
+
+                # Fix tracking if it's missing
+                if player_id not in self.player_matches:
+                    self.player_matches[player_id] = db_match_id
+                    print(f"Fixed missing player tracking: {player_name} -> {db_match_id}")
+
+                # Block the player with appropriate message
+                if db_channel_id == channel_id:
+                    return f"{player_mention} you are already in a match ({db_status}) in this channel! Match ID: {db_match_id}"
+                else:
+                    try:
+                        other_channel_mention = f"<#{db_channel_id}>"
+                        return f"{player_mention} you are already in a match ({db_status}) in {other_channel_mention}. Match ID: {db_match_id}"
+                    except:
+                        return f"{player_mention} you are already in a match ({db_status}) in another channel. Match ID: {db_match_id}"
+        except Exception as e:
+            print(f"Error checking database for player matches: {e}")
 
         # Check if player is already in any queue
         queued_player = self.queue_collection.find_one({"id": player_id})
@@ -231,7 +261,6 @@ class QueueManager:
             else:
                 # If queued in another channel, mention that channel
                 try:
-                    other_channel = self.bot.get_channel(int(queued_channel_id))
                     other_channel_mention = f"<#{queued_channel_id}>"
                     return f"{player_mention} you are already in a queue in {other_channel_mention}. Please leave that queue first."
                 except:
@@ -366,12 +395,13 @@ class QueueManager:
         # Update in-memory state
         self.active_matches[match_id] = match_data
 
-        # IMPORTANT: Track all players in this match immediately
+        # CRITICAL: Track all players in this match immediately - even during voting phase
         for player in players:
             player_id = str(player.get('id', ''))
             if player_id:
                 self.player_matches[player_id] = match_id
-                print(f"Tracking player {player.get('name', 'Unknown')} (ID: {player_id}) in match {match_id}")
+                print(
+                    f"Tracking player {player.get('name', 'Unknown')} (ID: {player_id}) in match {match_id} from start")
 
         # Remove these players from the queue in database
         player_ids = [p.get('id') for p in players]
