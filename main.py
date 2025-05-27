@@ -236,36 +236,29 @@ async def on_reaction_add(reaction, user):
 
 
 # Queue commands
-# Updated queue command with better error handling
+# Updated queue command - optimized for speed, no defer
 @bot.tree.command(name="queue", description="Join the queue for 6 mans")
 async def queue_slash(interaction: discord.Interaction):
-    # CRITICAL: Respond immediately to prevent timeout
-    await interaction.response.defer()
-
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
         return
 
-    # Check if the player has completed rank verification
+    # Fast check - get player info
     player = interaction.user
     player_id = str(player.id)
 
-    # Get all rank roles
+    # Quick rank verification check
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
     rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
     rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
     rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
     has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
 
-    # Check if player has a rank entry in the database OR has a rank role
-    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
-
-    # Allow joining if either database record exists OR player has a rank role
     if not (rank_record or has_rank_role):
-        # Player hasn't completed rank verification either way
         embed = discord.Embed(
             title="Rank Verification Required",
             description="You need to verify your Rocket League rank before joining the queue.",
@@ -276,215 +269,154 @@ async def queue_slash(interaction: discord.Interaction):
             value="Visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    # If player has role but no database record, create one based on their role
+    # Create missing rank record if needed (do this quickly)
     if has_rank_role and not rank_record:
-        print(f"Player {player.display_name} has rank role but no database record. Creating one.")
-
-        # Determine which role they have
-        tier = None
+        tier = "Rank C"
+        mmr = 600
         if rank_a_role in player.roles:
             tier = "Rank A"
             mmr = 1600
         elif rank_b_role in player.roles:
             tier = "Rank B"
             mmr = 1100
-        elif rank_c_role in player.roles:
-            tier = "Rank C"
-            mmr = 600
 
-        # Create a record in the database
-        db.get_collection('ranks').insert_one({
-            "discord_id": player_id,
-            "discord_username": player.display_name,
-            "tier": tier,
-            "mmr": mmr,
-            "timestamp": datetime.datetime.utcnow()
-        })
-        print(f"Created rank record for {player.display_name} with tier {tier}")
+        # Quick insert
+        try:
+            db.get_collection('ranks').insert_one({
+                "discord_id": player_id,
+                "discord_username": player.display_name,
+                "tier": tier,
+                "mmr": mmr,
+                "timestamp": datetime.datetime.utcnow()
+            })
+        except Exception as e:
+            print(f"Error creating rank record: {e}")
 
-    # Use the queue manager to add player
-    response_message = await system_coordinator.queue_manager.add_player(player, interaction.channel)
+    # Get queue manager response
+    try:
+        response_message = await system_coordinator.queue_manager.add_player(player, interaction.channel)
+    except Exception as e:
+        print(f"Error adding player to queue: {e}")
+        await interaction.response.send_message("An error occurred while joining the queue. Please try again.",
+                                                ephemeral=True)
+        return
 
-    # Parse the response message
-    if response_message.startswith("QUEUE_ERROR:"):
-        # Extract the actual error message
-        error_msg = response_message[12:].strip()  # Remove "QUEUE_ERROR: " prefix
+    # Handle response quickly
+    if "QUEUE_ERROR:" in response_message:
+        error_msg = response_message.replace("QUEUE_ERROR:", "").strip()
 
         if "already in the queue for" in error_msg:
-            # Player is in another channel's queue
             embed = discord.Embed(
                 title="Queue Error",
                 description=error_msg,
-                color=0xe74c3c  # Red for error
+                color=0xe74c3c
             )
-            embed.add_field(
-                name="What to do",
-                value="Use `/leave` in that channel first, then try joining this queue again.",
-                inline=False
-            )
+            embed.add_field(name="What to do",
+                            value="Use `/leave` in that channel first, then try joining this queue again.",
+                            inline=False)
         elif "already in this queue" in error_msg:
-            # Player is already in this queue
             status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
             queue_count = status_data['queue_count']
-
             embed = discord.Embed(
                 title="Queue Status",
                 description=f"{player.mention}, you're already in this queue!",
-                color=0xffa500  # Orange for already in queue
+                color=0xffa500
             )
-            embed.add_field(
-                name="Current Queue",
-                value=f"**{queue_count}/6** players waiting",
-                inline=False
-            )
-            embed.add_field(
-                name="Queue Progress",
-                value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
-                inline=False
-            )
-        elif "already in an active match" in error_msg:
-            # Player is in an active match
-            embed = discord.Embed(
-                title="Queue Error",
-                description=error_msg,
-                color=0xff0000  # Red for error
-            )
-            embed.add_field(
-                name="Finish Your Match",
-                value="Complete your current match before joining another queue",
-                inline=False
-            )
+            embed.add_field(name="Current Queue", value=f"**{queue_count}/6** players waiting", inline=False)
+            embed.add_field(name="Queue Progress",
+                            value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)", inline=False)
         else:
-            # Generic error
-            embed = discord.Embed(
-                title="Queue Error",
-                description=error_msg,
-                color=0xff0000  # Red for error
-            )
+            embed = discord.Embed(title="Queue Error", description=error_msg, color=0xff0000)
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
-        return
+        await interaction.response.send_message(embed=embed)
 
-    elif response_message.startswith("SUCCESS:"):
-        # Successful queue join
-        success_msg = response_message[8:].strip()  # Remove "SUCCESS: " prefix
-
-        # Get current queue status
+    elif "SUCCESS:" in response_message:
+        success_msg = response_message.replace("SUCCESS:", "").strip()
         status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
         queue_count = status_data['queue_count']
 
         embed = discord.Embed(
             title="Queue Status",
             description=success_msg,
-            color=0x00ff00  # Green for successful join
+            color=0x00ff00
         )
-
-        embed.add_field(
-            name="Queue Progress",
-            value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
-            inline=False
-        )
+        embed.add_field(name="Queue Progress", value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
+                        inline=False)
 
         if queue_count < 6:
-            embed.add_field(
-                name="Status",
-                value=f"Waiting for **{6 - queue_count}** more player(s)",
-                inline=False
-            )
+            embed.add_field(name="Status", value=f"Waiting for **{6 - queue_count}** more player(s)", inline=False)
         else:
-            embed.add_field(
-                name="Status",
-                value="🎉 **Queue is FULL!** Match starting soon...",
-                inline=False
-            )
+            embed.add_field(name="Status", value="🎉 **Queue is FULL!** Match starting soon...", inline=False)
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
-        return
+        await interaction.response.send_message(embed=embed)
 
     else:
-        # Handle match creation (when queue is full)
-        # The response_message should be a match_id
+        # Match creation
         match_id = response_message
-
         embed = discord.Embed(
             title="Match Starting!",
             description=f"Queue is full! Starting team selection for match `{match_id}`",
-            color=0x00ff00  # Green for match start
+            color=0x00ff00
         )
-
-        embed.add_field(
-            name="Match ID",
-            value=f"`{match_id}`",
-            inline=False
-        )
-
-        embed.add_field(
-            name="Next Step",
-            value="Team selection voting will begin shortly. Make sure to vote!",
-            inline=False
-        )
-
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+        embed.add_field(name="Next Step", value="Team selection voting will begin shortly. Make sure to vote!",
+                        inline=False)
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
 
 
-# Updated leave command with immediate response to prevent timeout
+# Updated leave command - optimized for speed, no defer
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
-    # CRITICAL: Respond immediately to prevent timeout
-    await interaction.response.defer()
-
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.followup.send(
+        await interaction.response.send_message(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
         return
 
-    # Check if the player has completed rank verification FIRST
+    # Fast rank verification check
     player = interaction.user
     player_id = str(player.id)
 
-    # Get all rank roles
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
     rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
     rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
     rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
     has_rank_role = any(role in player.roles for role in [rank_a_role, rank_b_role, rank_c_role])
 
-    # Check if player has a rank entry in the database OR has a rank role
-    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
-
-    # If no verification, show rank verification required embed
     if not (rank_record or has_rank_role):
         embed = discord.Embed(
             title="Rank Verification Required",
             description="You need to verify your Rocket League rank before joining the queue.",
             color=0xf1c40f
         )
-        embed.add_field(
-            name="How to Verify",
-            value="Visit the rank check page on the website to complete verification.",
-            inline=False
-        )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        embed.add_field(name="How to Verify",
+                        value="Visit the rank check page on the website to complete verification.", inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    # Use the queue manager to remove player
-    response_message = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
+    # Get queue manager response
+    try:
+        response_message = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
+    except Exception as e:
+        print(f"Error removing player from queue: {e}")
+        await interaction.response.send_message("An error occurred while leaving the queue. Please try again.",
+                                                ephemeral=True)
+        return
 
-    # Parse the response message
-    if response_message.startswith("MATCH_ERROR:"):
-        # Extract the actual error message
-        error_msg = response_message[12:].strip()  # Remove "MATCH_ERROR: " prefix
+    # Handle response quickly
+    if "MATCH_ERROR:" in response_message:
+        error_msg = response_message.replace("MATCH_ERROR:", "").strip()
 
         # Extract match ID if present
         match_id = None
@@ -494,225 +426,113 @@ async def leave_slash(interaction: discord.Interaction):
             if match:
                 match_id = match.group(1)
 
-        embed = discord.Embed(
-            title="Cannot Leave Queue",
-            description=error_msg,
-            color=0xe74c3c  # Red for error
-        )
+        embed = discord.Embed(title="Cannot Leave Queue", description=error_msg, color=0xe74c3c)
 
         if "voting" in error_msg:
-            embed.add_field(
-                name="Reason",
-                value="Team selection voting is in progress",
-                inline=False
-            )
-            embed.add_field(
-                name="What to do",
-                value="Wait for the vote to complete, then you'll be in a match",
-                inline=False
-            )
+            embed.add_field(name="Reason", value="Team selection voting is in progress", inline=False)
+            embed.add_field(name="What to do", value="Wait for the vote to complete, then you'll be in a match",
+                            inline=False)
         elif "selection" in error_msg:
-            embed.add_field(
-                name="Reason",
-                value="Captain selection is in progress",
-                inline=False
-            )
-            embed.add_field(
-                name="What to do",
-                value="Wait for team selection to complete, then you'll be in a match",
-                inline=False
-            )
+            embed.add_field(name="Reason", value="Captain selection is in progress", inline=False)
+            embed.add_field(name="What to do", value="Wait for team selection to complete, then you'll be in a match",
+                            inline=False)
         elif "active match" in error_msg:
-            embed.add_field(
-                name="Reason",
-                value="You're currently in an active match",
-                inline=False
-            )
+            embed.add_field(name="Reason", value="You're currently in an active match", inline=False)
             if match_id:
-                embed.add_field(
-                    name="What to do",
-                    value=f"Complete your match using `/report {match_id} win` or `/report {match_id} loss`",
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name="What to do",
-                    value="Complete your match using `/report <match_id> win` or `/report <match_id> loss`",
-                    inline=False
-                )
-        elif "completed match" in error_msg:
-            embed.add_field(
-                name="Reason",
-                value="You have a completed match that needs to be reported",
-                inline=False
-            )
-            if match_id:
-                embed.add_field(
-                    name="What to do",
-                    value=f"Report your match result using `/report {match_id} win` or `/report {match_id} loss`",
-                    inline=False
-                )
-        else:
-            embed.add_field(
-                name="Reason",
-                value="You're in a match that needs to be completed",
-                inline=False
-            )
+                embed.add_field(name="What to do",
+                                value=f"Complete your match using `/report {match_id} win` or `/report {match_id} loss`",
+                                inline=False)
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
-        return
+        await interaction.response.send_message(embed=embed)
 
-    elif response_message.startswith("QUEUE_ERROR:"):
-        # Extract the actual error message
-        error_msg = response_message[12:].strip()  # Remove "QUEUE_ERROR: " prefix
-
-        # Get current queue status for context
+    elif "QUEUE_ERROR:" in response_message:
+        error_msg = response_message.replace("QUEUE_ERROR:", "").strip()
         status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
         queue_count = status_data['queue_count']
 
         if "not in this channel's queue" in error_msg:
-            # Player is in another channel's queue
-            embed = discord.Embed(
-                title="Queue Error",
-                description=error_msg,
-                color=0xf1c40f  # Yellow for wrong channel
-            )
-            embed.add_field(
-                name="Current Queue",
-                value=f"**{queue_count}/6** players waiting in this channel",
-                inline=False
-            )
-            embed.add_field(
-                name="Your Queue",
-                value="You're queued in a different channel. Use `/leave` in that channel to leave your queue.",
-                inline=False
-            )
+            embed = discord.Embed(title="Queue Error", description=error_msg, color=0xf1c40f)
+            embed.add_field(name="Current Queue", value=f"**{queue_count}/6** players waiting in this channel",
+                            inline=False)
+            embed.add_field(name="Your Queue",
+                            value="You're queued in a different channel. Use `/leave` in that channel to leave your queue.",
+                            inline=False)
         elif "not in any queue" in error_msg:
-            # Player is not in any queue
-            embed = discord.Embed(
-                title="Queue Status",
-                description=error_msg,
-                color=0xf1c40f  # Yellow for not in queue
-            )
-            embed.add_field(
-                name="Current Queue",
-                value=f"**{queue_count}/6** players waiting",
-                inline=False
-            )
-
+            embed = discord.Embed(title="Queue Status", description=error_msg, color=0xf1c40f)
+            embed.add_field(name="Current Queue", value=f"**{queue_count}/6** players waiting", inline=False)
             if queue_count > 0:
-                embed.add_field(
-                    name="Join Queue",
-                    value="Use `/queue` to join the current queue",
-                    inline=False
-                )
+                embed.add_field(name="Join Queue", value="Use `/queue` to join the current queue", inline=False)
             else:
-                embed.add_field(
-                    name="Join Queue",
-                    value="Use `/queue` to start a new queue",
-                    inline=False
-                )
+                embed.add_field(name="Join Queue", value="Use `/queue` to start a new queue", inline=False)
         else:
-            # Generic queue error
-            embed = discord.Embed(
-                title="Queue Error",
-                description=error_msg,
-                color=0xe74c3c  # Red for error
-            )
+            embed = discord.Embed(title="Queue Error", description=error_msg, color=0xe74c3c)
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
-        return
+        await interaction.response.send_message(embed=embed)
 
-    elif response_message.startswith("SUCCESS:"):
-        # Successful queue leave
-        success_msg = response_message[8:].strip()  # Remove "SUCCESS: " prefix
-
-        # Get current queue status
+    elif "SUCCESS:" in response_message:
+        success_msg = response_message.replace("SUCCESS:", "").strip()
         status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
         queue_count = status_data['queue_count']
 
-        embed = discord.Embed(
-            title="Queue Status",
-            description=success_msg,
-            color=0xff9900  # Orange for leaving
-        )
-
-        embed.add_field(
-            name="Updated Queue",
-            value=f"**{queue_count}/6** players remaining",
-            inline=False
-        )
+        embed = discord.Embed(title="Queue Status", description=success_msg, color=0xff9900)
+        embed.add_field(name="Updated Queue", value=f"**{queue_count}/6** players remaining", inline=False)
 
         if queue_count > 0:
-            embed.add_field(
-                name="Queue Progress",
-                value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
-                inline=False
-            )
-            embed.add_field(
-                name="Status",
-                value=f"Waiting for **{6 - queue_count}** more player(s)",
-                inline=False
-            )
+            embed.add_field(name="Queue Progress",
+                            value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)", inline=False)
+            embed.add_field(name="Status", value=f"Waiting for **{6 - queue_count}** more player(s)", inline=False)
         else:
-            embed.add_field(
-                name="Status",
-                value="Queue is now empty",
-                inline=False
-            )
+            embed.add_field(name="Status", value="Queue is now empty", inline=False)
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
-        return
-
-    elif response_message.startswith("ERROR:"):
-        # Generic error
-        error_msg = response_message[6:].strip()  # Remove "ERROR: " prefix
-
-        embed = discord.Embed(
-            title="Error",
-            description=error_msg,
-            color=0xff0000  # Red for error
-        )
-
-        embed.timestamp = datetime.datetime.now()
-        embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
-        return
+        await interaction.response.send_message(embed=embed)
 
     else:
-        # Fallback for any other response or edge cases
-        embed = discord.Embed(
-            title="Queue Status",
-            description=response_message,
-            color=0x95a5a6  # Gray for unknown/other
-        )
-
-        # Get current queue status for context
+        # Fallback
+        embed = discord.Embed(title="Queue Status", description=response_message, color=0x95a5a6)
         status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
         queue_count = status_data['queue_count']
-
-        embed.add_field(
-            name="Current Queue",
-            value=f"**{queue_count}/6** players waiting",
-            inline=False
-        )
-
-        if queue_count == 0:
-            embed.add_field(
-                name="Start Playing",
-                value="Use `/queue` to join the queue and start playing!",
-                inline=False
-            )
-
+        embed.add_field(name="Current Queue", value=f"**{queue_count}/6** players waiting", inline=False)
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await interaction.response.send_message(embed=embed)
+
+
+# Fixed error handler - simplified
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    print(f"Command error: {error}")
+
+    try:
+        if isinstance(error, app_commands.errors.CommandNotFound):
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Command not found. Use `/help` to see available commands.",
+                                                        ephemeral=True)
+        elif isinstance(error, app_commands.errors.MissingPermissions):
+            if not interaction.response.is_done():
+                await interaction.response.send_message("You don't have permission to use this command.",
+                                                        ephemeral=True)
+        elif isinstance(error, app_commands.errors.CommandInvokeError):
+            # Handle the underlying error
+            if isinstance(error.original, discord.errors.NotFound):
+                # Interaction timeout - just log it
+                print(f"Interaction timed out: {error.original}")
+                return
+            else:
+                print(f"Command invoke error: {error.original}")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+        else:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in error handler: {e}")
+        # Don't try to respond if we're already in an error state
 
 
 @bot.tree.command(name="status", description="Shows the current queue status")
