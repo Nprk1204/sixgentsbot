@@ -2405,9 +2405,10 @@ img {
     }
 
     .alert-success {
-        background: rgba(67, 181, 129, 0.15);
-        color: var(--success);
-        border-left: 4px solid var(--success);
+    background: rgba(67, 181, 129, 0.02) !important;
+    color: #43b581;
+    border-left: 4px solid rgba(67, 181, 129, 0.3);
+    border: 1px solid rgba(67, 181, 129, 0.08);
     }
 
     .alert-warning {
