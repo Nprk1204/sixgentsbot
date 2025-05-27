@@ -171,21 +171,8 @@ class QueueManager:
                 match_channel_id = match.get('channel_id')
                 match_status = match.get('status', '')
 
-                # FIXED: Return simple, consistent error messages
-                if match_status == "voting":
-                    return "MATCH_ERROR: You're already in an active match!"
-
-                elif match_status == "selection":
-                    return "MATCH_ERROR: You're already in an active match!"
-
-                elif match_status == "in_progress":
-                    return f"MATCH_ERROR: You're already in an active match! Use `/report {match_id} win` or `/report {match_id} loss` to complete it."
-
-                elif match_status == "completed":
-                    return f"MATCH_ERROR: You're in a completed match! Use `/report {match_id} win` or `/report {match_id} loss` to complete it."
-
-                else:
-                    return "MATCH_ERROR: You're already in an active match!"
+                # FIXED: Return formatted error message with match ID
+                return f"QUEUE_ERROR: You're already in an active match! Match ID: `{match_id}`"
 
         # ADDITIONAL CHECK: Look for matches in database where player might be stuck
         try:
@@ -207,8 +194,8 @@ class QueueManager:
                     self.player_matches[player_id] = db_match_id
                     print(f"Fixed missing player tracking: {player_name} -> {db_match_id}")
 
-                # FIXED: Return simple error message
-                return f"MATCH_ERROR: You're already in an active match! Match ID: {db_match_id}"
+                # FIXED: Return formatted error message with match ID
+                return f"QUEUE_ERROR: You're already in an active match! Match ID: `{db_match_id}`"
 
         except Exception as e:
             print(f"Error checking database for player matches: {e}")
@@ -221,8 +208,15 @@ class QueueManager:
             if queued_channel_id == channel_id:
                 return "QUEUE_ERROR: You're already in this queue!"
             else:
-                # FIXED: Return simple error for wrong channel
-                return "QUEUE_ERROR: You're already in a queue in another channel!"
+                # FIXED: Get the actual channel and mention the player properly
+                try:
+                    other_channel = self.bot.get_channel(int(queued_channel_id))
+                    if other_channel:
+                        return f"QUEUE_ERROR: {player_mention}, you're already in the queue for {other_channel.mention}!"
+                    else:
+                        return f"QUEUE_ERROR: {player_mention}, you're already in a queue in another channel!"
+                except:
+                    return f"QUEUE_ERROR: {player_mention}, you're already in a queue in another channel!"
 
         # Determine if this is a global queue
         is_global = channel.name.lower() == "global"
@@ -268,21 +262,21 @@ class QueueManager:
             if match:
                 match_status = match.get('status', '')
 
-                # Provide specific messages based on match status
+                # FIXED: Provide specific messages with match ID
                 if match_status == "voting":
-                    return f"{player_mention} cannot leave during team selection voting. Please wait for the vote to complete."
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave during team selection voting. Match ID: `{match_id}`"
                 elif match_status == "selection":
-                    return f"{player_mention} cannot leave during captain selection. Please wait for team selection to complete."
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave during captain selection. Match ID: `{match_id}`"
                 elif match_status == "in_progress":
-                    return f"{player_mention} cannot leave while in an active match. You must complete the match first using `/report {match_id} win` or `/report {match_id} loss`."
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Complete your match first using `/report {match_id} win` or `/report {match_id} loss`"
                 elif match_status == "completed":
-                    return f"{player_mention} cannot leave until the completed match is reported. Use `/report {match_id} win` or `/report {match_id} loss`."
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave until the completed match is reported. Use `/report {match_id} win` or `/report {match_id} loss`"
                 else:
                     # Generic message for unknown status
-                    return f"{player_mention} cannot leave while in an active match (status: {match_status})."
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Match ID: `{match_id}`"
             else:
                 # If match isn't in active_matches but player is tracked, they're in a match being processed
-                return f"{player_mention} is currently in a match that is being processed. Please wait for match completion."
+                return f"MATCH_ERROR: {player_mention}, you are currently in a match that is being processed. Please wait for match completion."
 
         # Check if player is in this channel's queue
         player_in_queue = False
@@ -300,12 +294,14 @@ class QueueManager:
                     if p.get('id') == player_id:
                         try:
                             other_channel = self.bot.get_channel(int(other_channel_id))
-                            other_channel_mention = f"<#{other_channel_id}>"
-                            return f"{player_mention} you are not in this channel's queue. You are in {other_channel_mention}'s queue."
+                            if other_channel:
+                                return f"QUEUE_ERROR: {player_mention}, you are not in this channel's queue. You are in {other_channel.mention}'s queue."
+                            else:
+                                return f"QUEUE_ERROR: {player_mention}, you are in another channel's queue, not this one."
                         except:
-                            return f"{player_mention} you are in another channel's queue, not this one."
+                            return f"QUEUE_ERROR: {player_mention}, you are in another channel's queue, not this one."
 
-            return f"{player_mention} you are not in any queue!"
+            return f"QUEUE_ERROR: {player_mention}, you are not in any queue!"
 
         # Remove player from database
         result = self.queue_collection.delete_one({"id": player_id, "channel_id": channel_id})
@@ -315,9 +311,9 @@ class QueueManager:
             self.channel_queues[channel_id] = [p for p in self.channel_queues[channel_id] if p.get('id') != player_id]
 
         if result.deleted_count > 0:
-            return f"{player_mention} has left the queue!"
+            return f"SUCCESS: {player_mention} has left the queue!"
         else:
-            return f"Error removing {player_mention} from the queue. Please try again."
+            return f"ERROR: Error removing {player_mention} from the queue. Please try again."
 
     async def create_match(self, channel, trigger_player_mention):
         """Create a match with the first 6 players in queue"""
