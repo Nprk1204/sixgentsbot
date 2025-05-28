@@ -613,6 +613,8 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
 
     # Determine winning team
     winner = match_result["winner"]
+    is_global = match_result.get("is_global", False)
+    mmr_type = "Global" if is_global else "Ranked"
 
     if winner == 1:
         winning_team = match_result["team1"]
@@ -621,7 +623,11 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         winning_team = match_result["team2"]
         losing_team = match_result["team1"]
 
-    # FIXED: Properly extract MMR changes and streaks from match result
+    print(f"Processing match report display for match {match_id}")
+    print(f"Match type: {mmr_type}")
+    print(f"MMR changes available: {len(match_result.get('mmr_changes', []))}")
+
+    # FIXED: Extract MMR changes and streaks from match result properly
     mmr_changes_by_player = {}
     for change in match_result.get("mmr_changes", []):
         player_id = change.get("player_id")
@@ -629,8 +635,13 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
             mmr_changes_by_player[player_id] = {
                 "mmr_change": change.get("mmr_change", 0),
                 "streak": change.get("streak", 0),
-                "is_win": change.get("is_win", False)
+                "is_win": change.get("is_win", False),
+                "is_global": change.get("is_global", False),
+                "old_mmr": change.get("old_mmr", 0),
+                "new_mmr": change.get("new_mmr", 0)
             }
+            print(
+                f"Player {player_id}: MMR change {change.get('mmr_change', 0)}, streak {change.get('streak', 0)}, is_global: {change.get('is_global', False)}")
 
     # Initialize arrays for MMR changes and streaks
     winning_team_mmr_changes = []
@@ -638,76 +649,102 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     winning_team_streaks = []
     losing_team_streaks = []
 
-    # Extract MMR changes for winning team
+    # FIXED: Extract MMR changes for winning team with proper global/ranked filtering
     for player in winning_team:
         player_id = player.get("id")
 
         if player_id and player_id in mmr_changes_by_player:
             change_data = mmr_changes_by_player[player_id]
-            mmr_change = change_data["mmr_change"]
-            streak = change_data["streak"]
 
-            winning_team_mmr_changes.append(f"+{mmr_change}")
+            # FIXED: Only show MMR changes that match the current match type
+            change_is_global = change_data.get("is_global", False)
+            if change_is_global == is_global:  # Only show if match types align
+                mmr_change = change_data["mmr_change"]
+                streak = change_data["streak"]
 
-            # Format streak display with emojis
-            if streak >= 3:
-                winning_team_streaks.append(f"🔥 {streak}W")
-            elif streak == 1:
-                winning_team_streaks.append("↗️ 1W")
-            elif streak == 2:
-                winning_team_streaks.append("↗️ 2W")
+                winning_team_mmr_changes.append(f"+{mmr_change}")
+
+                # FIXED: Format streak display with emojis based on the new streak value
+                if streak >= 3:
+                    winning_team_streaks.append(f"🔥 {streak}W")
+                elif streak == 2:
+                    winning_team_streaks.append(f"↗️ {streak}W")
+                elif streak == 1:
+                    winning_team_streaks.append(f"↗️ {streak}W")
+                else:
+                    winning_team_streaks.append("—")
+
+                print(f"Winner {player.get('name', 'Unknown')}: +{mmr_change} MMR, streak {streak}")
             else:
+                print(
+                    f"Skipping MMR display for {player.get('name', 'Unknown')} - wrong match type (change_is_global: {change_is_global}, match_is_global: {is_global})")
+                winning_team_mmr_changes.append("—")
                 winning_team_streaks.append("—")
-
         elif player_id and player_id.startswith('9000'):  # Dummy player
             winning_team_mmr_changes.append("+0")
             winning_team_streaks.append("—")
         else:
-            winning_team_mmr_changes.append("+??")
+            print(f"No MMR change found for winner {player.get('name', 'Unknown')} (ID: {player_id})")
+            winning_team_mmr_changes.append("—")
             winning_team_streaks.append("—")
 
-    # Extract MMR changes for losing team
+    # FIXED: Extract MMR changes for losing team with proper global/ranked filtering
     for player in losing_team:
         player_id = player.get("id")
 
         if player_id and player_id in mmr_changes_by_player:
             change_data = mmr_changes_by_player[player_id]
-            mmr_change = change_data["mmr_change"]
-            streak = change_data["streak"]
 
-            losing_team_mmr_changes.append(str(mmr_change))  # Already negative
+            # FIXED: Only show MMR changes that match the current match type
+            change_is_global = change_data.get("is_global", False)
+            if change_is_global == is_global:  # Only show if match types align
+                mmr_change = change_data["mmr_change"]
+                streak = change_data["streak"]
 
-            # Format streak display
-            if streak <= -3:
-                losing_team_streaks.append(f"❄️ {abs(streak)}L")
-            elif streak == -1:
-                losing_team_streaks.append("↘️ 1L")
-            elif streak == -2:
-                losing_team_streaks.append("↘️ 2L")
+                losing_team_mmr_changes.append(str(mmr_change))  # Already negative
+
+                # FIXED: Format streak display for losses
+                if streak <= -3:
+                    losing_team_streaks.append(f"❄️ {abs(streak)}L")
+                elif streak == -2:
+                    losing_team_streaks.append(f"↘️ {abs(streak)}L")
+                elif streak == -1:
+                    losing_team_streaks.append(f"↘️ {abs(streak)}L")
+                else:
+                    losing_team_streaks.append("—")
+
+                print(f"Loser {player.get('name', 'Unknown')}: {mmr_change} MMR, streak {streak}")
             else:
+                print(
+                    f"Skipping MMR display for {player.get('name', 'Unknown')} - wrong match type (change_is_global: {change_is_global}, match_is_global: {is_global})")
+                losing_team_mmr_changes.append("—")
                 losing_team_streaks.append("—")
-
         elif player_id and player_id.startswith('9000'):  # Dummy player
             losing_team_mmr_changes.append("-0")
             losing_team_streaks.append("—")
         else:
-            losing_team_mmr_changes.append("-??")
+            print(f"No MMR change found for loser {player.get('name', 'Unknown')} (ID: {player_id})")
+            losing_team_mmr_changes.append("—")
             losing_team_streaks.append("—")
 
-    # Create the embed with updated formatting to include streaks
+    # FIXED: Create the embed with enhanced formatting to include match type and streaks
     embed = discord.Embed(
-        title="Match Results",
+        title=f"{mmr_type} Match Results",
         description=f"Match completed",
         color=0x00ff00  # Green color
     )
 
-    # Match ID field
-    embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+    # Match ID and type field
+    embed.add_field(
+        name="Match Info",
+        value=f"**Match ID:** `{match_id}`\n**Type:** {mmr_type} Match",
+        inline=False
+    )
 
     # Add Winners header
     embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
 
-    # Create individual fields for each winning player
+    # Create individual fields for each winning player with better formatting
     for i, player in enumerate(winning_team):
         try:
             member = await interaction.guild.fetch_member(int(player.get("id", 0)))
@@ -715,10 +752,13 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         except:
             name = player.get("name", "Unknown")
 
-        # Add a field for this player with streak info
+        # FIXED: Enhanced display with MMR type indicator
+        mmr_display = winning_team_mmr_changes[i] if i < len(winning_team_mmr_changes) else "—"
+        streak_display = winning_team_streaks[i] if i < len(winning_team_streaks) else "—"
+
         embed.add_field(
             name=f"**{name}**",
-            value=f"{winning_team_mmr_changes[i]} MMR\n{winning_team_streaks[i]}",
+            value=f"{mmr_display} {mmr_type} MMR\n{streak_display}",
             inline=True
         )
 
@@ -732,7 +772,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Add Losers header
     embed.add_field(name="😔 Losers", value="\u200b", inline=False)
 
-    # Create individual fields for each losing player
+    # Create individual fields for each losing player with better formatting
     for i, player in enumerate(losing_team):
         try:
             member = await interaction.guild.fetch_member(int(player.get("id", 0)))
@@ -740,10 +780,13 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         except:
             name = player.get("name", "Unknown")
 
-        # Add a field for this player with streak info
+        # FIXED: Enhanced display with MMR type indicator
+        mmr_display = losing_team_mmr_changes[i] if i < len(losing_team_mmr_changes) else "—"
+        streak_display = losing_team_streaks[i] if i < len(losing_team_streaks) else "—"
+
         embed.add_field(
             name=f"**{name}**",
-            value=f"{losing_team_mmr_changes[i]} MMR\n{losing_team_streaks[i]}",
+            value=f"{mmr_display} {mmr_type} MMR\n{streak_display}",
             inline=True
         )
 
@@ -754,17 +797,34 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     elif len(losing_team) % 3 == 2:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-    # MMR System explanation
+    # FIXED: Enhanced MMR System explanation with streak info
     embed.add_field(
-        name="📊 MMR System",
-        value="Dynamic MMR: Changes based on games played and win/loss streaks",
+        name="📊 MMR & Streak System",
+        value=(
+            f"**{mmr_type} MMR:** Dynamic changes based on team balance and streaks\n"
+            f"**Streaks:** 🔥 3+ wins = bonus MMR | ❄️ 3+ losses = extra penalty\n"
+            f"**Icons:** ↗️ Recent win | ↘️ Recent loss | — No streak"
+        ),
         inline=False
     )
 
-    # Footer with reporter info
-    embed.set_footer(text=f"Reported by {interaction.user.display_name}")
+    # Footer with reporter info and timestamp
+    embed.set_footer(
+        text=f"Reported by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+
+    # FIXED: Add debug info if no MMR changes were found
+    if not mmr_changes_by_player:
+        embed.add_field(
+            name="⚠️ Debug Info",
+            value="No MMR changes recorded for this match. This may indicate a system error.",
+            inline=False
+        )
+        print(f"WARNING: No MMR changes found in match result for match {match_id}")
 
     await interaction.followup.send(embed=embed)
+
+    print(f"Match report display completed for {match_id}")
 
 
 @bot.tree.command(name="adminreport", description="Admin command to report match results")
