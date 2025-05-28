@@ -645,78 +645,76 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         winning_team = match_result["team2"]
         losing_team = match_result["team1"]
 
-    # FIXED: Properly extract MMR changes and streaks from match result
-    mmr_changes_by_player = {}
+    # Initialize empty arrays for MMR changes
+    winning_team_mmr_changes = ["?"] * len(winning_team)
+    losing_team_mmr_changes = ["?"] * len(losing_team)
+
+    # NEW: Track streaks for display
+    winning_team_streaks = ["?"] * len(winning_team)
+    losing_team_streaks = ["?"] * len(losing_team)
+
+    # Extract MMR changes from the match result
     for change in match_result.get("mmr_changes", []):
         player_id = change.get("player_id")
-        if player_id:
-            mmr_changes_by_player[player_id] = {
-                "mmr_change": change.get("mmr_change", 0),
-                "streak": change.get("streak", 0),
-                "is_win": change.get("is_win", False)
-            }
+        mmr_change = change.get("mmr_change", 0)
+        is_win = change.get("is_win", False)
+        streak = change.get("streak", 0)  # FIXED: Get streak from MMR changes
 
-    # Initialize arrays for MMR changes and streaks
-    winning_team_mmr_changes = []
-    losing_team_mmr_changes = []
-    winning_team_streaks = []
-    losing_team_streaks = []
-
-    # Extract MMR changes for winning team
-    for player in winning_team:
-        player_id = player.get("id")
-
-        if player_id and player_id in mmr_changes_by_player:
-            change_data = mmr_changes_by_player[player_id]
-            mmr_change = change_data["mmr_change"]
-            streak = change_data["streak"]
-
-            winning_team_mmr_changes.append(f"+{mmr_change}")
-
-            # Format streak display with emojis
-            if streak >= 3:
-                winning_team_streaks.append(f"🔥 {streak}W")
-            elif streak == 1:
-                winning_team_streaks.append("↗️ 1W")
-            elif streak == 2:
-                winning_team_streaks.append("↗️ 2W")
-            else:
-                winning_team_streaks.append("—")
-
-        elif player_id and player_id.startswith('9000'):  # Dummy player
-            winning_team_mmr_changes.append("+0")
-            winning_team_streaks.append("—")
+        # Find the player's index and set their MMR change AND streak
+        if is_win:
+            # This is a winner
+            for i, player in enumerate(winning_team):
+                if player.get("id") == player_id:
+                    winning_team_mmr_changes[i] = f"+{mmr_change}"
+                    # FIXED: Format streak display with emojis
+                    if streak >= 3:
+                        winning_team_streaks[i] = f"🔥 {streak}W"  # Fire emoji for hot streak
+                    elif streak == 1:
+                        winning_team_streaks[i] = "↗️ 1W"  # Just started winning
+                    elif streak == 2:
+                        winning_team_streaks[i] = "↗️ 2W"  # Building momentum
+                    else:
+                        winning_team_streaks[i] = "—"  # No streak (unlikely but possible)
+                    break
         else:
-            winning_team_mmr_changes.append("+??")
-            winning_team_streaks.append("—")
+            # This is a loser
+            for i, player in enumerate(losing_team):
+                if player.get("id") == player_id:
+                    losing_team_mmr_changes[i] = f"{mmr_change}"  # Already negative
+                    # FIXED: Format streak display
+                    if streak <= -3:
+                        losing_team_streaks[i] = f"❄️ {abs(streak)}L"  # Cold streak
+                    elif streak == -1:
+                        losing_team_streaks[i] = "↘️ 1L"  # Just started losing
+                    elif streak == -2:
+                        losing_team_streaks[i] = "↘️ 2L"  # Slumping
+                    else:
+                        losing_team_streaks[i] = "—"  # No streak (unlikely)
+                    break
 
-    # Extract MMR changes for losing team
-    for player in losing_team:
-        player_id = player.get("id")
+    # Handle dummy players (they don't have MMR changes in the database)
+    for i, player in enumerate(winning_team):
+        if player.get("id", "").startswith('9000'):  # Dummy player
+            winning_team_mmr_changes[i] = "+0"
+            winning_team_streaks[i] = "—"
 
-        if player_id and player_id in mmr_changes_by_player:
-            change_data = mmr_changes_by_player[player_id]
-            mmr_change = change_data["mmr_change"]
-            streak = change_data["streak"]
+    for i, player in enumerate(losing_team):
+        if player.get("id", "").startswith('9000'):  # Dummy player
+            losing_team_mmr_changes[i] = "-0"
+            losing_team_streaks[i] = "—"
 
-            losing_team_mmr_changes.append(str(mmr_change))  # Already negative
+    # Check for any remaining unknown MMR changes
+    for i in range(len(winning_team_mmr_changes)):
+        if winning_team_mmr_changes[i] == "?":
+            winning_team_mmr_changes[i] = "+??"
+        if winning_team_streaks[i] == "?":
+            winning_team_streaks[i] = "—"
 
-            # Format streak display
-            if streak <= -3:
-                losing_team_streaks.append(f"❄️ {abs(streak)}L")
-            elif streak == -1:
-                losing_team_streaks.append("↘️ 1L")
-            elif streak == -2:
-                losing_team_streaks.append("↘️ 2L")
-            else:
-                losing_team_streaks.append("—")
-
-        elif player_id and player_id.startswith('9000'):  # Dummy player
-            losing_team_mmr_changes.append("-0")
-            losing_team_streaks.append("—")
-        else:
-            losing_team_mmr_changes.append("-??")
-            losing_team_streaks.append("—")
+    for i in range(len(losing_team_mmr_changes)):
+        if losing_team_mmr_changes[i] == "?":
+            losing_team_mmr_changes[i] = "-??"
+        if losing_team_streaks[i] == "?":
+            losing_team_streaks[i] = "—"
 
     # Create the embed with updated formatting to include streaks
     embed = discord.Embed(
