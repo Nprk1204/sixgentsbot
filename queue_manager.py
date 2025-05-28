@@ -366,14 +366,8 @@ class QueueManager:
             # Remove the first 6 players
             self.channel_queues[channel_id] = self.channel_queues[channel_id][6:]
 
-        # FIX: Automatically start voting after creating the match
-        channel_name = channel.name.lower()
-        if channel_name in self.vote_systems:
-            vote_system = self.vote_systems[channel_name]
-            # Start voting in the background (don't await here to avoid blocking)
-            if self.bot:
-                self.bot.loop.create_task(vote_system.start_vote(channel))
-                print(f"Auto-starting vote for match {match_id} in channel {channel.name}")
+        # REMOVED: Auto-vote trigger that was causing duplicates
+        # The voting will be started by the main command flow instead
 
         # Return the match ID
         return match_id

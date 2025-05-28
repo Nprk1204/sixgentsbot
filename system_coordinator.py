@@ -107,33 +107,18 @@ class SystemCoordinator:
             await self.vote_systems[channel_name].handle_reaction(reaction, user)
 
     async def check_for_ready_matches(self):
-        """Background task to check for ready matches to start voting"""
+        """Background task disabled to prevent duplicate vote triggers"""
         while True:
             try:
-                if self.bot:
-                    # Check each queue channel for matches ready to start
-                    for guild in self.bot.guilds:
-                        for channel in guild.text_channels:
-                            channel_name = channel.name.lower()
+                # DISABLED: This background task was causing duplicate vote starts
+                # All voting will be handled by the main command flow instead
+                print("Background match check disabled to prevent duplicates")
 
-                            # Only check supported channels
-                            if channel_name in self.channel_names:
-                                channel_id = str(channel.id)
-
-                                # Get the players in queue for this channel
-                                players = self.queue_manager.get_players_in_queue(channel_id)
-
-                                # If there are 6 or more players and no voting is active, start voting
-                                if len(players) >= 6:
-                                    vote_system = self.vote_systems.get(channel_name)
-                                    if vote_system and not vote_system.is_voting_active(channel_id=channel_id):
-                                        print(f"Starting vote in {channel.name} as queue has 6+ players")
-                                        await vote_system.start_vote(channel)
             except Exception as e:
                 print(f"Error in check_for_ready_matches: {e}")
 
-            # Check every 10 seconds
-            await asyncio.sleep(10)
+            # Check every 60 seconds (increased interval, but mostly inactive)
+            await asyncio.sleep(60)
 
     def is_voting_active(self, channel_id=None):
         """Check if voting is active in any/specific channel"""
