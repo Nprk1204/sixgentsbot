@@ -254,15 +254,16 @@ class QueueManager:
         player_id = str(player.id)
         player_mention = player.mention
 
-        # Check if player is in any active match (including voting/selection)
+        # FIXED: Check if player is in any active match (including voting/selection) FIRST
         if player_id in self.player_matches:
             match_id = self.player_matches[player_id]
             match = self.active_matches.get(match_id)
 
             if match:
                 match_status = match.get('status', '')
+                print(f"Player {player.display_name} is in match {match_id} with status: {match_status}")
 
-                # FIXED: Provide specific messages with match ID
+                # FIXED: Provide specific messages with match ID for all match phases
                 if match_status == "voting":
                     return f"MATCH_ERROR: {player_mention}, you cannot leave during team selection voting. Match ID: `{match_id}`"
                 elif match_status == "selection":
@@ -275,8 +276,53 @@ class QueueManager:
                     # Generic message for unknown status
                     return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Match ID: `{match_id}`"
             else:
-                # If match isn't in active_matches but player is tracked, they're in a match being processed
-                return f"MATCH_ERROR: {player_mention}, you are currently in a match that is being processed. Please wait for match completion."
+                # FIXED: If match isn't in active_matches but player is tracked, check database
+                print(f"Player {player.display_name} is tracked in match {match_id} but match not in active_matches")
+
+                # Check database for the match
+                db_match = self.active_matches_collection.find_one({"match_id": match_id})
+                if db_match:
+                    match_status = db_match.get('status', 'unknown')
+                    print(f"Found match {match_id} in database with status: {match_status}")
+
+                    if match_status == "voting":
+                        return f"MATCH_ERROR: {player_mention}, you cannot leave during team selection voting. Match ID: `{match_id}`"
+                    elif match_status == "selection":
+                        return f"MATCH_ERROR: {player_mention}, you cannot leave during captain selection. Match ID: `{match_id}`"
+                    elif match_status == "in_progress":
+                        return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Complete your match first using `/report {match_id} win` or `/report {match_id} loss`"
+                    else:
+                        return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Match ID: `{match_id}`"
+                else:
+                    # Match not found anywhere, clean up the tracking
+                    print(f"Cleaning up orphaned player tracking for {player.display_name}")
+                    del self.player_matches[player_id]
+
+        # FIXED: Additional check - look for the player in any active match directly
+        for match_id, match in self.active_matches.items():
+            # Check if player is in this match's players list
+            players = match.get('players', [])
+            player_in_match = any(p.get('id') == player_id for p in players)
+
+            if player_in_match:
+                match_status = match.get('status', '')
+                print(
+                    f"Found player {player.display_name} in match {match_id} (status: {match_status}) via direct search")
+
+                # Update tracking if missing
+                if player_id not in self.player_matches:
+                    self.player_matches[player_id] = match_id
+                    print(f"Fixed missing player tracking for {player.display_name}")
+
+                # Return appropriate error message
+                if match_status == "voting":
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave during team selection voting. Match ID: `{match_id}`"
+                elif match_status == "selection":
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave during captain selection. Match ID: `{match_id}`"
+                elif match_status == "in_progress":
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Complete your match first using `/report {match_id} win` or `/report {match_id} loss`"
+                else:
+                    return f"MATCH_ERROR: {player_mention}, you cannot leave while in an active match. Match ID: `{match_id}`"
 
         # Check if player is in this channel's queue
         player_in_queue = False
