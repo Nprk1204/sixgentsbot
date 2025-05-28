@@ -26,10 +26,10 @@ handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w'
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
-intents.reactions = True  # Make sure reaction intents are enabled
+intents.reactions = True
 
 bot = commands.Bot(command_prefix='/', intents=intents)
-bot.remove_command('help')  # Remove default help command
+bot.remove_command('help')
 
 # Create a minimal Flask app for keepalive purposes
 keepalive_app = Flask(__name__)
@@ -47,7 +47,7 @@ def run_keepalive_server():
 
 def start_keepalive_server():
     server_thread = Thread(target=run_keepalive_server)
-    server_thread.daemon = True  # This ensures the thread will close when the main program exits
+    server_thread.daemon = True
     server_thread.start()
     print("Keepalive web server started on port", os.environ.get("PORT", 8080))
 
@@ -86,41 +86,39 @@ class SimpleCommand:
         self.name = command.name if command else "unknown"
 
 
-# Track recent commands to prevent duplicates
+# Track recent commands to prevent duplicates - ENHANCED
 recent_commands = {}
 command_lock = asyncio.Lock()
 
 
 async def is_duplicate_command(ctx):
-    """Thread-safe check if a command is a duplicate"""
+    """Enhanced duplicate prevention"""
     user_id = ctx.author.id
     command_name = ctx.command.name if ctx.command else "unknown"
     channel_id = ctx.channel.id
     message_id = ctx.message.id
     timestamp = ctx.message.created_at.timestamp()
 
-    print(f"Command received: {command_name} from {ctx.author.name} (ID: {message_id})")
-
-    key = f"{user_id}:{command_name}:{channel_id}:{message_id}"
+    # Create a unique key based on user, command, and channel
+    key = f"{user_id}:{command_name}:{channel_id}"
 
     async with command_lock:
+        now = datetime.datetime.now(datetime.UTC).timestamp()
+
+        # Check if this exact command was run very recently (within 2 seconds)
         if key in recent_commands:
-            print(f"DUPLICATE FOUND: {command_name} from {ctx.author.name} in {ctx.channel.name} (ID: {message_id})")
-            return True
+            last_time = recent_commands[key]
+            if now - last_time < 2.0:  # 2 second cooldown
+                print(f"DUPLICATE BLOCKED: {command_name} from {ctx.author.name} (too recent)")
+                return True
 
-        # Update BEFORE continuing to prevent race conditions
-        recent_commands[key] = timestamp
-        print(f"Command registered: {command_name} (ID: {message_id})")
+        # Update the timestamp
+        recent_commands[key] = now
 
-        # Keep dict size manageable
-        if len(recent_commands) > 100:
-            now = datetime.datetime.now(datetime.UTC).timestamp()
-            # Only keep commands from last 5 minutes
-            old_size = len(recent_commands)
-            current_records = recent_commands.copy()
-            recent_commands.clear()
-            recent_commands.update({k: v for k, v in current_records.items() if now - v < 300})
-            print(f"Cleaned command cache: {old_size} → {len(recent_commands)} entries")
+        # Clean old entries (older than 10 seconds)
+        old_keys = [k for k, v in recent_commands.items() if now - v > 10.0]
+        for old_key in old_keys:
+            del recent_commands[old_key]
 
     return False
 
@@ -140,25 +138,18 @@ def is_command_channel(channel):
 
 
 def has_admin_or_mod_permissions(user, guild):
-    """
-    Check if user has admin permissions OR the "6mod" role
-    """
-    # Check if user has administrator permissions
+    """Check if user has admin permissions OR the "6mod" role"""
     if user.guild_permissions.administrator:
         return True
-
-    # Check if user has the "6mod" role
     mod_role = discord.utils.get(guild.roles, name="6mod")
     if mod_role and mod_role in user.roles:
         return True
-
     return False
 
 
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 try:
-    # Test the connection
     client.admin.command('ping')
     print("MongoDB connection successful!")
 except Exception as e:
@@ -166,8 +157,6 @@ except Exception as e:
 
 # Initialize components
 db = Database(MONGO_URI)
-
-# Create the system coordinator which will manage all systems
 system_coordinator = SystemCoordinator(db)
 
 
@@ -177,31 +166,13 @@ async def on_ready():
     print(f"Connected to {len(bot.guilds)} guilds")
 
     try:
-        # Set bot in system coordinator
         system_coordinator.set_bot(bot)
-
-        # Start background task to check for ready matches
         bot.loop.create_task(system_coordinator.check_for_ready_matches())
-
         print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
-        # First, register all commands explicitly to ensure they're in the tree
-        # This is just an example - your actual commands are already defined in the file
-        # But this ensures they are definitely in the tree
-
-        # Example of explicitly registering a command
-        # (Uncomment if you want to test with just one command)
-        """
-        @bot.tree.command(name="ping", description="Check if the bot is connected")
-        async def ping_cmd(interaction: discord.Interaction):
-            await interaction.response.send_message("Pong! Bot is connected to Discord.")
-        """
-
-        # Sync commands first without guild restriction (global commands)
         print("Syncing global commands...")
         await bot.tree.sync()
 
-        # Then sync to each guild specifically for faster updates
         print("Syncing guild-specific commands...")
         for guild in bot.guilds:
             try:
@@ -210,14 +181,12 @@ async def on_ready():
             except Exception as guild_error:
                 print(f"Error syncing to guild {guild.name}: {guild_error}")
 
-        # Log all commands that should be available
         commands = bot.tree.get_commands()
         print(f"Registered {len(commands)} global application commands:")
         for cmd in commands:
             print(f"- /{cmd.name}")
 
-        # The sync process can take some time to propagate to Discord's systems
-        print("Command synchronization complete. It may take up to an hour for commands to appear in Discord.")
+        print("Command synchronization complete.")
 
     except Exception as e:
         print(f"Error during bot initialization: {e}")
@@ -229,9 +198,7 @@ async def on_ready():
 async def on_reaction_add(reaction, user):
     """Handle reactions for voting"""
     if user.bot:
-        return  # Ignore bot reactions
-
-    # Pass to system coordinator to handle
+        return
     await system_coordinator.handle_reaction(reaction, user)
 
 
@@ -239,7 +206,7 @@ async def on_reaction_add(reaction, user):
 # Updated queue command - optimized for speed, no defer
 @bot.tree.command(name="queue", description="Join the queue for 6 mans")
 async def queue_slash(interaction: discord.Interaction):
-    # Check if command is used in an allowed channel
+    # Check channel first
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
@@ -247,11 +214,13 @@ async def queue_slash(interaction: discord.Interaction):
         )
         return
 
-    # Fast check - get player info
+    # IMMEDIATE response to prevent timeout
+    await interaction.response.defer()
+
+    # Fast rank verification check
     player = interaction.user
     player_id = str(player.id)
 
-    # Quick rank verification check
     rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
     rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
     rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
@@ -269,10 +238,10 @@ async def queue_slash(interaction: discord.Interaction):
             value="Visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         return
 
-    # Create missing rank record if needed (do this quickly)
+    # Create missing rank record if needed
     if has_rank_role and not rank_record:
         tier = "Rank C"
         mmr = 600
@@ -283,7 +252,6 @@ async def queue_slash(interaction: discord.Interaction):
             tier = "Rank B"
             mmr = 1100
 
-        # Quick insert
         try:
             db.get_collection('ranks').insert_one({
                 "discord_id": player_id,
@@ -300,11 +268,10 @@ async def queue_slash(interaction: discord.Interaction):
         response_message = await system_coordinator.queue_manager.add_player(player, interaction.channel)
     except Exception as e:
         print(f"Error adding player to queue: {e}")
-        await interaction.response.send_message("An error occurred while joining the queue. Please try again.",
-                                                ephemeral=True)
+        await interaction.followup.send("An error occurred while joining the queue. Please try again.", ephemeral=True)
         return
 
-    # Handle response quickly
+    # Handle response - SINGLE followup message only
     if "QUEUE_ERROR:" in response_message:
         error_msg = response_message.replace("QUEUE_ERROR:", "").strip()
 
@@ -333,7 +300,7 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     elif "SUCCESS:" in response_message:
         success_msg = response_message.replace("SUCCESS:", "").strip()
@@ -355,7 +322,7 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     else:
         # Match creation
@@ -370,19 +337,32 @@ async def queue_slash(interaction: discord.Interaction):
                         inline=False)
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
+
+        # FIXED: Start voting AFTER sending the match creation message
+        # Check if voting system exists for this channel
+        channel_name = interaction.channel.name.lower()
+        if channel_name in system_coordinator.vote_systems:
+            # Small delay to ensure proper order
+            await asyncio.sleep(1.0)
+            try:
+                await system_coordinator.vote_systems[channel_name].start_vote(interaction.channel)
+            except Exception as vote_error:
+                print(f"Error starting vote: {vote_error}")
 
 
-# Updated leave command - optimized for speed, no defer
+# FIXED: Leave command with proper interaction handling
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
-    # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
         return
+
+    # IMMEDIATE response to prevent timeout
+    await interaction.response.defer()
 
     # Fast rank verification check
     player = interaction.user
@@ -402,7 +382,7 @@ async def leave_slash(interaction: discord.Interaction):
         )
         embed.add_field(name="How to Verify",
                         value="Visit the rank check page on the website to complete verification.", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         return
 
     # Get queue manager response
@@ -410,11 +390,10 @@ async def leave_slash(interaction: discord.Interaction):
         response_message = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
     except Exception as e:
         print(f"Error removing player from queue: {e}")
-        await interaction.response.send_message("An error occurred while leaving the queue. Please try again.",
-                                                ephemeral=True)
+        await interaction.followup.send("An error occurred while leaving the queue. Please try again.", ephemeral=True)
         return
 
-    # Handle response quickly
+    # Handle response - SINGLE followup message only
     if "MATCH_ERROR:" in response_message:
         error_msg = response_message.replace("MATCH_ERROR:", "").strip()
 
@@ -445,7 +424,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     elif "QUEUE_ERROR:" in response_message:
         error_msg = response_message.replace("QUEUE_ERROR:", "").strip()
@@ -471,7 +450,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     elif "SUCCESS:" in response_message:
         success_msg = response_message.replace("SUCCESS:", "").strip()
@@ -490,7 +469,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     else:
         # Fallback
@@ -500,10 +479,10 @@ async def leave_slash(interaction: discord.Interaction):
         embed.add_field(name="Current Queue", value=f"**{queue_count}/6** players waiting", inline=False)
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
 
-# Fixed error handler - simplified
+# FIXED: Error handler - simplified
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     print(f"Command error: {error}")
@@ -518,9 +497,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
                 await interaction.response.send_message("You don't have permission to use this command.",
                                                         ephemeral=True)
         elif isinstance(error, app_commands.errors.CommandInvokeError):
-            # Handle the underlying error
             if isinstance(error.original, discord.errors.NotFound):
-                # Interaction timeout - just log it
                 print(f"Interaction timed out: {error.original}")
                 return
             else:
@@ -532,7 +509,6 @@ async def on_app_command_error(interaction: discord.Interaction, error):
                 await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
     except Exception as e:
         print(f"Error in error handler: {e}")
-        # Don't try to respond if we're already in an error state
 
 
 @bot.tree.command(name="status", description="Shows the current queue status")
@@ -2859,7 +2835,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
         )
         return
 
-    # Check if user has permissions
+    # Check if user has permissions - FIXED: Use the correct function name
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
         await interaction.response.send_message(
             "You need administrator permissions or the 6mod role to use this command.",
@@ -2890,22 +2866,8 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     player_out_mention = player_out.mention
     player_in_mention = player_in.mention
 
-    # If not admin, check if user is part of the match
-    if not is_admin:
-        # Get teams
-        team1 = match.get("team1", [])
-        team2 = match.get("team2", [])
-        all_players = team1 + team2
-
-        # Check if interaction user is part of the match
-        user_in_match = any(p.get("id") == str(interaction.user.id) for p in all_players)
-
-        if not user_in_match:
-            await interaction.response.send_message(
-                "You must be part of the match or an administrator to make substitutions.",
-                ephemeral=True
-            )
-            return
+    # REMOVED: The problematic is_admin check that was causing the error
+    # The permission check above is sufficient
 
     # Check which team player_out is on
     team1 = match.get("team1", [])
