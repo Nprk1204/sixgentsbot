@@ -224,11 +224,8 @@ class MatchSystem:
         if self.queue_manager:
             self.queue_manager.remove_match(match_id)
 
-        # Get the updated match document
-        updated_match = self.matches.find_one({"match_id": match_id})
-
         # Check if this is a global match
-        is_global_match = updated_match.get("is_global", False)
+        is_global_match = match.get("is_global", False)
         print(f"Match is global: {is_global_match}")
 
         # Determine winning and losing teams
@@ -709,7 +706,25 @@ class MatchSystem:
         if self.queue_manager:
             self.queue_manager.remove_match(match_id)
 
-        return updated_match, None
+        # CRITICAL FIX: Return a match result object that includes the MMR changes
+        # Instead of fetching from database which might not have the changes yet,
+        # construct the result object manually with all the data we just processed
+        match_result = {
+            "match_id": match_id,
+            "team1": team1,
+            "team2": team2,
+            "winner": winner,
+            "score": {"team1": team1_score, "team2": team2_score},
+            "completed_at": now,
+            "reported_by": reporter_id,
+            "is_global": is_global_match,
+            "mmr_changes": mmr_changes,  # This is the key - include the MMR changes we just calculated
+            "team1_avg_mmr": team1_avg_mmr,
+            "team2_avg_mmr": team2_avg_mmr,
+            "status": "completed"
+        }
+
+        return match_result, None
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
         """Update a player's Discord role based on their new MMR"""
