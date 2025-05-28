@@ -3500,6 +3500,172 @@ async def resetstreak_slash(interaction: discord.Interaction, member: discord.Me
                 await interaction.response.send_message(
                     f"Failed to reset streak for {member.mention}. No changes were made.")
 
+
+@bot.tree.command(name="debugmmr", description="Debug MMR storage issue (Admin only)")
+async def debug_mmr_issue(interaction: discord.Interaction, match_id: str):
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message("Admin only", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    # Check if match exists in database
+    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+
+    if not match:
+        await interaction.followup.send(f"❌ Match `{match_id}` not found in database!")
+        return
+
+    # Get match details
+    status = match.get("status", "unknown")
+    is_global = match.get("is_global", False)
+    team1 = match.get("team1", [])
+    team2 = match.get("team2", [])
+    mmr_changes = match.get("mmr_changes", [])
+
+    # Build debug report
+    debug_text = f"**Match Debug Report: `{match_id}`**\n\n"
+    debug_text += f"📊 **Basic Info:**\n"
+    debug_text += f"• Status: {status}\n"
+    debug_text += f"• Is Global: {is_global}\n"
+    debug_text += f"• Team 1 size: {len(team1)}\n"
+    debug_text += f"• Team 2 size: {len(team2)}\n"
+    debug_text += f"• MMR changes recorded: {len(mmr_changes)}\n\n"
+
+    # Show team compositions
+    debug_text += f"👥 **Team 1:**\n"
+    for i, player in enumerate(team1):
+        player_id = player.get("id", "unknown")
+        player_name = player.get("name", "unknown")
+        is_dummy = player_id.startswith('9000')
+        debug_text += f"  {i + 1}. {player_name} (ID: {player_id}) {'[DUMMY]' if is_dummy else '[REAL]'}\n"
+
+    debug_text += f"\n👥 **Team 2:**\n"
+    for i, player in enumerate(team2):
+        player_id = player.get("id", "unknown")
+        player_name = player.get("name", "unknown")
+        is_dummy = player_id.startswith('9000')
+        debug_text += f"  {i + 1}. {player_name} (ID: {player_id}) {'[DUMMY]' if is_dummy else '[REAL]'}\n"
+
+    # Show MMR changes in detail
+    debug_text += f"\n💰 **MMR Changes ({len(mmr_changes)} total):**\n"
+    if mmr_changes:
+        for i, change in enumerate(mmr_changes):
+            player_id = change.get("player_id", "unknown")
+            mmr_change = change.get("mmr_change", 0)
+            old_mmr = change.get("old_mmr", 0)
+            new_mmr = change.get("new_mmr", 0)
+            streak = change.get("streak", 0)
+            is_win = change.get("is_win", False)
+            change_is_global = change.get("is_global", False)
+
+            # Find player name
+            player_name = "Unknown"
+            for team in [team1, team2]:
+                for p in team:
+                    if p.get("id") == player_id:
+                        player_name = p.get("name", "Unknown")
+                        break
+
+            result_icon = "🏆" if is_win else "😔"
+            debug_text += f"  {i + 1}. {result_icon} {player_name}: {old_mmr} → {new_mmr} ({mmr_change:+d})\n"
+            debug_text += f"     Streak: {streak}, Global: {change_is_global}\n"
+    else:
+        debug_text += "  ❌ No MMR changes found!\n"
+
+    # Check if YOUR player ID is in the match
+    your_id = str(interaction.user.id)
+    your_in_match = False
+    your_team = None
+
+    for player in team1 + team2:
+        if player.get("id") == your_id:
+            your_in_match = True
+            your_team = "Team 1" if player in team1 else "Team 2"
+            break
+
+    debug_text += f"\n🫵 **Your Participation:**\n"
+    debug_text += f"• Your ID: {your_id}\n"
+    debug_text += f"• You in match: {your_in_match}\n"
+    if your_in_match:
+        debug_text += f"• Your team: {your_team}\n"
+
+        # Check if you have MMR change recorded
+        your_mmr_change = None
+        for change in mmr_changes:
+            if change.get("player_id") == your_id:
+                your_mmr_change = change
+                break
+
+        if your_mmr_change:
+            debug_text += f"• Your MMR change: {your_mmr_change.get('mmr_change', 0):+d}\n"
+            debug_text += f"• Your new streak: {your_mmr_change.get('streak', 0)}\n"
+        else:
+            debug_text += f"• ❌ No MMR change recorded for you!\n"
+
+    # Split message if too long
+    if len(debug_text) > 2000:
+        # Send in chunks
+        chunks = []
+        current_chunk = ""
+        for line in debug_text.split('\n'):
+            if len(current_chunk + line + '\n') > 1900:
+                chunks.append(current_chunk)
+                current_chunk = line + '\n'
+            else:
+                current_chunk += line + '\n'
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        for i, chunk in enumerate(chunks):
+            if i == 0:
+                await interaction.followup.send(chunk)
+            else:
+                await interaction.followup.send(chunk)
+    else:
+        await interaction.followup.send(debug_text)
+
+
+# Also add this command to manually test MMR calculation
+@bot.tree.command(name="testmmr", description="Test MMR calculation manually (Admin only)")
+async def test_mmr_calculation(interaction: discord.Interaction, match_id: str):
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message("Admin only", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    # Find the match
+    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+    if not match:
+        await interaction.followup.send(f"Match `{match_id}` not found!")
+        return
+
+    # Check if match is completed
+    if match.get("status") != "completed":
+        await interaction.followup.send(f"Match `{match_id}` is not completed yet (status: {match.get('status')})")
+        return
+
+    # Get your player data
+    your_id = str(interaction.user.id)
+    your_player_data = system_coordinator.match_system.players.find_one({"id": your_id})
+
+    result_text = f"**MMR Test for Match `{match_id}`**\n\n"
+    result_text += f"Your Player ID: {your_id}\n"
+
+    if your_player_data:
+        result_text += f"Your current ranked MMR: {your_player_data.get('mmr', 'Not found')}\n"
+        result_text += f"Your current global MMR: {your_player_data.get('global_mmr', 'Not found')}\n"
+        result_text += f"Your ranked matches: {your_player_data.get('matches', 0)}\n"
+        result_text += f"Your global matches: {your_player_data.get('global_matches', 0)}\n"
+        result_text += f"Your ranked streak: {your_player_data.get('current_streak', 0)}\n"
+        result_text += f"Your global streak: {your_player_data.get('global_current_streak', 0)}\n"
+    else:
+        result_text += "❌ No player data found for you in the database!\n"
+        result_text += "This means you haven't played any matches yet or there's a database issue.\n"
+
+    await interaction.followup.send(result_text)
+
 @bot.tree.command(name="streakstats", description="Show server-wide streak statistics (Admin only)")
 async def streakstats_slash(interaction: discord.Interaction):
             # Check if command is used in an allowed channel
