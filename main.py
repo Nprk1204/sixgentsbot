@@ -597,6 +597,47 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         await interaction.response.send_message("Invalid result. Please use 'win' or 'loss'.", ephemeral=True)
         return
 
+    # ADDED: Check if the match was created in this specific channel
+    current_channel_id = str(interaction.channel.id)
+
+    # Find the match first to check which channel it belongs to
+    match = None
+
+    # Check active matches first
+    if system_coordinator.queue_manager:
+        match = system_coordinator.queue_manager.get_match_by_id(match_id)
+
+    # If not in active matches, check completed matches in database
+    if not match:
+        match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+
+    if not match:
+        await interaction.response.send_message(f"No match found with ID `{match_id}`.", ephemeral=True)
+        return
+
+    # Check if the match belongs to this channel
+    match_channel_id = str(match.get('channel_id', ''))
+    if match_channel_id != current_channel_id:
+        # Get the correct channel name for the error message
+        try:
+            correct_channel = bot.get_channel(int(match_channel_id))
+            if correct_channel:
+                await interaction.response.send_message(
+                    f"❌ This match was created in {correct_channel.mention}. Please report it there instead.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    f"❌ This match was not created in this channel. Please report it in the correct channel.",
+                    ephemeral=True
+                )
+        except:
+            await interaction.response.send_message(
+                f"❌ This match was not created in this channel. Please report it in the correct channel.",
+                ephemeral=True
+            )
+        return
+
     # Start with a deferred response since match reporting might take time
     await interaction.response.defer()
 
@@ -662,7 +703,8 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 mmr_change = change_data["mmr_change"]
                 streak = change_data["streak"]
 
-                winning_team_mmr_changes.append(f"+{mmr_change}")
+                # UPDATED: Show just the MMR value without "Global" or "Ranked" prefix
+                winning_team_mmr_changes.append(f"+{mmr_change} MMR")
 
                 # FIXED: Format streak display with emojis based on the new streak value
                 if streak >= 3:
@@ -681,7 +723,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 winning_team_mmr_changes.append("—")
                 winning_team_streaks.append("—")
         elif player_id and player_id.startswith('9000'):  # Dummy player
-            winning_team_mmr_changes.append("+0")
+            winning_team_mmr_changes.append("+0 MMR")
             winning_team_streaks.append("—")
         else:
             print(f"No MMR change found for winner {player.get('name', 'Unknown')} (ID: {player_id})")
@@ -701,7 +743,8 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 mmr_change = change_data["mmr_change"]
                 streak = change_data["streak"]
 
-                losing_team_mmr_changes.append(str(mmr_change))  # Already negative
+                # UPDATED: Show just the MMR value without "Global" or "Ranked" prefix
+                losing_team_mmr_changes.append(f"{mmr_change} MMR")  # Already negative
 
                 # FIXED: Format streak display for losses
                 if streak <= -3:
@@ -720,7 +763,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 losing_team_mmr_changes.append("—")
                 losing_team_streaks.append("—")
         elif player_id and player_id.startswith('9000'):  # Dummy player
-            losing_team_mmr_changes.append("-0")
+            losing_team_mmr_changes.append("-0 MMR")
             losing_team_streaks.append("—")
         else:
             print(f"No MMR change found for loser {player.get('name', 'Unknown')} (ID: {player_id})")
@@ -752,13 +795,13 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         except:
             name = player.get("name", "Unknown")
 
-        # FIXED: Enhanced display with MMR type indicator
+        # FIXED: Enhanced display with simplified MMR format
         mmr_display = winning_team_mmr_changes[i] if i < len(winning_team_mmr_changes) else "—"
         streak_display = winning_team_streaks[i] if i < len(winning_team_streaks) else "—"
 
         embed.add_field(
             name=f"**{name}**",
-            value=f"{mmr_display} {mmr_type} MMR\n{streak_display}",
+            value=f"{mmr_display}\n{streak_display}",
             inline=True
         )
 
@@ -780,13 +823,13 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         except:
             name = player.get("name", "Unknown")
 
-        # FIXED: Enhanced display with MMR type indicator
+        # FIXED: Enhanced display with simplified MMR format
         mmr_display = losing_team_mmr_changes[i] if i < len(losing_team_mmr_changes) else "—"
         streak_display = losing_team_streaks[i] if i < len(losing_team_streaks) else "—"
 
         embed.add_field(
             name=f"**{name}**",
-            value=f"{mmr_display} {mmr_type} MMR\n{streak_display}",
+            value=f"{mmr_display}\n{streak_display}",
             inline=True
         )
 

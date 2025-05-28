@@ -208,11 +208,11 @@ class QueueManager:
             if queued_channel_id == channel_id:
                 return "QUEUE_ERROR: You're already in this queue!"
             else:
-                # FIXED: Get the actual channel and mention the player properly
+                # UPDATED: Get the actual channel and show the channel name properly
                 try:
                     other_channel = self.bot.get_channel(int(queued_channel_id))
                     if other_channel:
-                        return f"QUEUE_ERROR: {player_mention}, you're already in the queue for {other_channel.mention}!"
+                        return f"QUEUE_ERROR: {player_mention}, you're already in the queue for #{other_channel.name}!"
                     else:
                         return f"QUEUE_ERROR: {player_mention}, you're already in a queue in another channel!"
                 except:
@@ -341,7 +341,7 @@ class QueueManager:
                         try:
                             other_channel = self.bot.get_channel(int(other_channel_id))
                             if other_channel:
-                                return f"QUEUE_ERROR: {player_mention}, you are not in this channel's queue. You are in {other_channel.mention}'s queue."
+                                return f"QUEUE_ERROR: {player_mention}, you are not in this channel's queue. You are in #{other_channel.name}'s queue."
                             else:
                                 return f"QUEUE_ERROR: {player_mention}, you are in another channel's queue, not this one."
                         except:
