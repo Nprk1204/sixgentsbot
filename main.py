@@ -1592,21 +1592,28 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                 await interaction.followup.send(embed=embed)
             return
 
-        # Remove the specific player
+        # Remove the specific player from database first
         channel_id = str(interaction.channel.id)
         result = system_coordinator.queue_manager.queue_collection.delete_one({
             "id": player_id,
             "channel_id": channel_id
         })
 
-        # Update in-memory state
+        # Update in-memory state regardless of database result (for sync)
+        removed_from_memory = False
         if channel_id in system_coordinator.queue_manager.channel_queues:
+            original_count = len(system_coordinator.queue_manager.channel_queues[channel_id])
             system_coordinator.queue_manager.channel_queues[channel_id] = [
                 p for p in system_coordinator.queue_manager.channel_queues[channel_id]
                 if p.get('id') != player_id
             ]
+            new_count = len(system_coordinator.queue_manager.channel_queues[channel_id])
+            removed_from_memory = (new_count < original_count)
 
-        if result.deleted_count > 0:
+        # Consider it successful if removed from either database OR memory
+        removal_successful = (result.deleted_count > 0) or removed_from_memory
+
+        if removal_successful:
             # Get updated queue status
             updated_status = system_coordinator.queue_manager.get_queue_status(interaction.channel)
             updated_count = updated_status['queue_count']
@@ -1628,6 +1635,15 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                 embed.add_field(name="Status", value="Queue is now empty", inline=False)
 
             embed.set_footer(text=f"Removed by {interaction.user.display_name}")
+
+            # Add debug info if there was a sync issue
+            if removed_from_memory and result.deleted_count == 0:
+                embed.add_field(name="⚠️ Note", value="Player was removed from memory (sync issue resolved)",
+                                inline=False)
+            elif result.deleted_count > 0 and not removed_from_memory:
+                embed.add_field(name="⚠️ Note", value="Player was removed from database (memory already synced)",
+                                inline=False)
+
             await interaction.followup.send(embed=embed)
         else:
             embed = discord.Embed(
@@ -1635,6 +1651,10 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                 description=f"Failed to remove {member.mention} from the queue. They may have already left or been removed.",
                 color=0xe74c3c
             )
+            # Add debug info
+            embed.add_field(name="Debug Info",
+                            value=f"DB result: {result.deleted_count}, Memory removal: {removed_from_memory}",
+                            inline=False)
             await interaction.followup.send(embed=embed)
 
 
