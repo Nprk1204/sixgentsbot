@@ -2317,8 +2317,6 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         'testmmr': 'Test MMR calculation manually for a match (Admin/Mod only)',
 
         # Utility
-        'purgechat': 'Clear chat messages (1-100) (Admin/Mod only)',
-        'ping': 'Check if the bot is connected and responsive',
         'help': 'Display this help menu or get details about specific commands'
     }
 
@@ -2330,7 +2328,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     player_admin_commands = ['adjustmmr', 'resetplayer', 'resetstreak']
     system_admin_commands = ['resetleaderboard', 'topstreaks', 'streakstats']
     debug_commands = ['debugmmr', 'testmmr']
-    utility_commands = ['purgechat', 'ping', 'help']
+    utility_commands = ['help']
 
     # Add command fields grouped by category with improved formatting
     embed.add_field(
