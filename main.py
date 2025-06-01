@@ -1290,8 +1290,9 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="clearqueue", description="Clear all players from the queue (Admin only)")
-async def clearqueue_slash(interaction: discord.Interaction):
+@bot.tree.command(name="addplayer", description="Add a player to the queue (Admin/Mod only)")
+@app_commands.describe(member="The member to add to the queue")
+async def addplayer_slash(interaction: discord.Interaction, member: discord.Member):
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
@@ -1307,40 +1308,300 @@ async def clearqueue_slash(interaction: discord.Interaction):
             ephemeral=True)
         return
 
+    # Defer response since queue operations might take time
+    await interaction.response.defer()
+
+    # Check if the target member has rank verification
+    player_id = str(member.id)
+    rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+    rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+    rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+    rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+    has_rank_role = any(role in member.roles for role in [rank_a_role, rank_b_role, rank_c_role])
+
+    if not (rank_record or has_rank_role):
+        embed = discord.Embed(
+            title="Cannot Add Player",
+            description=f"{member.mention} needs to verify their Rocket League rank before being added to the queue.",
+            color=0xf1c40f
+        )
+        embed.add_field(
+            name="What they need to do",
+            value="The player must visit the rank check page on the website to complete verification.",
+            inline=False
+        )
+        await interaction.followup.send(embed=embed)
+        return
+
+    # Create missing rank record if needed
+    if has_rank_role and not rank_record:
+        tier = "Rank C"
+        mmr = 600
+        if rank_a_role in member.roles:
+            tier = "Rank A"
+            mmr = 1600
+        elif rank_b_role in member.roles:
+            tier = "Rank B"
+            mmr = 1100
+
+        try:
+            db.get_collection('ranks').insert_one({
+                "discord_id": player_id,
+                "discord_username": member.display_name,
+                "tier": tier,
+                "mmr": mmr,
+                "timestamp": datetime.datetime.utcnow()
+            })
+        except Exception as e:
+            print(f"Error creating rank record: {e}")
+
+    # Try to add the player to the queue using the existing queue manager
+    try:
+        response_message = await system_coordinator.queue_manager.add_player(member, interaction.channel)
+    except Exception as e:
+        print(f"Error adding player to queue: {e}")
+        await interaction.followup.send(
+            f"An error occurred while adding {member.mention} to the queue. Please try again.")
+        return
+
+    # Handle response
+    if "QUEUE_ERROR:" in response_message:
+        error_msg = response_message.replace("QUEUE_ERROR:", "").strip()
+
+        embed = discord.Embed(
+            title="Cannot Add Player",
+            description=error_msg,
+            color=0xe74c3c
+        )
+        embed.set_footer(text=f"Admin action by {interaction.user.display_name}")
+        await interaction.followup.send(embed=embed)
+
+    elif "SUCCESS:" in response_message:
+        success_msg = response_message.replace("SUCCESS:", "").strip()
+        status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
+        queue_count = status_data['queue_count']
+
+        embed = discord.Embed(
+            title="Player Added to Queue",
+            description=f"Successfully added {member.mention} to the queue!",
+            color=0x00ff00
+        )
+        embed.add_field(name="Queue Progress", value=f"{'▰' * queue_count}{'▱' * (6 - queue_count)} ({queue_count}/6)",
+                        inline=False)
+
+        if queue_count < 6:
+            embed.add_field(name="Status", value=f"Waiting for **{6 - queue_count}** more player(s)", inline=False)
+        else:
+            embed.add_field(name="Status", value="🎉 **Queue is FULL!** Match starting soon...", inline=False)
+
+        embed.set_footer(text=f"Added by admin: {interaction.user.display_name}")
+        await interaction.followup.send(embed=embed)
+
+    else:
+        # Match creation response
+        match_id = response_message
+        embed = discord.Embed(
+            title="Match Starting!",
+            description=f"Queue filled! Starting team selection for match `{match_id}`",
+            color=0x00ff00
+        )
+        embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
+        embed.add_field(name="Added Player", value=f"{member.mention} was the final player needed!", inline=False)
+        embed.set_footer(text=f"Queue completed by admin: {interaction.user.display_name}")
+        await interaction.followup.send(embed=embed)
+
+        # Start voting for the match
+        channel_name = interaction.channel.name.lower()
+        if channel_name in system_coordinator.vote_systems:
+            await asyncio.sleep(1.0)  # Small delay to ensure proper order
+            try:
+                await system_coordinator.vote_systems[channel_name].start_vote(interaction.channel)
+            except Exception as vote_error:
+                print(f"Error starting vote after admin add: {vote_error}")
+
+
+@bot.tree.command(name="removeplayer", description="Remove player(s) from the queue (Admin/Mod only)")
+@app_commands.describe(
+    member="The specific member to remove (leave empty to remove all players)",
+    remove_all="Set to 'yes' to remove all players from the queue"
+)
+@app_commands.choices(remove_all=[
+    app_commands.Choice(name="No - Remove specific player only", value="no"),
+    app_commands.Choice(name="Yes - Remove ALL players", value="yes")
+])
+async def removeplayer_slash(interaction: discord.Interaction, member: discord.Member = None, remove_all: str = "no"):
+    # Check if command is used in an allowed channel
+    if not is_queue_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
+        return
+
+    # Validate parameters
+    if remove_all == "yes" and member is not None:
+        await interaction.response.send_message(
+            "❌ Cannot specify both a member and 'remove all'. Choose one option.",
+            ephemeral=True
+        )
+        return
+
+    if remove_all == "no" and member is None:
+        await interaction.response.send_message(
+            "❌ Please specify a member to remove, or set 'remove_all' to 'yes' to clear the entire queue.",
+            ephemeral=True
+        )
+        return
+
     # Get current queue status
     status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
     queue_count = status_data['queue_count']
     queue_players = status_data['queue_players']
 
-    # If there are no players in the queue
+    # If queue is empty
     if queue_count == 0:
-        await interaction.response.send_message("Queue is already empty!")
+        await interaction.response.send_message("The queue is already empty!")
         return
 
-    # Create an embed with the players being removed
-    player_mentions = [player['mention'] for player in queue_players]
+    if remove_all == "yes":
+        # Remove all players from queue
+        player_mentions = [player['mention'] for player in queue_players]
 
-    embed = discord.Embed(
-        title="Queue Cleared",
-        description=f"Removed {queue_count} player(s) from the queue:",
-        color=0xff9900  # Orange color
-    )
+        embed = discord.Embed(
+            title="Queue Cleared",
+            description=f"Removed **{queue_count}** player(s) from the queue:",
+            color=0xff9900
+        )
 
-    if player_mentions:
-        embed.add_field(name="Players Removed", value=", ".join(player_mentions), inline=False)
+        if player_mentions:
+            # Split into chunks if too many players (Discord embed field limit)
+            if len(player_mentions) <= 10:
+                embed.add_field(name="Players Removed", value=", ".join(player_mentions), inline=False)
+            else:
+                # Show first 10 and indicate there are more
+                shown_mentions = player_mentions[:10]
+                embed.add_field(
+                    name="Players Removed",
+                    value=", ".join(shown_mentions) + f"\n... and {len(player_mentions) - 10} more",
+                    inline=False
+                )
 
-    embed.set_footer(text=f"Cleared by {interaction.user.display_name}")
+        embed.set_footer(text=f"Cleared by {interaction.user.display_name}")
 
-    # Clear players from this channel's queue
-    channel_id = str(interaction.channel.id)
-    system_coordinator.queue_manager.queue_collection.delete_many({"channel_id": channel_id})
+        # Clear players from this channel's queue
+        channel_id = str(interaction.channel.id)
+        system_coordinator.queue_manager.queue_collection.delete_many({"channel_id": channel_id})
 
-    # Make sure to update the in-memory state too
-    if channel_id in system_coordinator.queue_manager.channel_queues:
-        system_coordinator.queue_manager.channel_queues[channel_id] = []
+        # Update in-memory state
+        if channel_id in system_coordinator.queue_manager.channel_queues:
+            system_coordinator.queue_manager.channel_queues[channel_id] = []
 
-    # Send confirmation
-    await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed)
+
+    else:
+        # Remove specific player
+        player_id = str(member.id)
+
+        # Check if player is in this channel's queue
+        player_in_queue = False
+        if interaction.channel.id in system_coordinator.queue_manager.channel_queues:
+            for p in system_coordinator.queue_manager.channel_queues[str(interaction.channel.id)]:
+                if p.get('id') == player_id:
+                    player_in_queue = True
+                    break
+
+        if not player_in_queue:
+            # Check if they're in any other queue
+            in_other_queue = False
+            other_channel_name = None
+
+            for channel_id, players in system_coordinator.queue_manager.channel_queues.items():
+                for p in players:
+                    if p.get('id') == player_id:
+                        in_other_queue = True
+                        try:
+                            other_channel = bot.get_channel(int(channel_id))
+                            if other_channel:
+                                other_channel_name = other_channel.name
+                        except:
+                            pass
+                        break
+                if in_other_queue:
+                    break
+
+            if in_other_queue:
+                embed = discord.Embed(
+                    title="Player Not in This Queue",
+                    description=f"{member.mention} is not in this channel's queue.",
+                    color=0xf1c40f
+                )
+                if other_channel_name:
+                    embed.add_field(
+                        name="Current Location",
+                        value=f"They are in the **#{other_channel_name}** queue instead.",
+                        inline=False
+                    )
+                await interaction.response.send_message(embed=embed)
+            else:
+                embed = discord.Embed(
+                    title="Player Not in Queue",
+                    description=f"{member.mention} is not in any queue.",
+                    color=0x95a5a6
+                )
+                await interaction.response.send_message(embed=embed)
+            return
+
+        # Remove the specific player
+        channel_id = str(interaction.channel.id)
+        result = system_coordinator.queue_manager.queue_collection.delete_one({
+            "id": player_id,
+            "channel_id": channel_id
+        })
+
+        # Update in-memory state
+        if channel_id in system_coordinator.queue_manager.channel_queues:
+            system_coordinator.queue_manager.channel_queues[channel_id] = [
+                p for p in system_coordinator.queue_manager.channel_queues[channel_id]
+                if p.get('id') != player_id
+            ]
+
+        if result.deleted_count > 0:
+            # Get updated queue status
+            updated_status = system_coordinator.queue_manager.get_queue_status(interaction.channel)
+            updated_count = updated_status['queue_count']
+
+            embed = discord.Embed(
+                title="Player Removed from Queue",
+                description=f"Successfully removed {member.mention} from the queue.",
+                color=0xff9900
+            )
+            embed.add_field(name="Updated Queue", value=f"**{updated_count}/6** players remaining", inline=False)
+
+            if updated_count > 0:
+                embed.add_field(name="Queue Progress",
+                                value=f"{'▰' * updated_count}{'▱' * (6 - updated_count)} ({updated_count}/6)",
+                                inline=False)
+                embed.add_field(name="Status", value=f"Waiting for **{6 - updated_count}** more player(s)",
+                                inline=False)
+            else:
+                embed.add_field(name="Status", value="Queue is now empty", inline=False)
+
+            embed.set_footer(text=f"Removed by {interaction.user.display_name}")
+            await interaction.response.send_message(embed=embed)
+        else:
+            embed = discord.Embed(
+                title="Removal Failed",
+                description=f"Failed to remove {member.mention} from the queue. They may have already left or been removed.",
+                color=0xe74c3c
+            )
+            await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="removematch", description="Remove/reverse a completed match and its MMR changes (Admin only)")
