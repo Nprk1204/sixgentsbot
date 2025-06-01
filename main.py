@@ -1445,16 +1445,19 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
             ephemeral=True)
         return
 
+    # Defer response first to avoid interaction timeout issues
+    await interaction.response.defer()
+
     # Validate parameters
     if remove_all == "yes" and member is not None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ Cannot specify both a member and 'remove all'. Choose one option.",
             ephemeral=True
         )
         return
 
     if remove_all == "no" and member is None:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "❌ Please specify a member to remove, or set 'remove_all' to 'yes' to clear the entire queue.",
             ephemeral=True
         )
@@ -1467,7 +1470,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
 
     # If queue is empty
     if queue_count == 0:
-        await interaction.response.send_message("The queue is already empty!")
+        await interaction.followup.send("The queue is already empty!")
         return
 
     if remove_all == "yes":
@@ -1503,7 +1506,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
         if channel_id in system_coordinator.queue_manager.channel_queues:
             system_coordinator.queue_manager.channel_queues[channel_id] = []
 
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     else:
         # Remove specific player
@@ -1579,14 +1582,14 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                         value=f"They are in the **#{other_channel_name}** queue instead.",
                         inline=False
                     )
-                await interaction.response.send_message(embed=embed)
+                await interaction.followup.send(embed=embed)
             else:
                 embed = discord.Embed(
                     title="Player Not in Queue",
                     description=f"{member.mention} is not in any queue.",
                     color=0x95a5a6
                 )
-                await interaction.response.send_message(embed=embed)
+                await interaction.followup.send(embed=embed)
             return
 
         # Remove the specific player
@@ -1625,14 +1628,14 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                 embed.add_field(name="Status", value="Queue is now empty", inline=False)
 
             embed.set_footer(text=f"Removed by {interaction.user.display_name}")
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
         else:
             embed = discord.Embed(
                 title="Removal Failed",
                 description=f"Failed to remove {member.mention} from the queue. They may have already left or been removed.",
                 color=0xe74c3c
             )
-            await interaction.response.send_message(embed=embed)
+            await interaction.followup.send(embed=embed)
 
 
 @bot.tree.command(name="removematch", description="Remove/reverse a completed match and its MMR changes (Admin only)")
@@ -2377,25 +2380,30 @@ async def on_error(event, *args, **kwargs):
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.errors.CommandNotFound):
-        await interaction.response.send_message("Command not found. Use `/help` to see available commands.",
-                                                ephemeral=True)
-    elif isinstance(error, app_commands.errors.MissingPermissions):
-        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
-    elif isinstance(error, app_commands.errors.MissingRequiredArgument):
-        await interaction.response.send_message("Missing required argument. Use `/help` to see command usage.",
-                                                ephemeral=True)
-    else:
-        print(f"Command error: {error}")
-        try:
-            await interaction.response.send_message(f"An error occurred: {error}", ephemeral=True)
-        except:
-            # If interaction was already responded to
-            try:
-                await interaction.followup.send(f"An error occurred: {error}", ephemeral=True)
-            except:
-                # Last resort
-                print(f"Could not respond to interaction with error: {error}")
+    print(f"Command error: {error}")
+
+    try:
+        if isinstance(error, app_commands.errors.CommandNotFound):
+            if not interaction.response.is_done():
+                await interaction.response.send_message("Command not found. Use `/help` to see available commands.",
+                                                        ephemeral=True)
+        elif isinstance(error, app_commands.errors.MissingPermissions):
+            if not interaction.response.is_done():
+                await interaction.response.send_message("You don't have permission to use this command.",
+                                                        ephemeral=True)
+        elif isinstance(error, app_commands.errors.CommandInvokeError):
+            if isinstance(error.original, discord.errors.NotFound):
+                print(f"Interaction timed out: {error.original}")
+                return
+            else:
+                print(f"Command invoke error: {error.original}")
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+        else:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in error handler: {e}")
 
 
 # 1. Adjust MMR Command
