@@ -1511,23 +1511,39 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
 
         # Check if player is in this channel's queue
         player_in_queue = False
-        if interaction.channel.id in system_coordinator.queue_manager.channel_queues:
-            for p in system_coordinator.queue_manager.channel_queues[str(interaction.channel.id)]:
+        channel_id = str(interaction.channel.id)
+
+        # Check in-memory queue first
+        if channel_id in system_coordinator.queue_manager.channel_queues:
+            for p in system_coordinator.queue_manager.channel_queues[channel_id]:
                 if p.get('id') == player_id:
                     player_in_queue = True
                     break
+
+        # Double-check in database if not found in memory
+        if not player_in_queue:
+            db_player = system_coordinator.queue_manager.queue_collection.find_one({
+                "id": player_id,
+                "channel_id": channel_id
+            })
+            if db_player:
+                player_in_queue = True
+                print(f"Found player {member.display_name} in database but not in memory - syncing issue")
 
         if not player_in_queue:
             # Check if they're in any other queue
             in_other_queue = False
             other_channel_name = None
 
-            for channel_id, players in system_coordinator.queue_manager.channel_queues.items():
+            # Check in-memory queues
+            for other_channel_id, players in system_coordinator.queue_manager.channel_queues.items():
+                if other_channel_id == channel_id:  # Skip current channel since we already checked
+                    continue
                 for p in players:
                     if p.get('id') == player_id:
                         in_other_queue = True
                         try:
-                            other_channel = bot.get_channel(int(channel_id))
+                            other_channel = bot.get_channel(int(other_channel_id))
                             if other_channel:
                                 other_channel_name = other_channel.name
                         except:
@@ -1535,6 +1551,21 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                         break
                 if in_other_queue:
                     break
+
+            # Also check database for other queues if not found in memory
+            if not in_other_queue:
+                db_other_queue = system_coordinator.queue_manager.queue_collection.find_one({
+                    "id": player_id,
+                    "channel_id": {"$ne": channel_id}
+                })
+                if db_other_queue:
+                    in_other_queue = True
+                    try:
+                        other_channel = bot.get_channel(int(db_other_queue.get("channel_id")))
+                        if other_channel:
+                            other_channel_name = other_channel.name
+                    except:
+                        pass
 
             if in_other_queue:
                 embed = discord.Embed(
