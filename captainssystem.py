@@ -353,9 +353,9 @@ class CaptainsSystem:
             player_list.append(f"{i + 1}. {player['name']} ({mmr_type}: {mmr})")
 
         embed.add_field(name="Available Players", value="\n".join(player_list), inline=False)
-        embed.set_footer(text="You have 60 seconds to choose.")
+        embed.set_footer(text="You have five minutes to choose.")
 
-        view = View(timeout=60)
+        view = View(timeout=300)
         result = {"selected_player": None}
 
         # Add buttons for each player (max 25 buttons per view)
@@ -419,9 +419,9 @@ class CaptainsSystem:
             player_list.append(f"{i + 1}. {player['name']} ({mmr_type}: {mmr})")
 
         embed.add_field(name="Available Players", value="\n".join(player_list), inline=False)
-        embed.set_footer(text="You have 90 seconds to choose 2 players.")
+        embed.set_footer(text="You have five minutes to choose 2 players.")
 
-        view = View(timeout=90)
+        view = View(timeout=300)
         selected_indices = []
         selected_players = []
 
