@@ -1,6 +1,3 @@
-// Check what might be causing the null reference error in main.js
-// This is a safer version that checks for element existence before adding listeners
-
 // MAKE SHOWPLAYERDETAILS GLOBAL - Define it outside of DOMContentLoaded
 function showPlayerDetails(playerId) {
     // First check if the modal element exists
@@ -200,7 +197,6 @@ function showPlayerDetails(playerId) {
                     }
 
                     // Determine result class
-                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
                     let resultBadge = match.player_result === 'Win' ?
                         '<span class="badge bg-success">Win</span>' :
                         '<span class="badge bg-danger">Loss</span>';
@@ -337,7 +333,6 @@ function showPlayerDetails(playerId) {
                     }
 
                     // Determine result class
-                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
                     let resultBadge = match.player_result === 'Win' ?
                         '<span class="badge bg-success">Win</span>' :
                         '<span class="badge bg-danger">Loss</span>';
@@ -430,20 +425,12 @@ document.addEventListener('DOMContentLoaded', function() {
             // Call our API endpoint to get the rank data
             fetchRankData(rocketId, platform, discordId);
         });
-    } else {
-        console.error('Check Rank button not found in the DOM');
     }
 
     // Initialize rank selector if it exists
     const rankSelect = document.getElementById('rlRank');
     if (rankSelect) {
         setupRankSelector();
-
-        // Check for a reset
-        checkResetStatus();
-
-        // Fallback check for very old verifications
-        checkLastVerificationAge();
     }
 
     function fetchRankData(username, platform, discordId) {
@@ -516,7 +503,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Use the rank card design
         resultDiv.innerHTML = `
             ${successAlert}
-    
+
             <div class="rank-card">
                 <div class="rank-header ${rankColorClass}">
                     <i class="${rankIcon} fa-2x"></i>
@@ -528,21 +515,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     <span class="badge ${badgeClass}">${data.tier} Role</span>
                 </div>
             </div>
-    
+
             ${discordAlert}
         `;
 
         // Show in the modal too if it exists
         const modalContent = document.getElementById('resultModalContent');
         if (modalContent && resultModal) {
-            let modalContent = `
+            let modalContentHtml = `
                 <div class="text-center">
                     <div class="mb-3">
                         <i class="fas fa-check-circle fa-4x text-success"></i>
                     </div>
                     <h4>Your rank has been verified!</h4>
                     <p class="mb-3">Based on your ${data.rank} rank.</p>
-                    
+
                     <div class="alert alert-info">
                         <strong>Discord Role:</strong> ${data.tier}<br>
                         <strong>Starting MMR:</strong> ${data.mmr}
@@ -551,20 +538,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Add role assignment result
             if (data.role_assignment && data.role_assignment.success) {
-                modalContent += `
+                modalContentHtml += `
                     <div class="alert alert-success">
                         <i class="fab fa-discord me-2"></i> Your Discord role has been updated automatically!
                     </div>
                 `;
             } else {
-                modalContent += `
+                modalContentHtml += `
                     <div class="alert alert-warning">
                         <i class="fas fa-exclamation-triangle me-2"></i> Could not update your Discord role automatically. Please contact an admin.
                     </div>
                 `;
             }
 
-            modalContent += `
+            modalContentHtml += `
                     <p>You can now join the 6 Mans queue in our Discord server.</p>
                     <a href="https://discord.gg/your-discord" target="_blank" class="btn btn-primary mt-2">
                         <i class="fab fa-discord me-2"></i> Join Our Discord
@@ -572,7 +559,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
             `;
 
-            document.getElementById('resultModalContent').innerHTML = modalContent;
+            document.getElementById('resultModalContent').innerHTML = modalContentHtml;
 
             // Show modal
             resultModal.show();
@@ -651,20 +638,6 @@ function setupRankSelector() {
         }
     });
 }
-
-function checkResetStatus() {
-    console.log("Checking leaderboard reset status...");
-    // Implementation details...
-}
-
-function checkLastVerificationAge() {
-    console.log("Checking verification age...");
-    // Implementation details...
-}
-
-//=========================================
-// Fix for the player details loading error
-//=========================================
 
 function setupPlayerClickHandlers() {
     // Set up click events for featured players and leaderboard rows

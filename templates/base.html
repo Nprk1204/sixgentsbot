@@ -16,8 +16,8 @@
     <!-- Font Awesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
-    <!-- Chart.js for graphs -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js for profile stats page only -->
+    {% block chart_js %}{% endblock %}
 
     <!-- Custom CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
@@ -30,6 +30,7 @@
     <div class="bg-splash bg-splash-1"></div>
     <div class="bg-splash bg-splash-2"></div>
     <div class="bg-splash bg-splash-3"></div>
+
     <!-- Header -->
     <header class="main-header">
         <div class="container">
@@ -145,7 +146,7 @@
         <div class="container">
             <div class="row">
                 <div class="col-lg-6 col-md-6 mb-4 mb-md-0">
-                    <h4 class="footer-title">About 6 Gents</h4>
+                    <h4 class="footer-title">About Six Gents</h4>
                     <p>The casual competitive matchmaking system for the banditos server!</p>
                 </div>
 
@@ -164,7 +165,7 @@
 
         <div class="footer-bottom mt-4">
             <div class="container">
-                <p>© 2025 Rocket League 6 Gents Bot. All rights reserved.</p>
+                <p>© 2025 Rocket League Six Gents Bot. All rights reserved.</p>
             </div>
         </div>
     </footer>

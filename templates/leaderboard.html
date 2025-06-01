@@ -105,18 +105,11 @@
 
 {% block extra_js %}
 <script>
-    // Global variables
+// Global variables
 let currentPage = 1;
 const perPage = 25;
 let totalPages = 1;
 let playerModal;
-
-// Make functions global by attaching to window
-window.searchPlayers = searchPlayers;
-window.updatePagination = updatePagination;
-window.showPlayerDetails = showPlayerDetails;
-window.displayPlayers = displayPlayers;
-window.loadLeaderboard = loadLeaderboard;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize Bootstrap modal
@@ -141,6 +134,21 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set up close search results button
     document.getElementById('closeSearchResults').addEventListener('click', function() {
         document.getElementById('searchResults').style.display = 'none';
+    });
+
+    // Handle navigation clicks
+    const navLinks = document.querySelectorAll('.nav-pills .nav-link');
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            // Remove active from all links
+            navLinks.forEach(l => l.classList.remove('active'));
+            // Add active to clicked link
+            this.classList.add('active');
+
+            // Reset to page 1 when changing board type
+            currentPage = 1;
+            loadLeaderboard(1);
+        });
     });
 });
 
@@ -232,46 +240,6 @@ function loadLeaderboard(page) {
         });
 }
 
-// Also add this function to handle navigation clicks properly
-document.addEventListener('DOMContentLoaded', function() {
-    // Handle navigation clicks
-    const navLinks = document.querySelectorAll('.nav-pills .nav-link');
-    navLinks.forEach(link => {
-        link.addEventListener('click', function(e) {
-            // Remove active from all links
-            navLinks.forEach(l => l.classList.remove('active'));
-            // Add active to clicked link
-            this.classList.add('active');
-
-            // Reset to page 1 when changing board type
-            currentPage = 1;
-            loadLeaderboard(1);
-        });
-    });
-
-    // Initialize other elements...
-    playerModal = new bootstrap.Modal(document.getElementById('playerModal'));
-    loadLeaderboard(currentPage);
-
-    // Set up refresh button
-    document.getElementById('refreshButton').addEventListener('click', function() {
-        loadLeaderboard(currentPage);
-    });
-
-    // Set up search functionality
-    document.getElementById('searchButton').addEventListener('click', searchPlayers);
-    document.getElementById('searchInput').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            searchPlayers();
-        }
-    });
-
-    // Set up close search results button
-    document.getElementById('closeSearchResults').addEventListener('click', function() {
-        document.getElementById('searchResults').style.display = 'none';
-    });
-});
-
 function displayPlayers(players, startIndex) {
     const leaderboardContent = document.getElementById('leaderboardContent');
 
@@ -323,7 +291,7 @@ function displayPlayers(players, startIndex) {
             </div>
         `;
 
-        // Add click event to show player details
+        // Add click event to show player details - uses global function from main.js
         playerRow.addEventListener('click', function() {
             showPlayerDetails(player.id);
         });
@@ -332,7 +300,9 @@ function displayPlayers(players, startIndex) {
     });
 }
 
-function showPlayerDetails(playerId) {
+// Local implementation of showPlayerDetails for leaderboard page
+// This provides a fallback if the global function isn't available
+function showPlayerDetailsLocal(playerId) {
     // First check if the modal element exists
     const modalElement = document.getElementById('playerModal');
     if (!modalElement) {
@@ -382,7 +352,9 @@ function showPlayerDetails(playerId) {
     } catch (error) {
         console.error("Error showing modal:", error);
         // Try an alternative approach if the first fails
-        $(modalElement).modal('show');
+        if (typeof $ !== 'undefined') {
+            $(modalElement).modal('show');
+        }
     }
 
     // Fetch player data with improved error handling
@@ -528,7 +500,6 @@ function showPlayerDetails(playerId) {
                     }
 
                     // Determine result class
-                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
                     let resultBadge = match.player_result === 'Win' ?
                         '<span class="badge bg-success">Win</span>' :
                         '<span class="badge bg-danger">Loss</span>';
@@ -666,7 +637,6 @@ function showPlayerDetails(playerId) {
                     }
 
                     // Determine result class
-                    let resultClass = match.player_result === 'Win' ? 'text-success' : 'text-danger';
                     let resultBadge = match.player_result === 'Win' ?
                         '<span class="badge bg-success">Win</span>' :
                         '<span class="badge bg-danger">Loss</span>';
@@ -716,6 +686,15 @@ function showPlayerDetails(playerId) {
                     <p>Please try again later or contact an administrator if the problem persists.</p>
                 </div>`;
         });
+}
+
+// Use global showPlayerDetails if available, otherwise use local implementation
+function showPlayerDetails(playerId) {
+    if (typeof window.showPlayerDetails === 'function') {
+        window.showPlayerDetails(playerId);
+    } else {
+        showPlayerDetailsLocal(playerId);
+    }
 }
 
 function updatePagination(currentPage, totalPages) {
