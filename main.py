@@ -3627,8 +3627,7 @@ async def streak_slash(interaction: discord.Interaction, member: discord.Member 
     await interaction.response.send_message(embed=embed)
 
 
-@bot.tree.command(name="topstreaks",
-                  description="Show players with the highest win or loss streaks (Admin only)")
+@bot.tree.command(name="topstreaks", description="Show players with the highest win or loss streaks (Admin only)")
 @app_commands.describe(
     streak_type="Type of streak to view",
     mode="Ranked or Global mode",
@@ -3665,46 +3664,45 @@ async def topstreaks_slash(
         return
 
     # Validate limit
-    limit = max(1, min(25, limit))  # Clamp between 1 and 25
-
-    # Determine if we're looking at ranked or global mode
-    is_global = mode == "global"
-    mode_prefix = "Global " if is_global else "Ranked "
-
-    # Set up query based on streak type and mode
-    if streak_type == "win":
-        # Get players with highest win streaks
-        field_name = "global_longest_win_streak" if is_global else "longest_win_streak"
-        query = {field_name: {"$gt": 0}}
-        sort_field = field_name
-        sort_dir = -1  # Descending
-        title = f"Top {limit} {mode_prefix}Win Streaks"
-        embed_color = 0x43b581  # Green
-    elif streak_type == "loss":
-        # Get players with worst loss streaks
-        field_name = "global_longest_loss_streak" if is_global else "longest_loss_streak"
-        query = {field_name: {"$lt": 0}}
-        sort_field = field_name
-        sort_dir = 1  # Ascending (for negative values)
-        title = f"Top {limit} {mode_prefix}Loss Streaks"
-        embed_color = 0xf04747  # Red
-    else:  # current
-        # Get players with highest absolute current streaks
-        field_name = "global_current_streak" if is_global else "current_streak"
-        query = {field_name: {"$ne": 0}}
-        sort_field = field_name
-        sort_dir = -1  # Get highest absolute values first by using MongoDB's $abs in aggregation
-        title = f"Top {limit} Current {mode_prefix}Streaks"
-        embed_color = 0x7289da  # Discord Blurple
+    limit = max(1, min(25, limit))
 
     # Start deferred response since this might take time
     await interaction.response.defer()
 
-    # Get players from database
     try:
+        # Determine if we're looking at ranked or global mode
+        is_global = mode == "global"
+        mode_prefix = "Global " if is_global else "Ranked "
+
+        # Set up query based on streak type and mode
+        if streak_type == "win":
+            # Get players with highest win streaks
+            field_name = "global_longest_win_streak" if is_global else "longest_win_streak"
+            query = {field_name: {"$gt": 0}}
+            sort_field = field_name
+            sort_dir = -1  # Descending
+            title = f"Top {limit} {mode_prefix}Win Streaks"
+            embed_color = 0x43b581  # Green
+        elif streak_type == "loss":
+            # Get players with worst loss streaks
+            field_name = "global_longest_loss_streak" if is_global else "longest_loss_streak"
+            query = {field_name: {"$lt": 0}}
+            sort_field = field_name
+            sort_dir = 1  # Ascending (for negative values)
+            title = f"Top {limit} {mode_prefix}Loss Streaks"
+            embed_color = 0xf04747  # Red
+        else:  # current
+            # Get players with highest absolute current streaks
+            field_name = "global_current_streak" if is_global else "current_streak"
+            query = {field_name: {"$ne": 0}}
+            sort_field = field_name
+            sort_dir = -1
+            title = f"Top {limit} Current {mode_prefix}Streaks"
+            embed_color = 0x7289da  # Discord Blurple
+
+        # Get players from database
         if streak_type == "current":
             # For current streaks, we need to sort by absolute value
-            # to get both highest win and loss streaks together
             pipeline = [
                 {"$match": query},
                 {"$addFields": {
@@ -3729,9 +3727,16 @@ async def topstreaks_slash(
             color=embed_color
         )
 
-        # Add fields for each player
+        # Add fields for each player (limit to prevent embed size issues)
+        displayed_count = 0
         for i, player in enumerate(players):
+            if displayed_count >= 10:  # Discord embed field limit
+                break
+
             player_id = player.get("id")
+            if not player_id:
+                continue
+
             player_name = player.get("name", "Unknown")
 
             # Try to get Discord member name
@@ -3742,51 +3747,80 @@ async def topstreaks_slash(
             except:
                 pass  # Use name from database if member not found
 
-            # Format streak value
-            if streak_type == "win":
-                streak_value = player.get(field_name, 0)
-                streak_display = f"🏆 {streak_value} Wins"
-            elif streak_type == "loss":
-                streak_value = player.get(field_name, 0)
-                streak_display = f"📉 {abs(streak_value)} Losses"
-            else:  # current
-                streak_value = player.get(field_name, 0)
-                if streak_value > 0:
-                    icon = "🔥" if streak_value >= 3 else "↗️"
-                    streak_display = f"{icon} {streak_value} Win Streak"
-                else:
-                    icon = "❄️" if streak_value <= -3 else "↘️"
-                    streak_display = f"{icon} {abs(streak_value)} Loss Streak"
+            # Format streak value safely
+            try:
+                if streak_type == "win":
+                    streak_value = player.get(field_name, 0)
+                    if streak_value is None:
+                        streak_value = 0
+                    streak_display = f"🏆 {streak_value} Wins"
+                elif streak_type == "loss":
+                    streak_value = player.get(field_name, 0)
+                    if streak_value is None:
+                        streak_value = 0
+                    streak_display = f"📉 {abs(streak_value)} Losses"
+                else:  # current
+                    streak_value = player.get(field_name, 0)
+                    if streak_value is None:
+                        streak_value = 0
+                    if streak_value > 0:
+                        icon = "🔥" if streak_value >= 3 else "↗️"
+                        streak_display = f"{icon} {streak_value} Win Streak"
+                    elif streak_value < 0:
+                        icon = "❄️" if streak_value <= -3 else "↘️"
+                        streak_display = f"{icon} {abs(streak_value)} Loss Streak"
+                    else:
+                        streak_display = "No Streak"
 
-            # Get player's MMR based on mode
-            if is_global:
-                mmr = player.get("global_mmr", 300)
-                mmr_label = "Global MMR"
-            else:
-                mmr = player.get("mmr", 0)
-                # Determine rank based on MMR
-                if mmr >= 1600:
-                    rank = "Rank A"
-                elif mmr >= 1100:
-                    rank = "Rank B"
+                # Get player's MMR based on mode
+                if is_global:
+                    mmr = player.get("global_mmr", 300)
+                    if mmr is None:
+                        mmr = 300
+                    mmr_label = "Global MMR"
                 else:
-                    rank = "Rank C"
-                mmr_label = f"MMR ({rank})"
+                    mmr = player.get("mmr", 0)
+                    if mmr is None:
+                        mmr = 0
+                    # Determine rank based on MMR
+                    if mmr >= 1600:
+                        rank = "Rank A"
+                    elif mmr >= 1100:
+                        rank = "Rank B"
+                    else:
+                        rank = "Rank C"
+                    mmr_label = f"MMR ({rank})"
 
-            # Add player field
-            embed.add_field(
-                name=f"#{i + 1}: {player_name}",
-                value=f"{streak_display}\n{mmr_label}: {mmr}",
-                inline=False
-            )
+                # Add player field
+                embed.add_field(
+                    name=f"#{i + 1}: {player_name}",
+                    value=f"{streak_display}\n{mmr_label}: {mmr}",
+                    inline=False
+                )
+                displayed_count += 1
+
+            except Exception as field_error:
+                print(f"Error processing player {player_name}: {field_error}")
+                continue
 
         # Add footer
         embed.set_footer(text=f"Streak data as of {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        # If we have more players than displayed, add a note
+        if len(players) > displayed_count:
+            embed.add_field(
+                name="Note",
+                value=f"Showing top {displayed_count} of {len(players)} players with streaks.",
+                inline=False
+            )
 
         # Send response
         await interaction.followup.send(embed=embed)
 
     except Exception as e:
+        print(f"Error in topstreaks command: {e}")
+        import traceback
+        traceback.print_exc()
         await interaction.followup.send(f"Error retrieving streak data: {str(e)}")
 
 @bot.tree.command(name="resetstreak", description="Reset a player's streak (Admin only)")
@@ -4029,209 +4063,249 @@ async def test_mmr_calculation(interaction: discord.Interaction, match_id: str):
 
     await interaction.followup.send(result_text)
 
+
 @bot.tree.command(name="streakstats", description="Show server-wide streak statistics (Admin only)")
 async def streakstats_slash(interaction: discord.Interaction):
-            # Check if command is used in an allowed channel
-            if not is_command_channel(interaction.channel):
-                await interaction.response.send_message(
-                    f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-                    ephemeral=True
-                )
-                return
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
 
-            # Check if user has admin permissions
-            if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-                await interaction.response.send_message(
-                    "You need administrator permissions or the 6mod role to use this command.",
-                    ephemeral=True)
-                return
+    # Check if user has admin permissions
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
+        return
 
-            # Start deferred response since this might take time
-            await interaction.response.defer()
+    # Start deferred response since this might take time
+    await interaction.response.defer()
 
-            try:
-                # Get overall stats with aggregation pipeline
-                pipeline = [
-                    {
-                        "$group": {
-                            "_id": None,
-                            "total_players": {"$sum": 1},
-                            "players_with_win_streaks": {"$sum": {"$cond": [{"$gt": ["$current_streak", 0]}, 1, 0]}},
-                            "players_with_loss_streaks": {"$sum": {"$cond": [{"$lt": ["$current_streak", 0]}, 1, 0]}},
-                            "avg_win_streak": {
-                                "$avg": {"$cond": [{"$gt": ["$current_streak", 0]}, "$current_streak", None]}},
-                            "avg_loss_streak": {"$avg": {
-                                "$cond": [{"$lt": ["$current_streak", 0]}, {"$abs": "$current_streak"}, None]}},
-                            "max_win_streak": {"$max": "$longest_win_streak"},
-                            "max_loss_streak": {"$min": "$longest_loss_streak"},
-                            "avg_longest_win": {"$avg": "$longest_win_streak"},
-                            "avg_longest_loss": {"$avg": {"$abs": "$longest_loss_streak"}}
-                        }
-                    }
-                ]
-
-                stats = list(system_coordinator.match_system.players.aggregate(pipeline))
-
-                if not stats or not stats[0]:
-                    await interaction.followup.send("No streak statistics available.")
-                    return
-
-                stats = stats[0]  # Get the first (and only) result
-
-                # Calculate percentages
-                total_players = stats.get("total_players", 0)
-                win_streak_percent = (
-                            stats.get("players_with_win_streaks", 0) / total_players * 100) if total_players > 0 else 0
-                loss_streak_percent = (
-                            stats.get("players_with_loss_streaks", 0) / total_players * 100) if total_players > 0 else 0
-
-                # Format values
-                avg_win_streak = round(stats.get("avg_win_streak", 0), 1)
-                avg_loss_streak = round(stats.get("avg_loss_streak", 0), 1)
-                max_win_streak = stats.get("max_win_streak", 0)
-                max_loss_streak = abs(stats.get("max_loss_streak", 0))
-                avg_longest_win = round(stats.get("avg_longest_win", 0), 1)
-                avg_longest_loss = round(stats.get("avg_longest_loss", 0), 1)
-
-                # Create embed
-                embed = discord.Embed(
-                    title="Server-wide Streak Statistics",
-                    description=f"Statistics based on {total_players} players",
-                    color=0x7289da
-                )
-
-                # Current streaks summary
-                embed.add_field(
-                    name="Current Streaks",
-                    value=(
-                        f"**Win Streaks**: {stats.get('players_with_win_streaks', 0)} players ({win_streak_percent:.1f}%)\n"
-                        f"**Loss Streaks**: {stats.get('players_with_loss_streaks', 0)} players ({loss_streak_percent:.1f}%)\n"
-                        f"**No Streak**: {total_players - stats.get('players_with_win_streaks', 0) - stats.get('players_with_loss_streaks', 0)} players"
-                    ),
-                    inline=False
-                )
-
-                # Streak length stats
-                embed.add_field(
-                    name="Win Streak Stats",
-                    value=(
-                        f"**Average Win Streak**: {avg_win_streak} wins\n"
-                        f"**Longest Win Streak**: {max_win_streak} wins\n"
-                        f"**Avg Longest Win Streak**: {avg_longest_win} wins"
-                    ),
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="Loss Streak Stats",
-                    value=(
-                        f"**Average Loss Streak**: {avg_loss_streak} losses\n"
-                        f"**Longest Loss Streak**: {max_loss_streak} losses\n"
-                        f"**Avg Longest Loss Streak**: {avg_longest_loss} losses"
-                    ),
-                    inline=True
-                )
-
-                # Get Rank A, B, C breakdowns
-                rank_a_stats = await get_rank_stats(system_coordinator.match_system.players, 1600)
-                rank_b_stats = await get_rank_stats(system_coordinator.match_system.players, 1100, 1599)
-                rank_c_stats = await get_rank_stats(system_coordinator.match_system.players, 0, 1099)
-
-                embed.add_field(
-                    name="Rank A Streaks",
-                    value=(
-                        f"**Win Streak %**: {rank_a_stats.get('win_streak_percent', 0):.1f}%\n"
-                        f"**Loss Streak %**: {rank_a_stats.get('loss_streak_percent', 0):.1f}%\n"
-                        f"**Avg Win Streak**: {rank_a_stats.get('avg_win_streak', 0):.1f}\n"
-                        f"**Avg Loss Streak**: {rank_a_stats.get('avg_loss_streak', 0):.1f}"
-                    ),
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="Rank B Streaks",
-                    value=(
-                        f"**Win Streak %**: {rank_b_stats.get('win_streak_percent', 0):.1f}%\n"
-                        f"**Loss Streak %**: {rank_b_stats.get('loss_streak_percent', 0):.1f}%\n"
-                        f"**Avg Win Streak**: {rank_b_stats.get('avg_win_streak', 0):.1f}\n"
-                        f"**Avg Loss Streak**: {rank_b_stats.get('avg_loss_streak', 0):.1f}"
-                    ),
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="Rank C Streaks",
-                    value=(
-                        f"**Win Streak %**: {rank_c_stats.get('win_streak_percent', 0):.1f}%\n"
-                        f"**Loss Streak %**: {rank_c_stats.get('loss_streak_percent', 0):.1f}%\n"
-                        f"**Avg Win Streak**: {rank_c_stats.get('avg_win_streak', 0):.1f}\n"
-                        f"**Avg Loss Streak**: {rank_c_stats.get('avg_loss_streak', 0):.1f}"
-                    ),
-                    inline=True
-                )
-
-                # Add footer
-                embed.set_footer(text=f"Data as of {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
-
-                # Send response
-                await interaction.followup.send(embed=embed)
-
-            except Exception as e:
-                await interaction.followup.send(f"Error retrieving streak statistics: {str(e)}")
-
-        # Helper function for streak stats by ra
-async def get_rank_stats(players_collection, min_mmr, max_mmr=None):
-            """Get streak statistics for a specific MMR range"""
-            # Build query based on MMR range
-            if max_mmr:
-                query = {"mmr": {"$gte": min_mmr, "$lt": max_mmr}}
-            else:
-                query = {"mmr": {"$gte": min_mmr}}
-
-            # Run aggregation pipeline
-            pipeline = [
-                {"$match": query},
-                {
-                    "$group": {
-                        "_id": None,
-                        "total_players": {"$sum": 1},
-                        "players_with_win_streaks": {"$sum": {"$cond": [{"$gt": ["$current_streak", 0]}, 1, 0]}},
-                        "players_with_loss_streaks": {"$sum": {"$cond": [{"$lt": ["$current_streak", 0]}, 1, 0]}},
-                        "avg_win_streak": {
-                            "$avg": {"$cond": [{"$gt": ["$current_streak", 0]}, "$current_streak", None]}},
-                        "avg_loss_streak": {
-                            "$avg": {"$cond": [{"$lt": ["$current_streak", 0]}, {"$abs": "$current_streak"}, None]}}
-                    }
+    try:
+        # Get overall stats with aggregation pipeline
+        pipeline = [
+            {
+                "$group": {
+                    "_id": None,
+                    "total_players": {"$sum": 1},
+                    "players_with_win_streaks": {"$sum": {"$cond": [{"$gt": ["$current_streak", 0]}, 1, 0]}},
+                    "players_with_loss_streaks": {"$sum": {"$cond": [{"$lt": ["$current_streak", 0]}, 1, 0]}},
+                    "avg_win_streak": {
+                        "$avg": {"$cond": [{"$gt": ["$current_streak", 0]}, "$current_streak", None]}},
+                    "avg_loss_streak": {"$avg": {
+                        "$cond": [{"$lt": ["$current_streak", 0]}, {"$abs": "$current_streak"}, None]}},
+                    "max_win_streak": {"$max": "$longest_win_streak"},
+                    "max_loss_streak": {"$min": "$longest_loss_streak"},
+                    "avg_longest_win": {"$avg": "$longest_win_streak"},
+                    "avg_longest_loss": {"$avg": {"$abs": "$longest_loss_streak"}}
                 }
-            ]
-
-            stats = list(players_collection.aggregate(pipeline))
-
-            if not stats or not stats[0]:
-                return {
-                    "total_players": 0,
-                    "win_streak_percent": 0,
-                    "loss_streak_percent": 0,
-                    "avg_win_streak": 0,
-                    "avg_loss_streak": 0
-                }
-
-            stats = stats[0]  # Get the first (and only) result
-
-            # Calculate percentages
-            total_players = stats.get("total_players", 0)
-            win_streak_percent = (
-                        stats.get("players_with_win_streaks", 0) / total_players * 100) if total_players > 0 else 0
-            loss_streak_percent = (
-                        stats.get("players_with_loss_streaks", 0) / total_players * 100) if total_players > 0 else 0
-
-            return {
-                "total_players": total_players,
-                "win_streak_percent": win_streak_percent,
-                "loss_streak_percent": loss_streak_percent,
-                "avg_win_streak": stats.get("avg_win_streak", 0),
-                "avg_loss_streak": stats.get("avg_loss_streak", 0)
             }
+        ]
+
+        stats = list(system_coordinator.match_system.players.aggregate(pipeline))
+
+        if not stats or not stats[0]:
+            await interaction.followup.send("No streak statistics available - no players found.")
+            return
+
+        stats = stats[0]  # Get the first (and only) result
+
+        # Calculate percentages safely
+        total_players = stats.get("total_players", 0)
+        if total_players == 0:
+            await interaction.followup.send("No players found to generate statistics.")
+            return
+
+        players_with_win_streaks = stats.get("players_with_win_streaks", 0) or 0
+        players_with_loss_streaks = stats.get("players_with_loss_streaks", 0) or 0
+
+        win_streak_percent = (players_with_win_streaks / total_players * 100) if total_players > 0 else 0
+        loss_streak_percent = (players_with_loss_streaks / total_players * 100) if total_players > 0 else 0
+
+        # Format values safely
+        avg_win_streak = stats.get("avg_win_streak") or 0
+        avg_loss_streak = stats.get("avg_loss_streak") or 0
+        max_win_streak = stats.get("max_win_streak") or 0
+        max_loss_streak = stats.get("max_loss_streak") or 0
+        avg_longest_win = stats.get("avg_longest_win") or 0
+        avg_longest_loss = stats.get("avg_longest_loss") or 0
+
+        # Round safely
+        avg_win_streak = round(float(avg_win_streak), 1) if avg_win_streak else 0
+        avg_loss_streak = round(float(avg_loss_streak), 1) if avg_loss_streak else 0
+        avg_longest_win = round(float(avg_longest_win), 1) if avg_longest_win else 0
+        avg_longest_loss = round(float(avg_longest_loss), 1) if avg_longest_loss else 0
+        max_loss_streak = abs(int(max_loss_streak)) if max_loss_streak else 0
+
+        # Create embed
+        embed = discord.Embed(
+            title="Server-wide Streak Statistics",
+            description=f"Statistics based on {total_players} players",
+            color=0x7289da
+        )
+
+        # Current streaks summary
+        no_streak_count = total_players - players_with_win_streaks - players_with_loss_streaks
+        embed.add_field(
+            name="Current Streaks",
+            value=(
+                f"**Win Streaks**: {players_with_win_streaks} players ({win_streak_percent:.1f}%)\n"
+                f"**Loss Streaks**: {players_with_loss_streaks} players ({loss_streak_percent:.1f}%)\n"
+                f"**No Streak**: {no_streak_count} players"
+            ),
+            inline=False
+        )
+
+        # Streak length stats
+        embed.add_field(
+            name="Win Streak Stats",
+            value=(
+                f"**Average Win Streak**: {avg_win_streak} wins\n"
+                f"**Longest Win Streak**: {max_win_streak} wins\n"
+                f"**Avg Longest Win Streak**: {avg_longest_win} wins"
+            ),
+            inline=True
+        )
+
+        embed.add_field(
+            name="Loss Streak Stats",
+            value=(
+                f"**Average Loss Streak**: {avg_loss_streak} losses\n"
+                f"**Longest Loss Streak**: {max_loss_streak} losses\n"
+                f"**Avg Longest Loss Streak**: {avg_longest_loss} losses"
+            ),
+            inline=True
+        )
+
+        # Get Rank A, B, C breakdowns
+        try:
+            rank_a_stats = await get_rank_stats_safe(system_coordinator.match_system.players, 1600)
+            rank_b_stats = await get_rank_stats_safe(system_coordinator.match_system.players, 1100, 1599)
+            rank_c_stats = await get_rank_stats_safe(system_coordinator.match_system.players, 0, 1099)
+
+            embed.add_field(
+                name="Rank A Streaks",
+                value=(
+                    f"**Win Streak %**: {rank_a_stats.get('win_streak_percent', 0):.1f}%\n"
+                    f"**Loss Streak %**: {rank_a_stats.get('loss_streak_percent', 0):.1f}%\n"
+                    f"**Avg Win Streak**: {rank_a_stats.get('avg_win_streak', 0):.1f}\n"
+                    f"**Avg Loss Streak**: {rank_a_stats.get('avg_loss_streak', 0):.1f}"
+                ),
+                inline=True
+            )
+
+            embed.add_field(
+                name="Rank B Streaks",
+                value=(
+                    f"**Win Streak %**: {rank_b_stats.get('win_streak_percent', 0):.1f}%\n"
+                    f"**Loss Streak %**: {rank_b_stats.get('loss_streak_percent', 0):.1f}%\n"
+                    f"**Avg Win Streak**: {rank_b_stats.get('avg_win_streak', 0):.1f}\n"
+                    f"**Avg Loss Streak**: {rank_b_stats.get('avg_loss_streak', 0):.1f}"
+                ),
+                inline=True
+            )
+
+            embed.add_field(
+                name="Rank C Streaks",
+                value=(
+                    f"**Win Streak %**: {rank_c_stats.get('win_streak_percent', 0):.1f}%\n"
+                    f"**Loss Streak %**: {rank_c_stats.get('loss_streak_percent', 0):.1f}%\n"
+                    f"**Avg Win Streak**: {rank_c_stats.get('avg_win_streak', 0):.1f}\n"
+                    f"**Avg Loss Streak**: {rank_c_stats.get('avg_loss_streak', 0):.1f}"
+                ),
+                inline=True
+            )
+        except Exception as rank_error:
+            print(f"Error getting rank stats: {rank_error}")
+            embed.add_field(
+                name="Rank Breakdown",
+                value="Error calculating rank-specific statistics",
+                inline=False
+            )
+
+        # Add footer
+        embed.set_footer(text=f"Data as of {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
+
+        # Send response
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        print(f"Error in streakstats command: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"Error retrieving streak statistics: {str(e)}")
+
+# Helper function for streak stats by rank (with safe None handling)
+async def get_rank_stats_safe(players_collection, min_mmr, max_mmr=None):
+    """Get streak statistics for a specific MMR range with safe None handling"""
+    try:
+        # Build query based on MMR range
+        if max_mmr:
+            query = {"mmr": {"$gte": min_mmr, "$lt": max_mmr}}
+        else:
+            query = {"mmr": {"$gte": min_mmr}}
+
+        # Run aggregation pipeline
+        pipeline = [
+            {"$match": query},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_players": {"$sum": 1},
+                    "players_with_win_streaks": {"$sum": {"$cond": [{"$gt": ["$current_streak", 0]}, 1, 0]}},
+                    "players_with_loss_streaks": {"$sum": {"$cond": [{"$lt": ["$current_streak", 0]}, 1, 0]}},
+                    "avg_win_streak": {
+                        "$avg": {"$cond": [{"$gt": ["$current_streak", 0]}, "$current_streak", None]}},
+                    "avg_loss_streak": {
+                        "$avg": {"$cond": [{"$lt": ["$current_streak", 0]}, {"$abs": "$current_streak"}, None]}}
+                }
+            }
+        ]
+
+        stats = list(players_collection.aggregate(pipeline))
+
+        if not stats or not stats[0]:
+            return {
+                "total_players": 0,
+                "win_streak_percent": 0,
+                "loss_streak_percent": 0,
+                "avg_win_streak": 0,
+                "avg_loss_streak": 0
+            }
+
+        stats = stats[0]  # Get the first (and only) result
+
+        # Calculate percentages safely
+        total_players = stats.get("total_players", 0) or 0
+        players_with_win_streaks = stats.get("players_with_win_streaks", 0) or 0
+        players_with_loss_streaks = stats.get("players_with_loss_streaks", 0) or 0
+
+        win_streak_percent = (players_with_win_streaks / total_players * 100) if total_players > 0 else 0
+        loss_streak_percent = (players_with_loss_streaks / total_players * 100) if total_players > 0 else 0
+
+        # Safe value extraction
+        avg_win_streak = stats.get("avg_win_streak") or 0
+        avg_loss_streak = stats.get("avg_loss_streak") or 0
+
+        return {
+            "total_players": total_players,
+            "win_streak_percent": win_streak_percent,
+            "loss_streak_percent": loss_streak_percent,
+            "avg_win_streak": float(avg_win_streak) if avg_win_streak else 0,
+            "avg_loss_streak": float(avg_loss_streak) if avg_loss_streak else 0
+        }
+    except Exception as e:
+        print(f"Error in get_rank_stats_safe: {e}")
+        return {
+            "total_players": 0,
+            "win_streak_percent": 0,
+            "loss_streak_percent": 0,
+            "avg_win_streak": 0,
+            "avg_loss_streak": 0
+        }
 
 # Run the bot with the keepalive server
 if __name__ == "__main__":
