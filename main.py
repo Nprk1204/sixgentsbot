@@ -2262,7 +2262,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
 
                 # Add parameter info if available
                 if hasattr(cmd, 'parameters') and cmd.parameters:
-                    params_str = "\n".join([f"{p.name}: {p.description}" for p in cmd.parameters])
+                    params_str = "\n".join([f"**{p.name}**: {p.description}" for p in cmd.parameters])
                     embed.add_field(name="Parameters", value=params_str, inline=False)
 
                 await interaction.response.send_message(embed=embed)
@@ -2278,7 +2278,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         color=0x00ff00
     )
 
-    # Define commands and descriptions with better, more detailed descriptions
+    # Define commands and descriptions with all current commands
     commands_dict = {
         # Queue Commands
         'queue': 'Join the queue for 6 mans matches in your current channel',
@@ -2291,30 +2291,46 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         'rank': 'Check your personal stats, MMR, and rank (or view another player\'s)',
         'streak': 'View your current win/loss streak and streak history',
 
-        # Admin/Mod Commands
-        'adjustmmr': 'Manually adjust a player\'s MMR (ranked or global)',
-        'adminreport': 'Force report match results by specifying the winning team',
-        'clearqueue': 'Remove all players from the current channel\'s queue',
-        'sub': 'Substitute a player in an active match',
-        'forcestart': 'Force start a match with dummy players if needed',
-        'removeactivematches': 'Cancel all active matches in the current channel',
-        'removematch': 'Remove/reverse the results of a completed match',
-        'resetleaderboard': 'Reset leaderboard data (global, ranked, or complete reset)',
-        'resetplayer': 'Completely reset all data for a specific player',
-        'resetstreak': 'Reset a player\'s current streak or all streak records',
-        'topstreaks': 'View leaderboards for highest win/loss streaks',
-        'streakstats': 'View server-wide streak statistics and analytics',
+        # Admin/Mod Queue Management
+        'addplayer': 'Add a specific player to the current queue (Admin/Mod only)',
+        'removeplayer': 'Remove a specific player or clear the entire queue (Admin/Mod only)',
+
+        # Admin/Mod Match Management
+        'adminreport': 'Force report match results by specifying the winning team (Admin/Mod only)',
+        'sub': 'Substitute a player in an active match (Admin/Mod only)',
+        'forcestart': 'Force start a match with dummy players if needed (Admin/Mod only)',
+        'removeactivematches': 'Cancel all active matches in the current channel (Admin/Mod only)',
+        'removematch': 'Remove/reverse the results of a completed match (Admin/Mod only)',
+
+        # Admin/Mod Player Management
+        'adjustmmr': 'Manually adjust a player\'s MMR (ranked or global) (Admin/Mod only)',
+        'resetplayer': 'Completely reset all data for a specific player (Admin/Mod only)',
+        'resetstreak': 'Reset a player\'s current streak or all streak records (Admin/Mod only)',
+
+        # Admin/Mod System Management
+        'resetleaderboard': 'Reset leaderboard data (global, ranked, or complete reset) (Admin/Mod only)',
+        'topstreaks': 'View leaderboards for highest win/loss streaks (Admin/Mod only)',
+        'streakstats': 'View server-wide streak statistics and analytics (Admin/Mod only)',
+
+        # Debug Commands (Admin/Mod only)
+        'debugmmr': 'Debug MMR storage issues for a specific match (Admin/Mod only)',
+        'testmmr': 'Test MMR calculation manually for a match (Admin/Mod only)',
 
         # Utility
+        'purgechat': 'Clear chat messages (1-100) (Admin/Mod only)',
+        'ping': 'Check if the bot is connected and responsive',
         'help': 'Display this help menu or get details about specific commands'
     }
 
     # Group commands by category
     queue_commands = ['queue', 'leave', 'status']
     match_commands = ['report', 'leaderboard', 'rank', 'streak']
-    admin_commands = ['adjustmmr', 'adminreport', 'clearqueue', 'sub', 'forcestart', 'removeactivematches',
-                      'removematch', 'resetleaderboard', 'resetplayer', 'resetstreak', 'topstreaks', 'streakstats']
-    utility_commands = ['help']
+    queue_admin_commands = ['addplayer', 'removeplayer']
+    match_admin_commands = ['adminreport', 'sub', 'forcestart', 'removeactivematches', 'removematch']
+    player_admin_commands = ['adjustmmr', 'resetplayer', 'resetstreak']
+    system_admin_commands = ['resetleaderboard', 'topstreaks', 'streakstats']
+    debug_commands = ['debugmmr', 'testmmr']
+    utility_commands = ['purgechat', 'ping', 'help']
 
     # Add command fields grouped by category with improved formatting
     embed.add_field(
@@ -2330,13 +2346,37 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     )
 
     embed.add_field(
-        name="🛠️ Admin/Moderator Commands",
-        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in admin_commands]),
+        name="👥 Admin: Queue Management",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in queue_admin_commands]),
         inline=False
     )
 
     embed.add_field(
-        name="❓ Utility Commands",
+        name="⚔️ Admin: Match Management",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in match_admin_commands]),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎯 Admin: Player Management",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in player_admin_commands]),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔧 Admin: System Management",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in system_admin_commands]),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🐛 Admin: Debug Tools",
+        value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in debug_commands]),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🛠️ Utility Commands",
         value="\n".join([f"`/{cmd}` - {commands_dict[cmd]}" for cmd in utility_commands]),
         inline=False
     )
@@ -2347,7 +2387,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         value=(
             "**1.** Use `/queue` in a rank channel (rank-a, rank-b, rank-c, or global)\n"
             "**2.** When 6 players join, automated team voting begins\n"
-            "**3.** Click voting buttons to select your preferred team setup\n"
+            "**3.** Vote for team setup: ⚖️ Balanced, 🎲 Random, or 👑 Captains\n"
             "**4.** Teams are finalized based on community votes\n"
             "**5.** Play your match and report results with `/report <match_id> win/loss`\n"
             "**6.** Check updated rankings with `/leaderboard` or personal stats with `/rank`\n"
@@ -2358,7 +2398,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
 
     # Enhanced streak system section
     embed.add_field(
-        name="🔥 Dynamic Streak System:",
+        name="🔥 Advanced Streak System:",
         value=(
             "**Enhanced Streak Tracking**\n"
             "• **Win Streaks (3+)**: Bonus MMR with 🔥 indicator\n"
@@ -2366,27 +2406,46 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
             "• **Streak Multipliers**: Longer streaks = bigger impact (up to +50%)\n"
             "• **Dual Tracking**: Separate streaks for ranked and global matches\n"
             "• **Live Monitoring**: Use `/streak` to check current status\n"
-            "• **Leaderboards**: View top streaks with `/topstreaks`"
+            "• **Admin Analytics**: `/topstreaks` and `/streakstats` for insights"
+        ),
+        inline=False
+    )
+
+    # Add admin tools section
+    embed.add_field(
+        name="👑 Admin/Moderator Tools:",
+        value=(
+            "**Queue Control**: Add/remove players, force start matches\n"
+            "**Match Management**: Substitute players, remove matches, admin reports\n"
+            "**Player Management**: Adjust MMR, reset player data, manage streaks\n"
+            "**System Control**: Reset leaderboards, view analytics, debug tools\n"
+            "**Requires**: Administrator permissions or '6mod' role"
         ),
         inline=False
     )
 
     # Add rank system explanation
     embed.add_field(
-        name="🏆 Rank System:",
+        name="🏆 Dual MMR System:",
         value=(
-            "**Rank A** (1600+ MMR) - Expert players\n"
-            "**Rank B** (1100-1599 MMR) - Intermediate players\n"
-            "**Rank C** (600-1099 MMR) - Developing players\n"
-            "**Global Queue** - Mixed ranks, separate MMR system\n\n"
-            "*Players must verify their Rocket League rank before joining queues*"
+            "**Ranked Queues**:\n"
+            "• **Rank A** (1600+ MMR) - Expert players\n"
+            "• **Rank B** (1100-1599 MMR) - Intermediate players\n"
+            "• **Rank C** (600-1099 MMR) - Developing players\n\n"
+            "**Global Queue**: Mixed ranks, separate MMR system (300+ MMR)\n"
+            "*Players must verify their Rocket League rank before joining*"
         ),
         inline=False
     )
 
-    # Enhanced footer
+    # Enhanced footer with command count
+    total_commands = len(commands_dict)
+    admin_commands = len(queue_admin_commands + match_admin_commands + player_admin_commands +
+                        system_admin_commands + debug_commands + ['purgechat'])
+    user_commands = total_commands - admin_commands
+
     embed.set_footer(
-        text="💡 Pro tip: Use /help <command> for detailed info • Questions? Ask a moderator!"
+        text=f"💡 {total_commands} total commands • {user_commands} user commands • {admin_commands} admin commands • Use /help <command> for details"
     )
 
     await interaction.response.send_message(embed=embed)
