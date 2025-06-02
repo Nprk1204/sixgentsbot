@@ -136,98 +136,21 @@ class QueueManager:
 
                 print(f"Removed {result.deleted_count} inactive players from queue")
 
-                # Group players by channel for better notification
-                players_by_channel = {}
+                # Send notifications
                 for player in expired_players:
+                    player_id = player.get('id')
+                    player_mention = player.get('mention')
                     channel_id = player.get('channel_id')
-                    if channel_id not in players_by_channel:
-                        players_by_channel[channel_id] = []
-                    players_by_channel[channel_id].append(player)
 
-                # Send notifications grouped by channel
-                for channel_id, channel_players in players_by_channel.items():
                     if self.bot and channel_id:
                         try:
                             channel = self.bot.get_channel(int(channel_id))
                             if channel:
-                                # Create embed for inactivity removal
-                                embed = discord.Embed(
-                                    title="🕒 Queue Inactivity Cleanup",
-                                    description="Removed inactive players from the queue",
-                                    color=0xff9900  # Orange color
+                                await channel.send(
+                                    f"{player_mention} has been removed from the queue due to inactivity (60+ minutes)."
                                 )
-
-                                # Get channel name for display
-                                channel_name = channel.name.title().replace('-', ' ')
-                                embed.add_field(
-                                    name="Channel",
-                                    value=f"#{channel.name}",
-                                    inline=True
-                                )
-
-                                embed.add_field(
-                                    name="Players Removed",
-                                    value=f"{len(channel_players)} player(s)",
-                                    inline=True
-                                )
-
-                                embed.add_field(
-                                    name="Reason",
-                                    value="60+ minutes of inactivity",
-                                    inline=True
-                                )
-
-                                # Add player list if not too many
-                                if len(channel_players) <= 10:
-                                    player_mentions = []
-                                    for player in channel_players:
-                                        mention = player.get('mention', player.get('name', 'Unknown'))
-                                        player_mentions.append(mention)
-
-                                    embed.add_field(
-                                        name="Removed Players",
-                                        value=", ".join(player_mentions),
-                                        inline=False
-                                    )
-                                elif len(channel_players) > 10:
-                                    # Show first 8 and indicate there are more
-                                    player_mentions = []
-                                    for player in channel_players[:8]:
-                                        mention = player.get('mention', player.get('name', 'Unknown'))
-                                        player_mentions.append(mention)
-
-                                    embed.add_field(
-                                        name="Removed Players",
-                                        value=", ".join(player_mentions) + f"\n... and {len(channel_players) - 8} more",
-                                        inline=False
-                                    )
-
-                                # Add helpful information
-                                embed.add_field(
-                                    name="💡 To Rejoin",
-                                    value="Use `/queue` to join the queue again",
-                                    inline=False
-                                )
-
-                                # Add timestamp
-                                embed.set_footer(
-                                    text=f"Cleanup performed at {datetime.datetime.now().strftime('%H:%M:%S')}"
-                                )
-
-                                # Send the embed
-                                await channel.send(embed=embed)
-
                         except Exception as e:
-                            print(f"Error sending inactivity notification to channel {channel_id}: {e}")
-
-                # Update in-memory state - remove expired players from channel queues
-                for channel_id, channel_players in players_by_channel.items():
-                    if channel_id in self.channel_queues:
-                        expired_player_ids = {p.get('id') for p in channel_players}
-                        self.channel_queues[channel_id] = [
-                            p for p in self.channel_queues[channel_id]
-                            if p.get('id') not in expired_player_ids
-                        ]
+                            print(f"Error sending queue timeout notification: {e}")
 
             except Exception as e:
                 print(f"Error in remove_inactive_players task: {e}")
