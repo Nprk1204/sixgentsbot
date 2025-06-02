@@ -160,9 +160,9 @@ async def safe_interaction_response(interaction, *args, **kwargs):
         )
 
         if not interaction.response.is_done():
-            await safe_interaction_response(interaction,*args, **kwargs)
+            await interaction.response.send_message(*args, **kwargs)
         else:
-            await safe_followup_send(interaction,*args, **kwargs)
+            await interaction.followup.send(*args, **kwargs)
 
     except discord.HTTPException as e:
         if e.status == 429:
@@ -170,9 +170,9 @@ async def safe_interaction_response(interaction, *args, **kwargs):
             await asyncio.sleep(getattr(e, 'retry_after', 1))
             # Retry once
             if not interaction.response.is_done():
-                await safe_interaction_response(interaction,*args, **kwargs)
+                await interaction.response.send_message(*args, **kwargs)
             else:
-                await safe_followup_send(interaction,*args, **kwargs)
+                await interaction.followup.send(*args, **kwargs)
         else:
             raise
 
@@ -206,13 +206,13 @@ async def safe_followup_send(interaction, *args, **kwargs):
             channel_id=str(interaction.channel.id) if interaction.channel else None
         )
 
-        return await safe_followup_send(interaction,*args, **kwargs)
+        return await interaction.followup.send(*args, **kwargs)
 
     except discord.HTTPException as e:
         if e.status == 429:
             discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
             await asyncio.sleep(getattr(e, 'retry_after', 1))
-            return await safe_followup_send(interaction,*args, **kwargs)
+            return await interaction.followup.send(*args, **kwargs)
         else:
             raise
 
