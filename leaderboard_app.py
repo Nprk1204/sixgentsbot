@@ -13,6 +13,8 @@ import functools
 import re
 import json
 import threading
+import asyncio
+from collections import defaultdict, deque
 
 # Import our Discord OAuth integration
 from discord_oauth import DiscordOAuth, login_required, get_current_user
@@ -191,6 +193,56 @@ except Exception as e:
     ranks_collection = db['ranks']
     resets_collection = db['resets']
 
+
+class WebAppRateLimiter:
+    """Simple rate limiter for web app Discord API calls"""
+
+    def __init__(self):
+        self.request_times = deque()
+        self.max_requests = 10  # requests per window
+        self.window = 60.0  # 60 seconds
+        self.role_request_times = deque()
+        self.role_max_requests = 3  # very conservative for role operations
+        self.role_window = 30.0  # 30 seconds
+
+    async def wait_if_needed(self, is_role_operation=False):
+        """Wait if rate limit would be exceeded"""
+        now = time.time()
+
+        if is_role_operation:
+            # Clean old role requests
+            while (self.role_request_times and
+                   now - self.role_request_times[0] > self.role_window):
+                self.role_request_times.popleft()
+
+            # Check if we need to wait
+            if len(self.role_request_times) >= self.role_max_requests:
+                wait_time = self.role_window - (now - self.role_request_times[0])
+                if wait_time > 0:
+                    print(f"Rate limiting role operation, waiting {wait_time:.2f}s")
+                    await asyncio.sleep(wait_time)
+
+            # Record this request
+            self.role_request_times.append(time.time())
+        else:
+            # Clean old requests
+            while (self.request_times and
+                   now - self.request_times[0] > self.window):
+                self.request_times.popleft()
+
+            # Check if we need to wait
+            if len(self.request_times) >= self.max_requests:
+                wait_time = self.window - (now - self.request_times[0])
+                if wait_time > 0:
+                    print(f"Rate limiting Discord API call, waiting {wait_time:.2f}s")
+                    await asyncio.sleep(wait_time)
+
+            # Record this request
+            self.request_times.append(time.time())
+
+
+# Create global rate limiter instance
+web_rate_limiter = WebAppRateLimiter()
 
 @app.template_filter('tojsonfilter')
 def to_json_filter(obj):
@@ -1154,8 +1206,8 @@ def get_mmr_from_rank(rank):
         return 600  # Default MMR for Diamond and below
 
 
-def assign_discord_role(username, role_name=None, role_id=None, discord_id=None):
-    """Improved Discord role assignment with better error handling and user matching"""
+async def assign_discord_role_with_rate_limiting(username, role_name=None, role_id=None, discord_id=None):
+    """Improved Discord role assignment with rate limiting and better error handling"""
     print("\n===== DISCORD ROLE ASSIGNMENT DEBUG =====")
     print(f"Attempting to assign role to user: {username}")
     print(f"Discord ID provided: {discord_id if discord_id else 'No'}")
@@ -1179,7 +1231,10 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
     }
 
     try:
-        # STEP 1: Verify bot authentication
+        # STEP 1: Wait for rate limits before any API calls
+        await web_rate_limiter.wait_if_needed(is_role_operation=False)
+
+        # Verify bot authentication
         print("\n1. Verifying bot authentication...")
         auth_url = "https://discord.com/api/v10/users/@me"
 
@@ -1189,16 +1244,22 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             print(f"❌ Network error during authentication: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
+        if auth_response.status_code == 429:
+            retry_after = auth_response.headers.get('Retry-After', '5')
+            print(f"❌ Rate limited during auth, waiting {retry_after}s")
+            await asyncio.sleep(float(retry_after))
+            return {"success": False, "message": "Rate limited during authentication"}
+
         if auth_response.status_code != 200:
             print(f"❌ Authentication failed: {auth_response.status_code}")
             return {"success": False, "message": f"Bot authentication failed: {auth_response.status_code}"}
 
         bot_user = auth_response.json()
-        bot_id = bot_user.get('id')
-        bot_name = bot_user.get('username')
-        print(f"✅ Bot authenticated as: {bot_name} (ID: {bot_id})")
+        print(f"✅ Bot authenticated as: {bot_user.get('username')}")
 
-        # STEP 2: Get server information
+        # STEP 2: Get server information with rate limiting
+        await web_rate_limiter.wait_if_needed(is_role_operation=False)
+
         print("\n2. Getting server information...")
         guild_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}"
 
@@ -1208,6 +1269,12 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             print(f"❌ Network error getting guild info: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
+        if guild_response.status_code == 429:
+            retry_after = guild_response.headers.get('Retry-After', '5')
+            print(f"❌ Rate limited getting guild info, waiting {retry_after}s")
+            await asyncio.sleep(float(retry_after))
+            return {"success": False, "message": "Rate limited getting server info"}
+
         if guild_response.status_code != 200:
             print(f"❌ Failed to get server info: {guild_response.status_code}")
             return {"success": False, "message": f"Failed to get server info: {guild_response.status_code}"}
@@ -1215,7 +1282,9 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         guild_data = guild_response.json()
         print(f"✅ Connected to server: {guild_data.get('name')}")
 
-        # STEP 3: Find user - prioritize Discord ID if provided
+        # STEP 3: Find user with rate limiting
+        await web_rate_limiter.wait_if_needed(is_role_operation=False)
+
         print(f"\n3. Finding user...")
         user_id = None
         matched_name = None
@@ -1226,6 +1295,12 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
 
             try:
                 member_response = requests.get(member_url, headers=headers, timeout=10)
+
+                if member_response.status_code == 429:
+                    retry_after = member_response.headers.get('Retry-After', '5')
+                    print(f"❌ Rate limited finding user by ID, waiting {retry_after}s")
+                    await asyncio.sleep(float(retry_after))
+                    return {"success": False, "message": "Rate limited finding user"}
 
                 if member_response.status_code == 200:
                     member_data = member_response.json()
@@ -1239,19 +1314,27 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             except requests.exceptions.RequestException as e:
                 print(f"❌ Network error finding user by ID: {e}")
 
-        # If Discord ID didn't work or wasn't provided, try username search
+        # If Discord ID didn't work, try username search with rate limiting
         if not user_id:
+            await web_rate_limiter.wait_if_needed(is_role_operation=False)
+
             print("\n3b. Finding user with username search...")
             search_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/search?query={username}&limit=10"
 
             try:
                 search_response = requests.get(search_url, headers=headers, timeout=10)
 
+                if search_response.status_code == 429:
+                    retry_after = search_response.headers.get('Retry-After', '5')
+                    print(f"❌ Rate limited during user search, waiting {retry_after}s")
+                    await asyncio.sleep(float(retry_after))
+                    return {"success": False, "message": "Rate limited during user search"}
+
                 if search_response.status_code == 200:
                     search_results = search_response.json()
                     print(f"Found {len(search_results)} potential matches")
 
-                    # First try exact matches on username, global_name, or nickname
+                    # Try exact matches
                     for member in search_results:
                         member_user = member.get('user', {})
                         member_username = member_user.get('username', '')
@@ -1259,7 +1342,6 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
                         member_nickname = member.get('nick', '')
                         member_id = member_user.get('id')
 
-                        # Check for exact match first (case insensitive)
                         if (username.lower() == member_username.lower() or
                                 username.lower() == member_global_name.lower() or
                                 username.lower() == member_nickname.lower()):
@@ -1273,12 +1355,13 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             except requests.exceptions.RequestException as e:
                 print(f"❌ Network error searching for users: {e}")
 
-        # If we still couldn't find the user
         if not user_id:
             print(f"❌ No matching user found for '{username}'")
             return {"success": False, "message": f"Could not find user '{username}' in Discord server"}
 
-        # STEP 4: Get all server roles
+        # STEP 4: Get roles with rate limiting
+        await web_rate_limiter.wait_if_needed(is_role_operation=False)
+
         print("\n4. Getting server roles...")
         roles_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
 
@@ -1288,6 +1371,12 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             print(f"❌ Network error getting roles: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
+        if roles_response.status_code == 429:
+            retry_after = roles_response.headers.get('Retry-After', '5')
+            print(f"❌ Rate limited getting roles, waiting {retry_after}s")
+            await asyncio.sleep(float(retry_after))
+            return {"success": False, "message": "Rate limited getting roles"}
+
         if roles_response.status_code != 200:
             print(f"❌ Failed to get roles: {roles_response.status_code}")
             return {"success": False, "message": f"Failed to retrieve roles: {roles_response.status_code}"}
@@ -1295,62 +1384,27 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         roles = roles_response.json()
         print(f"✅ Found {len(roles)} roles in the server")
 
-        # Find the bot member to get its roles
-        bot_member_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{bot_id}"
-
-        try:
-            bot_member_response = requests.get(bot_member_url, headers=headers, timeout=10)
-        except requests.exceptions.RequestException as e:
-            print(f"❌ Network error getting bot member: {e}")
-            return {"success": False, "message": f"Network error: {str(e)}"}
-
-        if bot_member_response.status_code != 200:
-            print(f"❌ Failed to get bot member: {bot_member_response.status_code}")
-            return {"success": False, "message": "Failed to retrieve bot member information"}
-
-        bot_member = bot_member_response.json()
-        bot_roles = bot_member.get('roles', [])
-
-        # Find the highest position of the bot's roles
-        bot_highest_role_position = 0
-        for role in roles:
-            if role.get('id') in bot_roles and role.get('position', 0) > bot_highest_role_position:
-                bot_highest_role_position = role.get('position', 0)
-
-        print(f"\nBot's highest role position: {bot_highest_role_position}")
-
-        # STEP 5: Find target role (by name or ID)
+        # STEP 5: Find target role
         print("\n5. Finding target role...")
         target_role_id = role_id
-        target_role_position = 0
         target_role_name = None
 
         if not target_role_id and role_name:
-            # Find by name if ID not provided
             for role in roles:
                 if role.get('name', '').lower() == role_name.lower():
                     target_role_id = role.get('id')
-                    target_role_position = role.get('position')
                     target_role_name = role.get('name')
-                    print(
-                        f"✅ Found role by name: '{target_role_name}' (ID: {target_role_id}, Position: {target_role_position})")
+                    print(f"✅ Found role by name: '{target_role_name}' (ID: {target_role_id})")
                     break
 
             if not target_role_id:
                 print(f"❌ No role found with name: '{role_name}'")
                 return {"success": False, "message": f"Role '{role_name}' not found in server"}
 
-        # STEP 6: Check role hierarchy
-        print("\n6. Checking role hierarchy...")
-        if target_role_position >= bot_highest_role_position:
-            print(
-                f"❌ Role hierarchy issue: Bot's highest role ({bot_highest_role_position}) must be higher than the role to assign ({target_role_position})")
-            return {"success": False, "message": "Bot's role is not high enough to assign this role"}
+        # STEP 6: Check if user already has the role with rate limiting
+        await web_rate_limiter.wait_if_needed(is_role_operation=False)
 
-        print("✅ Bot's role position is higher than target role - hierarchy check passed")
-
-        # STEP 7: Check if user already has the role
-        print("\n7. Checking if user already has the role...")
+        print("\n6. Checking if user already has the role...")
         member_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}"
 
         try:
@@ -1358,6 +1412,12 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         except requests.exceptions.RequestException as e:
             print(f"❌ Network error getting member info: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
+
+        if member_response.status_code == 429:
+            retry_after = member_response.headers.get('Retry-After', '5')
+            print(f"❌ Rate limited getting member info, waiting {retry_after}s")
+            await asyncio.sleep(float(retry_after))
+            return {"success": False, "message": "Rate limited getting member info"}
 
         if member_response.status_code != 200:
             print(f"❌ Failed to get member info: {member_response.status_code}")
@@ -1370,8 +1430,10 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
             print(f"User already has role '{target_role_name}'")
             return {"success": True, "message": f"User already has role '{target_role_name}'"}
 
-        # STEP 8: Assign the role
-        print("\n8. Attempting to assign role...")
+        # STEP 7: Assign the role with HEAVY rate limiting
+        await web_rate_limiter.wait_if_needed(is_role_operation=True)
+
+        print("\n7. Attempting to assign role...")
         assign_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{user_id}/roles/{target_role_id}"
 
         try:
@@ -1379,6 +1441,12 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         except requests.exceptions.RequestException as e:
             print(f"❌ Network error during role assignment: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
+
+        if assign_response.status_code == 429:
+            retry_after = assign_response.headers.get('Retry-After', '10')
+            print(f"❌ Rate limited during role assignment, waiting {retry_after}s")
+            await asyncio.sleep(float(retry_after))
+            return {"success": False, "message": "Rate limited during role assignment, please try again later"}
 
         if assign_response.status_code in [204, 200]:
             print(f"✅ Role assignment successful! Status code: {assign_response.status_code}")
@@ -1397,6 +1465,38 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
     finally:
         print("\n===== ROLE ASSIGNMENT COMPLETED =====\n")
 
+def assign_discord_role(username, role_name=None, role_id=None, discord_id=None):
+    """Wrapper to call the async rate-limited function"""
+    try:
+        # Try to get existing event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # If we're in an async context, create a new task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(
+                    asyncio.run,
+                    assign_discord_role_with_rate_limiting(username, role_name, role_id, discord_id)
+                )
+                return future.result(timeout=30)
+        else:
+            # If no event loop running, use asyncio.run
+            return asyncio.run(assign_discord_role_with_rate_limiting(username, role_name, role_id, discord_id))
+    except Exception as e:
+        print(f"Error in role assignment wrapper: {e}")
+        return {"success": False, "message": f"Error: {str(e)}"}
+
+
+# Additional helper for Flask routes that need async Discord operations
+def run_async_in_flask(async_func):
+    """Helper to run async functions in Flask routes"""
+    def wrapper(*args, **kwargs):
+        try:
+            return asyncio.run(async_func(*args, **kwargs))
+        except Exception as e:
+            print(f"Error running async function in Flask: {e}")
+            return {"success": False, "message": f"Error: {str(e)}"}
+    return wrapper
 
 # Legacy rank check API endpoint (keep for backwards compatibility)
 @app.route('/api/rank-check', methods=['GET'])

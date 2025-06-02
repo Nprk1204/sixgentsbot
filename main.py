@@ -15,6 +15,9 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import uuid
 import random
+from collections import defaultdict, deque
+import time
+from discord_rate_limiter import discord_rate_limiter, RateLimitedDiscordOps, rate_limiter_maintenance, rate_limited
 
 # Load environment variables
 load_dotenv()
@@ -147,6 +150,85 @@ def has_admin_or_mod_permissions(user, guild):
     return False
 
 
+async def safe_interaction_response(interaction, *args, **kwargs):
+    """Safely respond to interactions with rate limiting"""
+    try:
+        await discord_rate_limiter.wait_for_rate_limit(
+            route="POST/interactions/{id}/{token}/callback",
+            guild_id=str(interaction.guild.id) if interaction.guild else None,
+            channel_id=str(interaction.channel.id) if interaction.channel else None
+        )
+
+        if not interaction.response.is_done():
+            await interaction.response.send_message(*args, **kwargs)
+        else:
+            await interaction.followup.send(*args, **kwargs)
+
+    except discord.HTTPException as e:
+        if e.status == 429:
+            discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
+            await asyncio.sleep(getattr(e, 'retry_after', 1))
+            # Retry once
+            if not interaction.response.is_done():
+                await interaction.response.send_message(*args, **kwargs)
+            else:
+                await interaction.followup.send(*args, **kwargs)
+        else:
+            raise
+
+
+async def safe_interaction_defer(interaction, ephemeral=False):
+    """Safely defer interactions with rate limiting"""
+    try:
+        await discord_rate_limiter.wait_for_rate_limit(
+            route="POST/interactions/{id}/{token}/callback",
+            guild_id=str(interaction.guild.id) if interaction.guild else None,
+            channel_id=str(interaction.channel.id) if interaction.channel else None
+        )
+
+        await interaction.response.defer(ephemeral=ephemeral)
+
+    except discord.HTTPException as e:
+        if e.status == 429:
+            discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
+            await asyncio.sleep(getattr(e, 'retry_after', 1))
+            await interaction.response.defer(ephemeral=ephemeral)
+        else:
+            raise
+
+
+async def safe_followup_send(interaction, *args, **kwargs):
+    """Safely send followup messages with rate limiting"""
+    try:
+        await discord_rate_limiter.wait_for_rate_limit(
+            route="POST/webhooks/{application.id}/{interaction.token}",
+            guild_id=str(interaction.guild.id) if interaction.guild else None,
+            channel_id=str(interaction.channel.id) if interaction.channel else None
+        )
+
+        return await interaction.followup.send(*args, **kwargs)
+
+    except discord.HTTPException as e:
+        if e.status == 429:
+            discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
+            await asyncio.sleep(getattr(e, 'retry_after', 1))
+            return await interaction.followup.send(*args, **kwargs)
+        else:
+            raise
+
+
+@rate_limited("PUT/guilds/{id}/members/{id}/roles/{id}", is_role_operation=True)
+async def assign_discord_role_rate_limited(member, role, reason=None):
+    """Rate-limited Discord role assignment"""
+    return await member.add_roles(role, reason=reason)
+
+
+@rate_limited("DELETE/guilds/{id}/members/{id}/roles/{id}", is_role_operation=True)
+async def remove_discord_role_rate_limited(member, role, reason=None):
+    """Rate-limited Discord role removal"""
+    return await member.remove_roles(role, reason=reason)
+
+
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 try:
@@ -168,6 +250,7 @@ async def on_ready():
     try:
         system_coordinator.set_bot(bot)
         bot.loop.create_task(system_coordinator.check_for_ready_matches())
+        bot.loop.create_task(rate_limiter_maintenance())
         print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
         print("Syncing global commands...")
