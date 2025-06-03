@@ -15,7 +15,9 @@ from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 import uuid
 import random
-from rate_limiter import DiscordRateLimiter, BulkOperationHelper, safe_role_operation
+from collections import defaultdict, deque
+import time
+from discord_rate_limiter import discord_rate_limiter, RateLimitedDiscordOps, rate_limiter_maintenance, rate_limited
 
 # Load environment variables
 load_dotenv()
@@ -148,6 +150,85 @@ def has_admin_or_mod_permissions(user, guild):
     return False
 
 
+async def safe_interaction_response(interaction, *args, **kwargs):
+    """Safely respond to interactions with rate limiting"""
+    try:
+        await discord_rate_limiter.wait_for_rate_limit(
+            route="POST/interactions/{id}/{token}/callback",
+            guild_id=str(interaction.guild.id) if interaction.guild else None,
+            channel_id=str(interaction.channel.id) if interaction.channel else None
+        )
+
+        if not interaction.response.is_done():
+            await interaction.response.send_message(*args, **kwargs)
+        else:
+            await interaction.followup.send(*args, **kwargs)
+
+    except discord.HTTPException as e:
+        if e.status == 429:
+            discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
+            await asyncio.sleep(getattr(e, 'retry_after', 1))
+            # Retry once
+            if not interaction.response.is_done():
+                await interaction.response.send_message(*args, **kwargs)
+            else:
+                await interaction.followup.send(*args, **kwargs)
+        else:
+            raise
+
+
+async def safe_interaction_defer(interaction, ephemeral=False):
+    """Safely defer interactions with rate limiting"""
+    try:
+        await discord_rate_limiter.wait_for_rate_limit(
+            route="POST/interactions/{id}/{token}/callback",
+            guild_id=str(interaction.guild.id) if interaction.guild else None,
+            channel_id=str(interaction.channel.id) if interaction.channel else None
+        )
+
+        await interaction.response.defer(ephemeral=ephemeral)
+
+    except discord.HTTPException as e:
+        if e.status == 429:
+            discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
+            await asyncio.sleep(getattr(e, 'retry_after', 1))
+            await interaction.response.defer(ephemeral=ephemeral)
+        else:
+            raise
+
+
+async def safe_followup_send(interaction, *args, **kwargs):
+    """Safely send followup messages with rate limiting"""
+    try:
+        await discord_rate_limiter.wait_for_rate_limit(
+            route="POST/webhooks/{application.id}/{interaction.token}",
+            guild_id=str(interaction.guild.id) if interaction.guild else None,
+            channel_id=str(interaction.channel.id) if interaction.channel else None
+        )
+
+        return await interaction.followup.send(*args, **kwargs)
+
+    except discord.HTTPException as e:
+        if e.status == 429:
+            discord_rate_limiter.handle_429_response(getattr(e, 'retry_after', None))
+            await asyncio.sleep(getattr(e, 'retry_after', 1))
+            return await interaction.followup.send(*args, **kwargs)
+        else:
+            raise
+
+
+@rate_limited("PUT/guilds/{id}/members/{id}/roles/{id}", is_role_operation=True)
+async def assign_discord_role_rate_limited(member, role, reason=None):
+    """Rate-limited Discord role assignment"""
+    return await member.add_roles(role, reason=reason)
+
+
+@rate_limited("DELETE/guilds/{id}/members/{id}/roles/{id}", is_role_operation=True)
+async def remove_discord_role_rate_limited(member, role, reason=None):
+    """Rate-limited Discord role removal"""
+    return await member.remove_roles(role, reason=reason)
+
+
 # Database setup
 client = MongoClient(MONGO_URI, server_api=ServerApi('1'))
 try:
@@ -160,10 +241,6 @@ except Exception as e:
 db = Database(MONGO_URI)
 system_coordinator = SystemCoordinator(db)
 
-# ADD THESE NEW LINES:
-rate_limiter = DiscordRateLimiter()
-bulk_helper = BulkOperationHelper(rate_limiter)
-
 
 @bot.event
 async def on_ready():
@@ -171,14 +248,9 @@ async def on_ready():
     print(f"Connected to {len(bot.guilds)} guilds")
 
     try:
-        # ADD THESE NEW LINES:
-        rate_limiter.bot = bot
-        rate_limiter.start_bulk_processor()
-        print("✅ Rate limiting system initialized")
-
-        # EXISTING CODE CONTINUES:
         system_coordinator.set_bot(bot)
         bot.loop.create_task(system_coordinator.check_for_ready_matches())
+        bot.loop.create_task(rate_limiter_maintenance())
         print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
         print("Syncing global commands...")
@@ -219,14 +291,14 @@ async def on_reaction_add(reaction, user):
 async def queue_slash(interaction: discord.Interaction):
     # Check channel first
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
         return
 
     # IMMEDIATE response to prevent timeout
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Fast rank verification check
     player = interaction.user
@@ -249,7 +321,7 @@ async def queue_slash(interaction: discord.Interaction):
             value="Visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await safe_followup_send(interaction,embed=embed, ephemeral=True)
         return
 
     # Create missing rank record if needed
@@ -279,7 +351,7 @@ async def queue_slash(interaction: discord.Interaction):
         response_message = await system_coordinator.queue_manager.add_player(player, interaction.channel)
     except Exception as e:
         print(f"Error adding player to queue: {e}")
-        await interaction.followup.send("An error occurred while joining the queue. Please try again.", ephemeral=True)
+        await safe_followup_send(interaction,"An error occurred while joining the queue. Please try again.", ephemeral=True)
         return
 
     # Handle response - SINGLE followup message only
@@ -311,7 +383,7 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     elif "SUCCESS:" in response_message:
         success_msg = response_message.replace("SUCCESS:", "").strip()
@@ -333,7 +405,7 @@ async def queue_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     else:
         # Match creation
@@ -348,7 +420,7 @@ async def queue_slash(interaction: discord.Interaction):
                         inline=False)
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
         # FIXED: Start voting AFTER sending the match creation message
         # Check if voting system exists for this channel
@@ -366,14 +438,14 @@ async def queue_slash(interaction: discord.Interaction):
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
         return
 
     # IMMEDIATE response to prevent timeout
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Fast rank verification check
     player = interaction.user
@@ -393,7 +465,7 @@ async def leave_slash(interaction: discord.Interaction):
         )
         embed.add_field(name="How to Verify",
                         value="Visit the rank check page on the website to complete verification.", inline=False)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await safe_followup_send(interaction,embed=embed, ephemeral=True)
         return
 
     # Get queue manager response
@@ -401,7 +473,7 @@ async def leave_slash(interaction: discord.Interaction):
         response_message = await system_coordinator.queue_manager.remove_player(interaction.user, interaction.channel)
     except Exception as e:
         print(f"Error removing player from queue: {e}")
-        await interaction.followup.send("An error occurred while leaving the queue. Please try again.", ephemeral=True)
+        await safe_followup_send(interaction,"An error occurred while leaving the queue. Please try again.", ephemeral=True)
         return
 
     # Handle response - SINGLE followup message only
@@ -435,7 +507,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     elif "QUEUE_ERROR:" in response_message:
         error_msg = response_message.replace("QUEUE_ERROR:", "").strip()
@@ -461,7 +533,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     elif "SUCCESS:" in response_message:
         success_msg = response_message.replace("SUCCESS:", "").strip()
@@ -480,7 +552,7 @@ async def leave_slash(interaction: discord.Interaction):
 
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     else:
         # Fallback
@@ -490,7 +562,7 @@ async def leave_slash(interaction: discord.Interaction):
         embed.add_field(name="Current Queue", value=f"**{queue_count}/6** players waiting", inline=False)
         embed.timestamp = datetime.datetime.now()
         embed.set_footer(text=f"Channel: #{interaction.channel.name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
 
 # FIXED: Error handler - simplified
@@ -501,11 +573,11 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     try:
         if isinstance(error, app_commands.errors.CommandNotFound):
             if not interaction.response.is_done():
-                await interaction.response.send_message("Command not found. Use `/help` to see available commands.",
+                await safe_interaction_response(interaction, "Command not found. Use `/help` to see available commands.",
                                                         ephemeral=True)
         elif isinstance(error, app_commands.errors.MissingPermissions):
             if not interaction.response.is_done():
-                await interaction.response.send_message("You don't have permission to use this command.",
+                await safe_interaction_response(interaction, "You don't have permission to use this command.",
                                                         ephemeral=True)
         elif isinstance(error, app_commands.errors.CommandInvokeError):
             if isinstance(error.original, discord.errors.NotFound):
@@ -514,10 +586,10 @@ async def on_app_command_error(interaction: discord.Interaction, error):
             else:
                 print(f"Command invoke error: {error.original}")
                 if not interaction.response.is_done():
-                    await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+                    await safe_interaction_response(interaction, "An error occurred. Please try again.", ephemeral=True)
         else:
             if not interaction.response.is_done():
-                await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+                await safe_interaction_response(interaction, "An error occurred. Please try again.", ephemeral=True)
     except Exception as e:
         print(f"Error in error handler: {e}")
 
@@ -526,7 +598,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 async def status_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
@@ -572,7 +644,7 @@ async def status_slash(interaction: discord.Interaction):
             inline=False
         )
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction, embed=embed)
 
 
 @bot.tree.command(name="report", description="Report match results")
@@ -595,7 +667,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
 
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -605,7 +677,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
 
     # Validate result argument
     if result.lower() not in ["win", "loss"]:
-        await interaction.response.send_message("Invalid result. Please use 'win' or 'loss'.", ephemeral=True)
+        await safe_interaction_response(interaction,"Invalid result. Please use 'win' or 'loss'.", ephemeral=True)
         return
 
     # ADDED: Check if the match was created in this specific channel
@@ -623,7 +695,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
 
     if not match:
-        await interaction.response.send_message(f"No match found with ID `{match_id}`.", ephemeral=True)
+        await safe_interaction_response(interaction,f"No match found with ID `{match_id}`.", ephemeral=True)
         return
 
     # Check if the match belongs to this channel
@@ -633,34 +705,34 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         try:
             correct_channel = bot.get_channel(int(match_channel_id))
             if correct_channel:
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"❌ This match was created in {correct_channel.mention}. Please report it there instead.",
                     ephemeral=True
                 )
             else:
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"❌ This match was not created in this channel. Please report it in the correct channel.",
                     ephemeral=True
                 )
         except:
-            await interaction.response.send_message(
+            await safe_interaction_response(interaction,
                 f"❌ This match was not created in this channel. Please report it in the correct channel.",
                 ephemeral=True
             )
         return
 
     # Start with a deferred response since match reporting might take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Get match result
     match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result, ctx)
 
     if error:
-        await interaction.followup.send(f"Error: {error}")
+        await safe_followup_send(interaction,f"Error: {error}")
         return
 
     if not match_result:
-        await interaction.followup.send("Failed to process match report.")
+        await safe_followup_send(interaction,"Failed to process match report.")
         return
 
     # Determine winning team
@@ -876,7 +948,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         )
         print(f"WARNING: No MMR changes found in match result for match {match_id}")
 
-    await interaction.followup.send(embed=embed)
+    await safe_followup_send(interaction,embed=embed)
 
     print(f"Match report display completed for {match_id}")
 
@@ -893,7 +965,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
 async def adminreport_slash(interaction: discord.Interaction, match_id: str, team_number: int, result: str = "win"):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -901,19 +973,19 @@ async def adminreport_slash(interaction: discord.Interaction, match_id: str, tea
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Validate team number
     if team_number not in [1, 2]:
-        await interaction.response.send_message("Invalid team number. Please use 1 or 2.", ephemeral=True)
+        await safe_interaction_response(interaction,"Invalid team number. Please use 1 or 2.", ephemeral=True)
         return
 
     # Validate result argument
     if result.lower() != "win":
-        await interaction.response.send_message("Invalid result. Please use 'win' to indicate the winning team.",
+        await safe_interaction_response(interaction,"Invalid result. Please use 'win' to indicate the winning team.",
                                                 ephemeral=True)
         return
 
@@ -924,7 +996,7 @@ async def adminreport_slash(interaction: discord.Interaction, match_id: str, tea
         # Check in completed matches
         active_match = system_coordinator.match_system.matches.find_one({"match_id": match_id, "status": "in_progress"})
         if not active_match:
-            await interaction.response.send_message(f"No active match found with ID `{match_id}`.", ephemeral=True)
+            await safe_interaction_response(interaction,f"No active match found with ID `{match_id}`.", ephemeral=True)
             return
 
     match_id = active_match.get("match_id")
@@ -1002,7 +1074,7 @@ async def adminreport_slash(interaction: discord.Interaction, match_id: str, tea
     embed.add_field(name="MMR", value="+15 for winners, -12 for losers (approximate)", inline=False)
     embed.set_footer(text=f"Reported by admin: {interaction.user.display_name}")
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
     # Also send a message encouraging people to check the leaderboard
     await interaction.channel.send("Check the updated leaderboard with `/leaderboard`!")
@@ -1012,7 +1084,7 @@ async def adminreport_slash(interaction: discord.Interaction, match_id: str, tea
 async def leaderboard_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -1042,7 +1114,7 @@ async def leaderboard_slash(interaction: discord.Interaction):
 
     embed.set_footer(text="Updated after each match")
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 
 @bot.tree.command(name="rank", description="Check your rank and stats (or another member's)")
@@ -1050,7 +1122,7 @@ async def leaderboard_slash(interaction: discord.Interaction):
 async def rank_slash(interaction: discord.Interaction, member: discord.Member = None):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -1107,7 +1179,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
                         value="• Your starting MMR based on your Rocket League rank\n• Access to all queues\n• Stat tracking\n• Leaderboard placement",
                         inline=False
                     )
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    await safe_interaction_response(interaction,embed=embed, ephemeral=True)
                 else:
                     # Show simple message for checking other unverified users
                     embed = discord.Embed(
@@ -1115,7 +1187,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
                         description=f"{member.mention} hasn't verified their rank yet.",
                         color=0x95a5a6
                     )
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    await safe_interaction_response(interaction,embed=embed, ephemeral=True)
                 return
         else:
             # Use data from rank record
@@ -1298,7 +1370,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 
 @bot.tree.command(name="addplayer", description="Add a player to the queue (Admin/Mod only)")
@@ -1306,7 +1378,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 async def addplayer_slash(interaction: discord.Interaction, member: discord.Member):
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
@@ -1314,13 +1386,13 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Defer response since queue operations might take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Check if the target member has rank verification
     player_id = str(member.id)
@@ -1341,7 +1413,7 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
             value="The player must visit the rank check page on the website to complete verification.",
             inline=False
         )
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
         return
 
     # Create missing rank record if needed
@@ -1371,7 +1443,7 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
         response_message = await system_coordinator.queue_manager.add_player(member, interaction.channel)
     except Exception as e:
         print(f"Error adding player to queue: {e}")
-        await interaction.followup.send(
+        await safe_followup_send(interaction,
             f"An error occurred while adding {member.mention} to the queue. Please try again.")
         return
 
@@ -1385,7 +1457,7 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
             color=0xe74c3c
         )
         embed.set_footer(text=f"Admin action by {interaction.user.display_name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     elif "SUCCESS:" in response_message:
         success_msg = response_message.replace("SUCCESS:", "").strip()
@@ -1406,7 +1478,7 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
             embed.add_field(name="Status", value="🎉 **Queue is FULL!** Match starting soon...", inline=False)
 
         embed.set_footer(text=f"Added by admin: {interaction.user.display_name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     else:
         # Match creation response
@@ -1419,7 +1491,7 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
         embed.add_field(name="Match ID", value=f"`{match_id}`", inline=False)
         embed.add_field(name="Added Player", value=f"{member.mention} was the final player needed!", inline=False)
         embed.set_footer(text=f"Queue completed by admin: {interaction.user.display_name}")
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
         # Start voting for the match
         channel_name = interaction.channel.name.lower()
@@ -1443,7 +1515,7 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
 async def removeplayer_slash(interaction: discord.Interaction, member: discord.Member = None, remove_all: str = "no"):
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
@@ -1451,24 +1523,24 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Defer response first to avoid interaction timeout issues
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Validate parameters
     if remove_all == "yes" and member is not None:
-        await interaction.followup.send(
+        await safe_followup_send(interaction,
             "❌ Cannot specify both a member and 'remove all'. Choose one option.",
             ephemeral=True
         )
         return
 
     if remove_all == "no" and member is None:
-        await interaction.followup.send(
+        await safe_followup_send(interaction,
             "❌ Please specify a member to remove, or set 'remove_all' to 'yes' to clear the entire queue.",
             ephemeral=True
         )
@@ -1481,7 +1553,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
 
     # If queue is empty
     if queue_count == 0:
-        await interaction.followup.send("The queue is already empty!")
+        await safe_followup_send(interaction,"The queue is already empty!")
         return
 
     if remove_all == "yes":
@@ -1517,7 +1589,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
         if channel_id in system_coordinator.queue_manager.channel_queues:
             system_coordinator.queue_manager.channel_queues[channel_id] = []
 
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     else:
         # Remove specific player
@@ -1593,14 +1665,14 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                         value=f"They are in the **#{other_channel_name}** queue instead.",
                         inline=False
                     )
-                await interaction.followup.send(embed=embed)
+                await safe_followup_send(interaction,embed=embed)
             else:
                 embed = discord.Embed(
                     title="Player Not in Queue",
                     description=f"{member.mention} is not in any queue.",
                     color=0x95a5a6
                 )
-                await interaction.followup.send(embed=embed)
+                await safe_followup_send(interaction,embed=embed)
             return
 
         # Remove the specific player from database first
@@ -1655,7 +1727,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                 embed.add_field(name="⚠️ Note", value="Player was removed from database (memory already synced)",
                                 inline=False)
 
-            await interaction.followup.send(embed=embed)
+            await safe_followup_send(interaction,embed=embed)
         else:
             embed = discord.Embed(
                 title="Removal Failed",
@@ -1666,7 +1738,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
             embed.add_field(name="Debug Info",
                             value=f"DB result: {result.deleted_count}, Memory removal: {removed_from_memory}",
                             inline=False)
-            await interaction.followup.send(embed=embed)
+            await safe_followup_send(interaction,embed=embed)
 
 
 @bot.tree.command(name="removematch", description="Remove/reverse a completed match and its MMR changes (Admin only)")
@@ -1677,7 +1749,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
 async def removematch_slash(interaction: discord.Interaction, match_id: str, confirmation: str):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -1685,14 +1757,14 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Check confirmation
     if confirmation != "CONFIRM":
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "❌ Match removal canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
             ephemeral=True
         )
@@ -1704,7 +1776,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
         match_id = match_id[:6]
 
     # Defer response as this operation could take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     try:
         # Look for the match in completed matches
@@ -1714,7 +1786,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
         })
 
         if not match:
-            await interaction.followup.send(f"❌ No completed match found with ID `{match_id}`.")
+            await safe_followup_send(interaction,f"❌ No completed match found with ID `{match_id}`.")
             return
 
         # Get match details for display
@@ -1730,7 +1802,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
 
         # Validate we have the necessary data
         if not match_details["mmr_changes"]:
-            await interaction.followup.send(f"❌ Match `{match_id}` has no MMR changes to reverse.")
+            await safe_followup_send(interaction,f"❌ Match `{match_id}` has no MMR changes to reverse.")
             return
 
         # Store original player stats for rollback verification
@@ -1877,7 +1949,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
         delete_result = system_coordinator.match_system.matches.delete_one({"match_id": match_id})
 
         if delete_result.deleted_count == 0:
-            await interaction.followup.send(f"⚠️ Warning: Match `{match_id}` could not be deleted from database.")
+            await safe_followup_send(interaction,f"⚠️ Warning: Match `{match_id}` could not be deleted from database.")
 
         # Create detailed response embed
         embed = discord.Embed(
@@ -1954,7 +2026,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
             text=f"Removed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
         # Send notification to affected players (optional)
         if len(affected_players) <= 10:  # Only if reasonable number of players
@@ -1973,7 +2045,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
             await interaction.channel.send(embed=notification_embed)
 
     except Exception as e:
-        await interaction.followup.send(f"❌ Error removing match: {str(e)}")
+        await safe_followup_send(interaction,f"❌ Error removing match: {str(e)}")
         print(f"Error in removematch command: {e}")
         import traceback
         traceback.print_exc()
@@ -1983,7 +2055,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
 async def forcestart_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
             ephemeral=True
         )
@@ -1991,7 +2063,7 @@ async def forcestart_slash(interaction: discord.Interaction):
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
@@ -2003,11 +2075,11 @@ async def forcestart_slash(interaction: discord.Interaction):
                    system_coordinator.queue_manager.get_match_by_channel(channel_id, status="selection")
 
     if active_match:
-        await interaction.response.send_message("A team selection is already in progress in this channel!")
+        await safe_interaction_response(interaction,"A team selection is already in progress in this channel!")
         return
 
     # Defer response as this might take some time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Get players from queue
     status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
@@ -2016,7 +2088,7 @@ async def forcestart_slash(interaction: discord.Interaction):
 
     # If queue is empty, we need to add 6 dummy players
     if queue_count == 0:
-        await interaction.followup.send("Queue is empty. Adding 6 dummy players...")
+        await safe_followup_send(interaction,"Queue is empty. Adding 6 dummy players...")
         await add_dummy_players(interaction.channel, 6)
         # Update queue status after adding dummies
         status_data = system_coordinator.queue_manager.get_queue_status(interaction.channel)
@@ -2025,7 +2097,7 @@ async def forcestart_slash(interaction: discord.Interaction):
     # If fewer than 6 players, add dummies to fill
     elif queue_count < 6:
         dummies_needed = 6 - queue_count
-        await interaction.followup.send(
+        await safe_followup_send(interaction,
             f"Only {queue_count}/6 players in queue. Adding {dummies_needed} dummy players...")
         await add_dummy_players(interaction.channel, dummies_needed)
         # Update queue status after adding dummies
@@ -2061,12 +2133,12 @@ async def forcestart_slash(interaction: discord.Interaction):
             inline=False
         )
 
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
         # Now start the vote system - without additional messages
         await system_coordinator.vote_systems[channel_name].start_vote(interaction.channel)
     else:
-        await interaction.followup.send("Error: No vote system found for this channel.")
+        await safe_followup_send(interaction,"Error: No vote system found for this channel.")
 
 
 async def add_dummy_players(channel, count):
@@ -2116,7 +2188,7 @@ async def add_dummy_players(channel, count):
 async def removeactivematches_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -2124,7 +2196,7 @@ async def removeactivematches_slash(interaction: discord.Interaction):
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
@@ -2139,7 +2211,7 @@ async def removeactivematches_slash(interaction: discord.Interaction):
 
     # If no active matches, inform the user
     if not active_matches:
-        await interaction.response.send_message("No active matches found in this channel.")
+        await safe_interaction_response(interaction,"No active matches found in this channel.")
         return
 
     # First, cancel any active votings or selections
@@ -2212,14 +2284,14 @@ async def removeactivematches_slash(interaction: discord.Interaction):
     embed.set_footer(text=f"Executed by {interaction.user.display_name}")
 
     # Send confirmation
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 @bot.tree.command(name="purgechat", description="Clear chat messages")
 @app_commands.describe(amount_to_delete="Number of messages to delete (1-100)")
 async def purgechat_slash(interaction: discord.Interaction, amount_to_delete: int = 10):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -2227,26 +2299,26 @@ async def purgechat_slash(interaction: discord.Interaction, amount_to_delete: in
 
     if interaction.user.guild_permissions.manage_messages:
         if 1 <= amount_to_delete <= 100:
-            await interaction.response.defer(ephemeral=True)
+            await safe_interaction_defer(interaction, ephemeral=True)
             await interaction.channel.purge(limit=amount_to_delete)
-            await interaction.followup.send(f"Cleared {amount_to_delete} messages.", ephemeral=True)
+            await safe_followup_send(interaction,f"Cleared {amount_to_delete} messages.", ephemeral=True)
         else:
-            await interaction.response.send_message("Please enter a number between 1 and 100", ephemeral=True)
+            await safe_interaction_response(interaction,"Please enter a number between 1 and 100", ephemeral=True)
     else:
-        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
+        await safe_interaction_response(interaction,"You don't have permission to use this command.", ephemeral=True)
 
 
 @bot.tree.command(name="ping", description="Check if the bot is connected")
 async def ping_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
         return
 
-    await interaction.response.send_message("Pong! Bot is connected to Discord.")
+    await safe_interaction_response(interaction,"Pong! Bot is connected to Discord.")
 
 
 @bot.tree.command(name="help", description="Shows command information")
@@ -2254,7 +2326,7 @@ async def ping_slash(interaction: discord.Interaction):
 async def help_slash(interaction: discord.Interaction, command_name: str = None):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -2276,10 +2348,10 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
                     params_str = "\n".join([f"**{p.name}**: {p.description}" for p in cmd.parameters])
                     embed.add_field(name="Parameters", value=params_str, inline=False)
 
-                await interaction.response.send_message(embed=embed)
+                await safe_interaction_response(interaction,embed=embed)
                 return
 
-        await interaction.response.send_message(f"Command `{command_name}` not found.", ephemeral=True)
+        await safe_interaction_response(interaction,f"Command `{command_name}` not found.", ephemeral=True)
         return
 
     # Create an embed for the command list
@@ -2457,7 +2529,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         text=f"💡 {total_commands} total commands • {user_commands} user commands • {admin_commands} admin commands • Use /help <command> for details"
     )
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 
 # Error handlers
@@ -2473,11 +2545,11 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     try:
         if isinstance(error, app_commands.errors.CommandNotFound):
             if not interaction.response.is_done():
-                await interaction.response.send_message("Command not found. Use `/help` to see available commands.",
+                await safe_interaction_response(interaction,"Command not found. Use `/help` to see available commands.",
                                                         ephemeral=True)
         elif isinstance(error, app_commands.errors.MissingPermissions):
             if not interaction.response.is_done():
-                await interaction.response.send_message("You don't have permission to use this command.",
+                await safe_interaction_response(interaction,"You don't have permission to use this command.",
                                                         ephemeral=True)
         elif isinstance(error, app_commands.errors.CommandInvokeError):
             if isinstance(error.original, discord.errors.NotFound):
@@ -2486,10 +2558,10 @@ async def on_app_command_error(interaction: discord.Interaction, error):
             else:
                 print(f"Command invoke error: {error.original}")
                 if not interaction.response.is_done():
-                    await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+                    await safe_interaction_response(interaction,"An error occurred. Please try again.", ephemeral=True)
         else:
             if not interaction.response.is_done():
-                await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+                await safe_interaction_response(interaction,"An error occurred. Please try again.", ephemeral=True)
     except Exception as e:
         print(f"Error in error handler: {e}")
 
@@ -2509,7 +2581,7 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
                           global_mmr: str = "false"):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -2517,7 +2589,7 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
@@ -2556,7 +2628,7 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
                 )
                 return
@@ -2581,12 +2653,12 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
                 )
                 return
         else:
-            await interaction.response.send_message(
+            await safe_interaction_response(interaction,
                 f"Player {player.mention} not found in the database and has no rank verification. They need to verify their rank first.",
                 ephemeral=True
             )
@@ -2662,7 +2734,7 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
     embed.set_footer(
         text=f"Adjusted by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 # 3. Reset Leaderboard Command
 @bot.tree.command(name="resetleaderboard", description="Reset the leaderboard (Admin only)")
@@ -2678,7 +2750,7 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
 async def resetleaderboard_slash(interaction: discord.Interaction, confirmation: str, reset_type: str = "all"):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -2686,21 +2758,21 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Check confirmation
     if confirmation != "CONFIRM":
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "❌ Leaderboard reset canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
             ephemeral=True
         )
         return
 
     # Defer response as this operation could take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Create backup collection name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2718,13 +2790,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     reset_count = 0
     roles_removed_count = 0
     role_removal_errors = []
-
-    # Send initial progress message
-    await interaction.followup.send(
-        f"🔄 **Starting {reset_type.upper()} Reset**\n"
-        f"📊 Players to process: **{player_count:,}**\n"
-        f"💾 Backup created: `{backup_collection_name}`"
-    )
 
     if reset_type == "global":
         # Reset only global stats
@@ -2747,11 +2812,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         matches_removed = matches_result.deleted_count
 
     elif reset_type == "ranked":
-        # Reset only ranked stats - ADD PROGRESS UPDATE for large operations
-        if player_count > 50:
-            await interaction.followup.send("⏳ Processing ranked stats reset...", ephemeral=True)
-
-        for i, player in enumerate(all_players):
+        # Reset only ranked stats
+        for player in all_players:
             player_id = player.get("id")
 
             # Look up rank record for default MMR based on tier
@@ -2778,13 +2840,6 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             )
             reset_count += 1
 
-            # Only show progress for very large operations (200+ players)
-            if player_count > 200 and (i + 1) % 100 == 0:
-                await interaction.followup.send(
-                    f"📊 Progress: {i + 1:,}/{player_count:,} players processed",
-                    ephemeral=True
-                )
-
         # Reset ranked matches
         matches_result = system_coordinator.match_system.matches.delete_many({"is_global": {"$ne": True}})
         matches_removed = matches_result.deleted_count
@@ -2797,10 +2852,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
 
-        # 2. ENHANCED DISCORD ROLE REMOVAL with rate limiting
-        await interaction.followup.send("🤖 **Starting Discord role removal...**")
-
-        print("=== STARTING ENHANCED DISCORD ROLE REMOVAL ===")
+        # 2. IMPROVED DISCORD ROLE REMOVAL
+        print("=== STARTING IMPROVED DISCORD ROLE REMOVAL ===")
 
         # Get rank roles
         rank_role_names = ["Rank A", "Rank B", "Rank C"]
@@ -2816,90 +2869,88 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         else:
             print(f"Found {len(rank_roles)} rank roles")
 
-            # Get ALL guild members (KEEP YOUR EXISTING LOGIC)
+            # Get ALL guild members (not just from database)
+            all_guild_members = []
+
+            # Method 1: Try to get all members from guild cache first
             print(f"Guild member count from cache: {interaction.guild.member_count}")
             cached_members = list(interaction.guild.members)
             print(f"Actually cached members: {len(cached_members)}")
 
             if len(cached_members) < interaction.guild.member_count:
+                # Cache might be incomplete, try to fetch more
                 print("Cache appears incomplete, attempting to fetch more members...")
                 try:
+                    # Try to fetch all members with chunking
                     await interaction.guild.chunk(cache=True)
                     cached_members = list(interaction.guild.members)
                     print(f"After chunking: {len(cached_members)} members")
                 except Exception as e:
                     print(f"Error during chunking: {e}")
 
-            # Process each cached member with SMART RATE LIMITING
+            # Process each cached member
             processed_count = 0
-            members_with_roles = []
-
-            # First, collect all members who need role removal
             for member in cached_members:
+                # Skip bots
                 if member.bot:
                     continue
 
-                member_rank_roles = [role for role in member.roles if role.name in rank_role_names]
-                if member_rank_roles:
-                    members_with_roles.append((member, member_rank_roles))
+                try:
+                    # Check if member has any rank roles
+                    member_rank_roles = [role for role in member.roles if role.name in rank_role_names]
 
-            # Now process them with rate limiting
-            if members_with_roles:
-                total_members = len(members_with_roles)
-                print(f"Found {total_members} members with roles to remove")
+                    if member_rank_roles:
+                        print(
+                            f"Processing member: {member.display_name} (ID: {member.id}) with roles: {[r.name for r in member_rank_roles]}")
 
-                for i, (member, member_rank_roles) in enumerate(members_with_roles):
-                    try:
-                        # Use rate-limited role removal if available, otherwise use regular method
-                        if 'rate_limiter' in globals():
-                            await rate_limiter.remove_role_with_limit(
-                                member, *member_rank_roles, reason="Complete leaderboard reset"
-                            )
-                        else:
-                            # Fallback to your original method
-                            await member.remove_roles(*member_rank_roles, reason="Complete leaderboard reset")
-                            await asyncio.sleep(0.2)  # Reduced delay since we're being smarter
+                        try:
+                            # Remove all rank roles from this member
+                            await remove_discord_role_rate_limited(member, *member_rank_roles, reason="Complete leaderboard reset")
+                            roles_removed_count += 1
+                            print(f"✅ Removed {len(member_rank_roles)} rank role(s) from {member.display_name}")
 
-                        roles_removed_count += 1
-                        print(f"✅ Removed {len(member_rank_roles)} rank role(s) from {member.display_name}")
+                            # Small delay to avoid rate limits
+                            await asyncio.sleep(0.3)
 
-                    except discord.Forbidden:
-                        error_msg = f"No permission to remove roles from {member.display_name}"
-                        print(f"❌ {error_msg}")
-                        role_removal_errors.append(error_msg)
-                    except discord.HTTPException as e:
-                        error_msg = f"HTTP error removing roles from {member.display_name}: {e}"
-                        print(f"❌ {error_msg}")
-                        role_removal_errors.append(error_msg)
-                    except Exception as e:
-                        error_msg = f"Unexpected error removing roles from {member.display_name}: {e}"
-                        print(f"❌ {error_msg}")
-                        role_removal_errors.append(error_msg)
+                        except discord.Forbidden:
+                            error_msg = f"No permission to remove roles from {member.display_name}"
+                            print(f"❌ {error_msg}")
+                            role_removal_errors.append(error_msg)
+                        except discord.HTTPException as e:
+                            error_msg = f"HTTP error removing roles from {member.display_name}: {e}"
+                            print(f"❌ {error_msg}")
+                            role_removal_errors.append(error_msg)
+                        except Exception as e:
+                            error_msg = f"Unexpected error removing roles from {member.display_name}: {e}"
+                            print(f"❌ {error_msg}")
+                            role_removal_errors.append(error_msg)
 
                     processed_count += 1
 
-                    # Only update for very large operations to avoid spam
-                    if total_members > 100 and processed_count % 50 == 0:
-                        await interaction.followup.send(
-                            f"⚡ Progress: {processed_count}/{total_members} members processed",
-                            ephemeral=True
-                        )
+                except Exception as e:
+                    error_msg = f"Error processing member {member.display_name}: {e}"
+                    print(f"❌ {error_msg}")
+                    role_removal_errors.append(error_msg)
+                    continue
 
-            print(f"=== ROLE REMOVAL COMPLETE: Processed {processed_count} members ===")
+            print(
+                f"=== ROLE REMOVAL COMPLETE: Processed {processed_count} members, removed roles from {roles_removed_count} members ===")
 
-            # KEEP YOUR DATABASE PLAYER FALLBACK LOGIC
+            # If we couldn't find many members with roles, also check database players
             if roles_removed_count == 0 and all_players:
                 print("No members found with roles via guild cache, checking database players...")
 
                 for player in all_players:
                     player_id = player.get("id")
 
+                    # Skip dummy players
                     if not player_id or player_id.startswith('9000'):
                         continue
 
                     try:
                         member = interaction.guild.get_member(int(player_id))
                         if not member:
+                            # Try to fetch if not in cache
                             try:
                                 member = await interaction.guild.fetch_member(int(player_id))
                             except (discord.NotFound, discord.HTTPException):
@@ -2907,22 +2958,15 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
                                 continue
 
                         if member:
+                            # Check if member has any rank roles
                             member_rank_roles = [role for role in member.roles if role.name in rank_role_names]
 
                             if member_rank_roles:
                                 try:
-                                    # Use rate-limited removal if available
-                                    if 'rate_limiter' in globals():
-                                        await rate_limiter.remove_role_with_limit(
-                                            member, *member_rank_roles, reason="Complete leaderboard reset"
-                                        )
-                                    else:
-                                        await member.remove_roles(*member_rank_roles,
-                                                                  reason="Complete leaderboard reset")
-                                        await asyncio.sleep(0.2)
-
+                                    await remove_discord_role_rate_limited(member, *member_rank_roles, reason="Complete leaderboard reset")
                                     roles_removed_count += 1
                                     print(f"✅ Removed roles from database player: {member.display_name}")
+                                    await asyncio.sleep(0.3)
                                 except Exception as e:
                                     error_msg = f"Error removing roles from {member.display_name}: {e}"
                                     role_removal_errors.append(error_msg)
@@ -2960,7 +3004,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         "role_removal_errors_count": len(role_removal_errors) if reset_type == "all" else 0
     })
 
-    # Send detailed completion report (KEEP YOUR EXISTING EMBED STRUCTURE)
+    # Send detailed completion report
     embed = discord.Embed(
         title="🔄 Leaderboard Reset Complete",
         description=f"Reset type: **{reset_type.upper()}**",
@@ -2969,7 +3013,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
     embed.add_field(
         name="Database Reset",
-        value=f"Players affected: {reset_count:,}/{player_count:,}\nMatches removed: {matches_removed:,}",
+        value=f"Players affected: {reset_count}/{player_count}\nMatches removed: {matches_removed}",
         inline=False
     )
 
@@ -2982,17 +3026,18 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     if reset_type == "all":
         embed.add_field(
             name="Discord Role Removal",
-            value=f"✅ Removed roles from: **{roles_removed_count:,}** members\n❌ Errors encountered: **{len(role_removal_errors):,}** members",
+            value=f"✅ Removed roles from: **{roles_removed_count}** members\n❌ Errors encountered: **{len(role_removal_errors)}** members",
             inline=False
         )
 
         embed.add_field(
             name="Rank Verification Reset",
-            value=f"**{ranks_removed:,}** rank verifications removed. All players must re-verify.",
+            value=f"**{ranks_removed}** rank verifications removed. All players must re-verify.",
             inline=False
         )
 
         if role_removal_errors and len(role_removal_errors) <= 10:
+            # Show errors if there are 10 or fewer
             error_sample = "\n".join(role_removal_errors)
             embed.add_field(
                 name="Role Removal Issues",
@@ -3000,6 +3045,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
                 inline=False
             )
         elif role_removal_errors:
+            # Show sample of errors if there are many
             error_sample = "\n".join(role_removal_errors[:3])
             error_sample += f"\n... and {len(role_removal_errors) - 3} more"
             embed.add_field(
@@ -3008,20 +3054,12 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
                 inline=False
             )
 
-    # Add performance note if rate limiter was used
-    if 'rate_limiter' in globals():
-        embed.add_field(
-            name="⚡ Performance",
-            value="Enhanced with smart rate limiting for optimal Discord API compliance",
-            inline=False
-        )
-
     embed.set_footer(
         text=f"Reset by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    await interaction.followup.send(embed=embed)
+    await safe_followup_send(interaction,embed=embed)
 
-    # Final announcement for complete reset (KEEP YOUR EXISTING LOGIC)
+    # Final announcement for complete reset
     if reset_type == "all":
         announcement = discord.Embed(
             title="🔄 Complete Season Reset",
@@ -3032,7 +3070,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         announcement.add_field(
             name="🚨 IMPORTANT: Complete Reset Performed 🚨",
             value=(
-                f"**{roles_removed_count:,}** members had their Discord rank roles removed.\n"
+                f"**{roles_removed_count}** members had their Discord rank roles removed.\n"
                 f"**All players must re-verify their ranks** before joining queues again."
             ),
             inline=False
@@ -3051,11 +3089,14 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if role_removal_errors:
             announcement.add_field(
                 name="Manual Review Required",
-                value=f"⚠️ {len(role_removal_errors):,} members may need manual role removal by an admin.",
+                value=f"⚠️ {len(role_removal_errors)} members may need manual role removal by an admin.",
                 inline=False
             )
 
         await interaction.channel.send(embed=announcement)
+
+
+# Add this command to your main.py file, after the other slash commands
 
 @bot.tree.command(name="resetplayer", description="Reset all data for a specific player (Admin only)")
 @app_commands.describe(
@@ -3065,7 +3106,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 async def resetplayer_slash(interaction: discord.Interaction, member: discord.Member, confirmation: str):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -3073,21 +3114,21 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Check confirmation
     if confirmation != "CONFIRM":
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "❌ Player reset canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
             ephemeral=True
         )
         return
 
     # Defer response as this operation could take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     player_id = str(member.id)
     player_name = member.display_name
@@ -3095,7 +3136,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
     # Check if player is currently in an active match
     if player_id in system_coordinator.queue_manager.player_matches:
         match_id = system_coordinator.queue_manager.player_matches[player_id]
-        await interaction.followup.send(
+        await safe_followup_send(interaction,
             f"❌ Cannot reset {member.mention} - they are currently in an active match (ID: `{match_id}`). "
             "Please wait for the match to complete or use `/removeactivematches` first.",
             ephemeral=True
@@ -3296,7 +3337,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
         text=f"Reset by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
 
-    await interaction.followup.send(embed=embed)
+    await safe_followup_send(interaction,embed=embed)
 
     # Send a DM to the player (optional, with error handling)
     try:
@@ -3351,7 +3392,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
                     player_in: discord.Member):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -3359,7 +3400,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 
     # Check if user has permissions - FIXED: Use the correct function name
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
@@ -3368,12 +3409,12 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
 
     if not match:
-        await interaction.response.send_message(f"Match with ID `{match_id}` not found.", ephemeral=True)
+        await safe_interaction_response(interaction,f"Match with ID `{match_id}` not found.", ephemeral=True)
         return
 
     # Check if match is in progress
     if match.get("status") != "in_progress":
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"Match with ID `{match_id}` is not in progress (status: {match.get('status')}). " +
             "Substitutions are only available for in-progress matches.",
             ephemeral=True
@@ -3417,7 +3458,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
                 break
 
     if not player_found:
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{player_out_mention} is not part of match `{match_id}`.",
             ephemeral=True
         )
@@ -3427,7 +3468,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     player_in_match = system_coordinator.queue_manager.get_player_match(player_in_id)
 
     if player_in_match and player_in_match.get("match_id") != match_id:
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{player_in_mention} is already in another active match and cannot be substituted.",
             ephemeral=True
         )
@@ -3437,7 +3478,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     player_in_this_match = any(p.get("id") == player_in_id for p in team1 + team2)
 
     if player_in_this_match:
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{player_in_mention} is already part of match `{match_id}`.",
             ephemeral=True
         )
@@ -3506,7 +3547,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     embed.set_footer(
         text=f"Requested by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 
 @bot.tree.command(name="streak", description="Check your current streak or another player's streak")
@@ -3514,7 +3555,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 async def streak_slash(interaction: discord.Interaction, member: discord.Member = None):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -3528,7 +3569,7 @@ async def streak_slash(interaction: discord.Interaction, member: discord.Member 
     player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
     if not player_data:
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{member.mention} hasn't played any matches yet. No streak information available.",
             ephemeral=True
         )
@@ -3723,7 +3764,7 @@ async def streak_slash(interaction: discord.Interaction, member: discord.Member 
         elif global_current_streak < 0:
             embed.color = 0xf04747  # Red for loss streak
 
-    await interaction.response.send_message(embed=embed)
+    await safe_interaction_response(interaction,embed=embed)
 
 
 @bot.tree.command(name="topstreaks", description="Show players with the highest win or loss streaks (Admin only)")
@@ -3749,7 +3790,7 @@ async def topstreaks_slash(
 ):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -3757,7 +3798,7 @@ async def topstreaks_slash(
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
@@ -3766,7 +3807,7 @@ async def topstreaks_slash(
     limit = max(1, min(25, limit))
 
     # Start deferred response since this might take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     try:
         # Determine if we're looking at ranked or global mode
@@ -3817,7 +3858,7 @@ async def topstreaks_slash(
                            .limit(limit))
 
         if not players:
-            await interaction.followup.send(f"No players found with {mode_prefix.lower()}{streak_type} streaks.")
+            await safe_followup_send(interaction,f"No players found with {mode_prefix.lower()}{streak_type} streaks.")
             return
 
         # Create embed
@@ -3914,13 +3955,13 @@ async def topstreaks_slash(
             )
 
         # Send response
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     except Exception as e:
         print(f"Error in topstreaks command: {e}")
         import traceback
         traceback.print_exc()
-        await interaction.followup.send(f"Error retrieving streak data: {str(e)}")
+        await safe_followup_send(interaction,f"Error retrieving streak data: {str(e)}")
 
 @bot.tree.command(name="resetstreak", description="Reset a player's streak (Admin only)")
 @app_commands.describe(
@@ -3934,7 +3975,7 @@ async def topstreaks_slash(
 async def resetstreak_slash(interaction: discord.Interaction, member: discord.Member, reset_type: str):
             # Check if command is used in an allowed channel
             if not is_command_channel(interaction.channel):
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
                     ephemeral=True
                 )
@@ -3942,7 +3983,7 @@ async def resetstreak_slash(interaction: discord.Interaction, member: discord.Me
 
             # Check if user has admin permissions
             if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     "You need administrator permissions or the 6mod role to use this command.",
                     ephemeral=True)
                 return
@@ -3951,7 +3992,7 @@ async def resetstreak_slash(interaction: discord.Interaction, member: discord.Me
             player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
             if not player_data:
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"{member.mention} hasn't played any matches. No streak information to reset.",
                     ephemeral=True
                 )
@@ -3991,25 +4032,25 @@ async def resetstreak_slash(interaction: discord.Interaction, member: discord.Me
             )
 
             if result.modified_count > 0:
-                await interaction.response.send_message(success_message)
+                await safe_interaction_response(interaction,success_message)
             else:
-                await interaction.response.send_message(
+                await safe_interaction_response(interaction,
                     f"Failed to reset streak for {member.mention}. No changes were made.")
 
 
 @bot.tree.command(name="debugmmr", description="Debug MMR storage issue (Admin only)")
 async def debug_mmr_issue(interaction: discord.Interaction, match_id: str):
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message("Admin only", ephemeral=True)
+        await safe_interaction_response(interaction,"Admin only", ephemeral=True)
         return
 
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Check if match exists in database
     match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
 
     if not match:
-        await interaction.followup.send(f"❌ Match `{match_id}` not found in database!")
+        await safe_followup_send(interaction,f"❌ Match `{match_id}` not found in database!")
         return
 
     # Get match details
@@ -4115,31 +4156,31 @@ async def debug_mmr_issue(interaction: discord.Interaction, match_id: str):
 
         for i, chunk in enumerate(chunks):
             if i == 0:
-                await interaction.followup.send(chunk)
+                await safe_followup_send(interaction,chunk)
             else:
-                await interaction.followup.send(chunk)
+                await safe_followup_send(interaction,chunk)
     else:
-        await interaction.followup.send(debug_text)
+        await safe_followup_send(interaction,debug_text)
 
 
 # Also add this command to manually test MMR calculation
 @bot.tree.command(name="testmmr", description="Test MMR calculation manually (Admin only)")
 async def test_mmr_calculation(interaction: discord.Interaction, match_id: str):
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message("Admin only", ephemeral=True)
+        await safe_interaction_response(interaction,"Admin only", ephemeral=True)
         return
 
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     # Find the match
     match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
     if not match:
-        await interaction.followup.send(f"Match `{match_id}` not found!")
+        await safe_followup_send(interaction,f"Match `{match_id}` not found!")
         return
 
     # Check if match is completed
     if match.get("status") != "completed":
-        await interaction.followup.send(f"Match `{match_id}` is not completed yet (status: {match.get('status')})")
+        await safe_followup_send(interaction,f"Match `{match_id}` is not completed yet (status: {match.get('status')})")
         return
 
     # Get your player data
@@ -4160,14 +4201,14 @@ async def test_mmr_calculation(interaction: discord.Interaction, match_id: str):
         result_text += "❌ No player data found for you in the database!\n"
         result_text += "This means you haven't played any matches yet or there's a database issue.\n"
 
-    await interaction.followup.send(result_text)
+    await safe_followup_send(interaction,result_text)
 
 
 @bot.tree.command(name="streakstats", description="Show server-wide streak statistics (Admin only)")
 async def streakstats_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
             ephemeral=True
         )
@@ -4175,13 +4216,13 @@ async def streakstats_slash(interaction: discord.Interaction):
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message(
+        await safe_interaction_response(interaction,
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
 
     # Start deferred response since this might take time
-    await interaction.response.defer()
+    await safe_interaction_defer(interaction)
 
     try:
         # Get overall stats with aggregation pipeline
@@ -4207,7 +4248,7 @@ async def streakstats_slash(interaction: discord.Interaction):
         stats = list(system_coordinator.match_system.players.aggregate(pipeline))
 
         if not stats or not stats[0]:
-            await interaction.followup.send("No streak statistics available - no players found.")
+            await safe_followup_send(interaction,"No streak statistics available - no players found.")
             return
 
         stats = stats[0]  # Get the first (and only) result
@@ -4215,7 +4256,7 @@ async def streakstats_slash(interaction: discord.Interaction):
         # Calculate percentages safely
         total_players = stats.get("total_players", 0)
         if total_players == 0:
-            await interaction.followup.send("No players found to generate statistics.")
+            await safe_followup_send(interaction,"No players found to generate statistics.")
             return
 
         players_with_win_streaks = stats.get("players_with_win_streaks", 0) or 0
@@ -4329,13 +4370,13 @@ async def streakstats_slash(interaction: discord.Interaction):
         embed.set_footer(text=f"Data as of {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
         # Send response
-        await interaction.followup.send(embed=embed)
+        await safe_followup_send(interaction,embed=embed)
 
     except Exception as e:
         print(f"Error in streakstats command: {e}")
         import traceback
         traceback.print_exc()
-        await interaction.followup.send(f"Error retrieving streak statistics: {str(e)}")
+        await safe_followup_send(interaction,f"Error retrieving streak statistics: {str(e)}")
 
 # Helper function for streak stats by rank (with safe None handling)
 async def get_rank_stats_safe(players_collection, min_mmr, max_mmr=None):
