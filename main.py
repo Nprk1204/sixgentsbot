@@ -2678,29 +2678,29 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
 async def resetleaderboard_slash(interaction: discord.Interaction, confirmation: str, reset_type: str = "all"):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
-        await safe_interaction_response(interaction,
-                                        f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-                                        ephemeral=True
-                                        )
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
         return
 
     # Check if user has admin permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await safe_interaction_response(interaction,
-                                        "You need administrator permissions or the 6mod role to use this command.",
-                                        ephemeral=True)
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True)
         return
 
     # Check confirmation
     if confirmation != "CONFIRM":
-        await safe_interaction_response(interaction,
-                                        "❌ Leaderboard reset canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
-                                        ephemeral=True
-                                        )
+        await interaction.response.send_message(
+            "❌ Leaderboard reset canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
+            ephemeral=True
+        )
         return
 
     # Defer response as this operation could take time
-    await safe_interaction_defer(interaction)
+    await interaction.response.defer()
 
     # Create backup collection name with timestamp
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -2780,7 +2780,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
 
-        # 2. OPTIMIZED DISCORD ROLE REMOVAL
+        # 2. OPTIMIZED DISCORD ROLE REMOVAL using the rate limiter
         print("=== STARTING OPTIMIZED DISCORD ROLE REMOVAL ===")
 
         # Get rank roles once
@@ -2795,7 +2795,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if rank_roles:
             print(f"Found {len(rank_roles)} rank roles")
 
-            # OPTIMIZATION 1: Batch collect all members with rank roles in one pass
+            # Collect all members with rank roles in one pass
             members_with_roles = []
 
             print("Collecting all members with rank roles...")
@@ -2809,7 +2809,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
             print(f"Found {len(members_with_roles)} members with rank roles")
 
-            # OPTIMIZATION 2: Process members in batches with your existing rate-limited function
+            # Process members using the existing rate limiter
             batch_size = 5  # Process 5 members at a time
 
             for i in range(0, len(members_with_roles), batch_size):
@@ -2818,9 +2818,9 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
                 # Process each member in this batch
                 for member, member_rank_roles in batch:
                     try:
-                        # Use your existing rate-limited role removal function
-                        for role in member_rank_roles:
-                            await remove_discord_role_rate_limited(member, role, reason="Complete leaderboard reset")
+                        # Use the existing rate-limited role removal function
+                        await remove_discord_role_rate_limited(member, *member_rank_roles,
+                                                               reason="Complete leaderboard reset")
 
                         roles_removed_count += 1
                         print(f"✅ Removed {len(member_rank_roles)} role(s) from {member.display_name}")
@@ -2927,7 +2927,7 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
     embed.set_footer(
         text=f"Reset by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    await safe_followup_send(interaction, embed=embed)
+    await interaction.followup.send(embed=embed)
 
     # Final announcement for complete reset
     if reset_type == "all":
@@ -2964,6 +2964,19 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             )
 
         await interaction.channel.send(embed=announcement)
+
+
+async def remove_discord_role_rate_limited(member, *roles, reason=None):
+    """
+    Rate-limited role removal using the existing rate limiter
+    """
+    try:
+        # Use the rate limiter from your main.py
+        await rate_limiter.remove_role_with_limit(member, *roles, reason=reason)
+        return True
+    except Exception as e:
+        print(f"Error removing roles from {member.display_name}: {e}")
+        raise  # Re-raise to be caught by the calling code
 
 @bot.tree.command(name="resetplayer", description="Reset all data for a specific player (Admin only)")
 @app_commands.describe(
