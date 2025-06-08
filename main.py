@@ -2780,8 +2780,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if all_ranks:
             backup_ranks_collection.insert_many(all_ranks)
 
-        # 2. OPTIMIZED DISCORD ROLE REMOVAL using the rate limiter
-        print("=== STARTING OPTIMIZED DISCORD ROLE REMOVAL ===")
+        # 2. FIXED DISCORD ROLE REMOVAL - Use the existing rate limiter properly
+        print("=== STARTING SAFE DISCORD ROLE REMOVAL ===")
 
         # Get rank roles once
         rank_role_names = ["Rank A", "Rank B", "Rank C"]
@@ -2795,61 +2795,27 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
         if rank_roles:
             print(f"Found {len(rank_roles)} rank roles")
 
-            # Collect all members with rank roles in one pass
-            members_with_roles = []
+            # FIXED: Use the existing BulkOperationHelper for safe role removal
+            try:
+                await interaction.followup.send("🔄 Starting Discord role removal (this may take a few minutes)...",
+                                                ephemeral=True)
 
-            print("Collecting all members with rank roles...")
-            for member in interaction.guild.members:
-                if member.bot:
-                    continue
+                # Use the existing bulk operation helper
+                removal_results = await bulk_helper.bulk_role_removal_with_progress(
+                    guild=interaction.guild,
+                    role_names=rank_role_names,
+                    interaction=interaction,
+                    progress_messages=True
+                )
 
-                member_rank_roles = [role for role in member.roles if role.name in rank_role_names]
-                if member_rank_roles:
-                    members_with_roles.append((member, member_rank_roles))
+                roles_removed_count = removal_results['success_count']
+                role_removal_errors = removal_results['errors']
 
-            print(f"Found {len(members_with_roles)} members with rank roles")
+                print(f"✅ Role removal complete: {roles_removed_count} successes, {len(role_removal_errors)} errors")
 
-            # Process members using the existing rate limiter
-            batch_size = 5  # Process 5 members at a time
-
-            for i in range(0, len(members_with_roles), batch_size):
-                batch = members_with_roles[i:i + batch_size]
-
-                # Process each member in this batch
-                for member, member_rank_roles in batch:
-                    try:
-                        # Use the existing rate-limited role removal function
-                        await remove_discord_role_rate_limited(member, *member_rank_roles,
-                                                               reason="Complete leaderboard reset")
-
-                        roles_removed_count += 1
-                        print(f"✅ Removed {len(member_rank_roles)} role(s) from {member.display_name}")
-
-                        # Small delay between members in the same batch
-                        await asyncio.sleep(0.1)
-
-                    except discord.Forbidden:
-                        error_msg = f"No permission to remove roles from {member.display_name}"
-                        print(f"❌ {error_msg}")
-                        role_removal_errors.append(error_msg)
-                    except discord.HTTPException as e:
-                        error_msg = f"HTTP error removing roles from {member.display_name}: {e}"
-                        print(f"❌ {error_msg}")
-                        role_removal_errors.append(error_msg)
-                    except Exception as e:
-                        error_msg = f"Unexpected error removing roles from {member.display_name}: {e}"
-                        print(f"❌ {error_msg}")
-                        role_removal_errors.append(error_msg)
-
-                # Delay between batches
-                if i + batch_size < len(members_with_roles):
-                    await asyncio.sleep(0.5)
-
-                # Progress update
-                progress = min(i + batch_size, len(members_with_roles))
-                print(f"Progress: {progress}/{len(members_with_roles)} members processed")
-
-            print(f"=== ROLE REMOVAL COMPLETE: Removed roles from {roles_removed_count} members ===")
+            except Exception as role_error:
+                print(f"❌ Error in bulk role removal: {role_error}")
+                role_removal_errors.append(f"Bulk removal failed: {str(role_error)}")
 
         # 3. DELETE all player records
         players_removed = system_coordinator.match_system.players.delete_many({}).deleted_count
@@ -2908,19 +2874,18 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             inline=False
         )
 
-        if role_removal_errors and len(role_removal_errors) <= 10:
-            error_sample = "\n".join(role_removal_errors)
+        # FIXED: Only show first few errors to prevent message length issues
+        if role_removal_errors and len(role_removal_errors) <= 3:
+            error_sample = "\n".join(role_removal_errors[:3])
             embed.add_field(
                 name="Role Removal Issues",
                 value=f"```{error_sample}```",
                 inline=False
             )
-        elif role_removal_errors:
-            error_sample = "\n".join(role_removal_errors[:3])
-            error_sample += f"\n... and {len(role_removal_errors) - 3} more"
+        elif len(role_removal_errors) > 3:
             embed.add_field(
-                name="Role Removal Issues (Sample)",
-                value=f"```{error_sample}```",
+                name="Role Removal Issues",
+                value=f"**{len(role_removal_errors)}** errors occurred. Check logs for details.",
                 inline=False
             )
 

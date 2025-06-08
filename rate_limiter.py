@@ -483,3 +483,113 @@ async def send_progress_update(rate_limiter: DiscordRateLimiter, channel, messag
         await asyncio.sleep(delay)  # Additional delay for readability
     except Exception as e:
         logging.error(f"Failed to send progress update: {e}")
+
+    async def handle_rate_limit_with_backoff(self, func, *args, max_retries=3, **kwargs):
+        """Handle rate limits with exponential backoff"""
+        for attempt in range(max_retries):
+            try:
+                return await func(*args, **kwargs)
+            except discord.HTTPException as e:
+                if e.status == 429:  # Rate limited
+                    retry_after = getattr(e, 'retry_after', 2 ** attempt)
+                    print(f"Rate limited, waiting {retry_after}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(retry_after)
+                    continue
+                elif e.status == 403:  # Forbidden - might be permissions issue
+                    print(f"Permission denied for operation: {e}")
+                    raise
+                else:
+                    print(f"HTTP error {e.status}: {e}")
+                    raise
+            except Exception as e:
+                print(f"Unexpected error in rate limit handler: {e}")
+                if attempt == max_retries - 1:
+                    raise
+                await asyncio.sleep(2 ** attempt)
+
+        raise Exception(f"Failed after {max_retries} attempts")
+
+
+# 2. Improved role removal function with better error handling
+async def safe_bulk_role_removal(guild, role_names, max_concurrent=5, delay_between_batches=2.0):
+    """
+    Safely remove roles from all members with strict rate limiting
+    """
+    # Find all roles to remove
+    roles_to_remove = [discord.utils.get(guild.roles, name=name) for name in role_names]
+    roles_to_remove = [role for role in roles_to_remove if role is not None]
+
+    if not roles_to_remove:
+        return {"success": 0, "errors": [], "message": "No roles found to remove"}
+
+    # Find members with these roles
+    members_with_roles = []
+    for member in guild.members:
+        if member.bot:
+            continue
+        member_roles = [role for role in member.roles if role in roles_to_remove]
+        if member_roles:
+            members_with_roles.append((member, member_roles))
+
+    if not members_with_roles:
+        return {"success": 0, "errors": [], "message": "No members found with specified roles"}
+
+    print(f"Found {len(members_with_roles)} members with roles to remove")
+
+    success_count = 0
+    errors = []
+
+    # Process in small batches with delays
+    for i in range(0, len(members_with_roles), max_concurrent):
+        batch = members_with_roles[i:i + max_concurrent]
+
+        # Process each member in the batch
+        batch_tasks = []
+        for member, member_roles in batch:
+            async def remove_roles_for_member(m, roles):
+                try:
+                    await m.remove_roles(*roles, reason="Leaderboard reset")
+                    return True, None
+                except discord.Forbidden:
+                    return False, f"No permission to remove roles from {m.display_name}"
+                except discord.HTTPException as e:
+                    if e.status == 429:
+                        # Wait and retry once
+                        await asyncio.sleep(getattr(e, 'retry_after', 5))
+                        try:
+                            await m.remove_roles(*roles, reason="Leaderboard reset - retry")
+                            return True, None
+                        except Exception as retry_error:
+                            return False, f"Rate limited retry failed for {m.display_name}: {str(retry_error)}"
+                    else:
+                        return False, f"HTTP error for {m.display_name}: {str(e)}"
+                except Exception as e:
+                    return False, f"Unexpected error for {m.display_name}: {str(e)}"
+
+            batch_tasks.append(remove_roles_for_member(member, member_roles))
+
+        # Wait for all tasks in this batch to complete
+        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+        # Process results
+        for result in batch_results:
+            if isinstance(result, Exception):
+                errors.append(f"Task exception: {str(result)}")
+            elif result[0]:  # Success
+                success_count += 1
+            else:  # Error
+                errors.append(result[1])
+
+        # Progress update
+        progress = min(i + max_concurrent, len(members_with_roles))
+        print(f"Processed {progress}/{len(members_with_roles)} members (✅ {success_count} ❌ {len(errors)})")
+
+        # Delay between batches to respect rate limits
+        if i + max_concurrent < len(members_with_roles):
+            await asyncio.sleep(delay_between_batches)
+
+    return {
+        "success": success_count,
+        "errors": errors,
+        "message": f"Completed: {success_count} successful, {len(errors)} errors"
+    }
