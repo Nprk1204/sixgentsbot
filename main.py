@@ -22,6 +22,9 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 MONGO_URI = os.getenv('MONGO_URI')
 
+RESET_IN_PROGRESS = False
+RESET_START_TIME = None
+
 # Set up logging
 handler = logging.FileHandler(filename='discord.log', encoding='utf-8', mode='w')
 intents = discord.Intents.default()
@@ -217,6 +220,26 @@ async def on_reaction_add(reaction, user):
 # Updated queue command - optimized for speed, no defer
 @bot.tree.command(name="queue", description="Join the queue for 6 mans")
 async def queue_slash(interaction: discord.Interaction):
+    global RESET_IN_PROGRESS, RESET_START_TIME
+    if RESET_IN_PROGRESS:
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Queuing Disabled",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Queuing will be re-enabled automatically\n• Check back in a few minutes",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Check channel first
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
@@ -365,6 +388,13 @@ async def queue_slash(interaction: discord.Interaction):
 # FIXED: Leave command with proper interaction handling
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
+    if RESET_IN_PROGRESS:
+        await interaction.response.send_message(
+            "⛔ Queue operations are disabled during leaderboard reset. Please wait for completion.",
+            ephemeral=True
+        )
+        return
+
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, or global channels.",
@@ -585,6 +615,13 @@ async def status_slash(interaction: discord.Interaction):
     app_commands.Choice(name="Loss", value="loss")
 ])
 async def report_slash(interaction: discord.Interaction, match_id: str, result: str):
+    if RESET_IN_PROGRESS:
+        await interaction.response.send_message(
+            "⛔ Match reporting is disabled during leaderboard reset. Please wait for completion.",
+            ephemeral=True
+        )
+        return
+
     # Create context for backward compatibility
     ctx = SimpleContext(interaction)
 
@@ -2664,9 +2701,58 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
 
     await interaction.response.send_message(embed=embed)
 
-# 3. Reset Leaderboard Command
-# main.py - COMPLETELY FIXED resetleaderboard command
 
+async def set_reset_status(status: bool, interaction=None):
+    """Set the reset status and notify channels"""
+    global RESET_IN_PROGRESS, RESET_START_TIME
+
+    RESET_IN_PROGRESS = status
+
+    if status:
+        RESET_START_TIME = datetime.datetime.now()
+        if interaction:
+            # Notify all queue channels that reset is starting
+            for guild in bot.guilds:
+                for channel in guild.text_channels:
+                    if channel.name.lower() in ["rank-a", "rank-b", "rank-c", "global"]:
+                        try:
+                            embed = discord.Embed(
+                                title="🚨 RESET IN PROGRESS",
+                                description="⛔ **Queuing is temporarily disabled**\n\nA leaderboard reset is currently running. Please wait for completion.",
+                                color=0xff0000
+                            )
+                            embed.add_field(
+                                name="What's Happening",
+                                value="• Database is being reset\n• Discord roles may be updated\n• This may take several minutes",
+                                inline=False
+                            )
+                            embed.set_footer(text=f"Reset started by {interaction.user.display_name}")
+                            await channel.send(embed=embed)
+                        except Exception as e:
+                            print(f"Error notifying channel {channel.name}: {e}")
+    else:
+        RESET_START_TIME = None
+        if interaction:
+            # Notify that reset is complete
+            for guild in bot.guilds:
+                for channel in guild.text_channels:
+                    if channel.name.lower() in ["rank-a", "rank-b", "rank-c", "global"]:
+                        try:
+                            embed = discord.Embed(
+                                title="✅ RESET COMPLETE",
+                                description="🎉 **Queuing is now re-enabled!**\n\nThe leaderboard reset has finished successfully.",
+                                color=0x00ff00
+                            )
+                            embed.add_field(
+                                name="Ready to Play",
+                                value="• Use `/queue` to join matches\n• Check `/rank` for your stats\n• Visit the website for leaderboards",
+                                inline=False
+                            )
+                            await channel.send(embed=embed)
+                        except Exception as e:
+                            print(f"Error notifying channel {channel.name}: {e}")
+
+# 3. Reset Leaderboard Command
 @bot.tree.command(name="resetleaderboard", description="Reset the leaderboard (Admin only)")
 @app_commands.describe(
     confirmation="Type 'CONFIRM' to confirm the reset",
@@ -2693,6 +2779,14 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             ephemeral=True)
         return
 
+    global RESET_IN_PROGRESS
+    if RESET_IN_PROGRESS:
+        await interaction.response.send_message(
+            "❌ A reset is already in progress! Please wait for it to complete.",
+            ephemeral=True
+        )
+        return
+
     # Check confirmation
     if confirmation != "CONFIRM":
         await interaction.response.send_message(
@@ -2700,6 +2794,8 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
             ephemeral=True
         )
         return
+
+    await set_reset_status(True, interaction)
 
     # IMMEDIATE response to prevent timeout
     await interaction.response.send_message(
@@ -2917,11 +3013,14 @@ async def perform_reset_background(interaction: discord.Interaction, reset_type:
             )
 
             await safe_send_message(channel, embed=announcement)
+            await set_reset_status(False, interaction)
 
     except Exception as e:
         print(f"Error in background reset: {e}")
         import traceback
         traceback.print_exc()
+
+        await set_reset_status(False, interaction)
 
         error_embed = discord.Embed(
             title="❌ Reset Error",
