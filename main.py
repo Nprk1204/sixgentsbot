@@ -389,10 +389,22 @@ async def queue_slash(interaction: discord.Interaction):
 @bot.tree.command(name="leave", description="Leave the queue")
 async def leave_slash(interaction: discord.Interaction):
     if RESET_IN_PROGRESS:
-        await interaction.response.send_message(
-            "⛔ Queue operations are disabled during leaderboard reset. Please wait for completion.",
-            ephemeral=True
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Queuing Disabled",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
         )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Queuing will be re-enabled automatically\n• Check back in a few minutes",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
     if not is_queue_channel(interaction.channel):
@@ -554,6 +566,25 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 
 @bot.tree.command(name="status", description="Shows the current queue status")
 async def status_slash(interaction: discord.Interaction):
+    if RESET_IN_PROGRESS:
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Queue Status Unavailable",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Queue status will be available after reset\n• All queues are currently disabled",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
@@ -616,10 +647,22 @@ async def status_slash(interaction: discord.Interaction):
 ])
 async def report_slash(interaction: discord.Interaction, match_id: str, result: str):
     if RESET_IN_PROGRESS:
-        await interaction.response.send_message(
-            "⛔ Match reporting is disabled during leaderboard reset. Please wait for completion.",
-            ephemeral=True
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Match Reporting Disabled",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
         )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Match reporting will be re-enabled automatically\n• Your match results will be preserved",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
     # Create context for backward compatibility
@@ -1085,6 +1128,25 @@ async def leaderboard_slash(interaction: discord.Interaction):
 @bot.tree.command(name="rank", description="Check your rank and stats (or another member's)")
 @app_commands.describe(member="The member whose rank you want to check (optional)")
 async def rank_slash(interaction: discord.Interaction, member: discord.Member = None):
+    if RESET_IN_PROGRESS:
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Rank Stats Unavailable",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Player stats are being updated\n• Rank information will be available after reset",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
@@ -1341,6 +1403,25 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 @bot.tree.command(name="addplayer", description="Add a player to the queue (Admin/Mod only)")
 @app_commands.describe(member="The member to add to the queue")
 async def addplayer_slash(interaction: discord.Interaction, member: discord.Member):
+    if RESET_IN_PROGRESS:
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Admin Queue Commands Disabled",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Admin queue commands will be re-enabled automatically\n• Check back in a few minutes",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
@@ -1478,6 +1559,25 @@ async def addplayer_slash(interaction: discord.Interaction, member: discord.Memb
     app_commands.Choice(name="Yes - Remove ALL players", value="yes")
 ])
 async def removeplayer_slash(interaction: discord.Interaction, member: discord.Member = None, remove_all: str = "no"):
+    if RESET_IN_PROGRESS:
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Admin Queue Commands Disabled",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Admin queue commands will be re-enabled automatically\n• Check back in a few minutes",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Check if command is used in an allowed channel
     if not is_queue_channel(interaction.channel):
         await interaction.response.send_message(
@@ -3599,6 +3699,25 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 @bot.tree.command(name="streak", description="Check your current streak or another player's streak")
 @app_commands.describe(member="The member whose streak you want to check (optional)")
 async def streak_slash(interaction: discord.Interaction, member: discord.Member = None):
+    if RESET_IN_PROGRESS:
+        duration = ""
+        if RESET_START_TIME:
+            elapsed = datetime.datetime.now() - RESET_START_TIME
+            duration = f" (Running for {elapsed.seconds // 60}m {elapsed.seconds % 60}s)"
+
+        embed = discord.Embed(
+            title="⛔ Streak Stats Unavailable",
+            description=f"A leaderboard reset is currently in progress{duration}",
+            color=0xff9900
+        )
+        embed.add_field(
+            name="Please Wait",
+            value="• Reset operations are running\n• Streak data is being updated\n• Streak information will be available after reset",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
