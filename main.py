@@ -1240,7 +1240,9 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
             "longest_loss_streak": 0,
             "global_current_streak": 0,
             "global_longest_win_streak": 0,
-            "global_longest_loss_streak": 0
+            "global_longest_loss_streak": 0,
+            # NEW: Add rank protection fields
+            "last_promotion": None
         }
 
     # Calculate stats - add global stats
@@ -1261,6 +1263,17 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     global_current_streak = player_data.get("global_current_streak", 0)
     global_longest_win_streak = player_data.get("global_longest_win_streak", 0)
     global_longest_loss_streak = player_data.get("global_longest_loss_streak", 0)
+
+    # NEW: Get rank protection information
+    last_promotion = player_data.get("last_promotion")
+    has_promotion_protection = False
+    games_since_promotion = 0
+
+    if last_promotion and not is_new:
+        current_matches = player_data.get("matches", 0)
+        matches_at_promotion = last_promotion.get("matches_at_promotion", 0)
+        games_since_promotion = current_matches - matches_at_promotion
+        has_promotion_protection = games_since_promotion < 3
 
     # Calculate win rates
     win_rate = 0
@@ -1317,7 +1330,15 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 
     # Add ranked section
     embed.add_field(name="__Ranked Stats__", value="", inline=False)
-    embed.add_field(name="Rank", value=tier, inline=True)
+
+    # NEW: Enhanced rank display with protection status
+    rank_display = tier
+    if has_promotion_protection:
+        rank_display += f" 🛡️ (Protected: {3 - games_since_promotion} games left)"
+    elif last_promotion and games_since_promotion < 10:
+        rank_display += f" ⭐ (Promoted {games_since_promotion} games ago)"
+
+    embed.add_field(name="Rank", value=rank_display, inline=True)
 
     if matches > 0:
         embed.add_field(name="Leaderboard", value=f"#{rank_position} of {total_players}", inline=True)
@@ -1374,26 +1395,61 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 
         embed.add_field(name="Global Streak", value=global_streak_display, inline=True)
 
+    # NEW: Add Enhanced MMR System section
+    if not is_new and matches > 0:
+        embed.add_field(name="__🎯 Enhanced MMR System__", value="", inline=False)
+
+        system_info = []
+
+        # Streak bonuses
+        if abs(current_streak) >= 2 or abs(global_current_streak) >= 2:
+            system_info.append("🔥 **Active Streak Bonuses**: 2x multiplier at 2+ streak")
+
+        # Momentum system
+        if matches >= 10:
+            system_info.append("⚡ **Momentum Tracking**: Recent performance affects MMR")
+
+        # Rank protection
+        if has_promotion_protection:
+            system_info.append(f"🛡️ **Promotion Protection**: {3 - games_since_promotion} games of 50% loss reduction")
+        elif mmr >= 1100:  # Check for demotion protection
+            # Check distance from rank boundaries
+            if mmr < 1150:  # Close to Rank B/C boundary
+                system_info.append("🛡️ **Demotion Protection**: Reduced losses near rank boundary")
+            elif mmr >= 1600 and mmr < 1650:  # Close to Rank A/B boundary
+                system_info.append("🛡️ **Demotion Protection**: Reduced losses near rank boundary")
+        elif mmr >= 1050 and mmr < 1100:  # Close to promotion to Rank B
+            system_info.append("🚀 **Promotion Assistance**: Bonus MMR gains near rank up")
+        elif mmr >= 1550 and mmr < 1600:  # Close to promotion to Rank A
+            system_info.append("🚀 **Promotion Assistance**: Bonus MMR gains near rank up")
+
+        if system_info:
+            embed.add_field(name="Active Bonuses", value="\n".join(system_info), inline=False)
+        else:
+            embed.add_field(name="Available Features",
+                            value="• 2x streak multipliers (2+ wins/losses)\n• Momentum bonuses (10+ games)\n• Rank boundary protection",
+                            inline=False)
+
     # Add note for new players
     if is_new:
         embed.set_footer(
             text="⭐ New player - this is your starting MMR based on rank verification. Play matches to earn your spot on the leaderboard!")
     else:
         # FIXED: Add comprehensive streak info in footer
-        streak_info = []
+        footer_info = []
         if longest_win_streak >= 3:
-            streak_info.append(f"Best ranked streak: {longest_win_streak} wins")
+            footer_info.append(f"Best ranked streak: {longest_win_streak} wins")
         if abs(longest_loss_streak) >= 3:
-            streak_info.append(f"Worst ranked streak: {abs(longest_loss_streak)} losses")
+            footer_info.append(f"Worst ranked streak: {abs(longest_loss_streak)} losses")
         if global_longest_win_streak >= 3:
-            streak_info.append(f"Best global streak: {global_longest_win_streak} wins")
+            footer_info.append(f"Best global streak: {global_longest_win_streak} wins")
         if abs(global_longest_loss_streak) >= 3:
-            streak_info.append(f"Worst global streak: {abs(global_longest_loss_streak)} losses")
+            footer_info.append(f"Worst global streak: {abs(global_longest_loss_streak)} losses")
 
-        if streak_info:
-            embed.set_footer(text=" | ".join(streak_info))
+        if footer_info:
+            embed.set_footer(text=" | ".join(footer_info))
         else:
-            embed.set_footer(text="Stats updated after each match")
+            embed.set_footer(text="Enhanced MMR system with streak bonuses, momentum tracking, and rank protection")
 
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
 
