@@ -22,6 +22,8 @@ class SystemCoordinator:
         self.queue_manager = QueueManager(db)
         self.match_system = MatchSystem(db, self.queue_manager)
 
+        self.rate_limiter = None
+
         # Create channel-specific systems
         self.channel_names = ["rank-a", "rank-b", "rank-c", "global"]
         self.vote_systems = {}
@@ -65,6 +67,24 @@ class SystemCoordinator:
 
         # Configure queue_manager with vote and captain systems for all channels
         self.connect_channel_systems()
+
+    def set_rate_limiter(self, rate_limiter):
+        """Set rate limiter for all systems"""
+        self.rate_limiter = rate_limiter
+        print("Setting rate limiter for all systems...")
+
+        # Set rate limiter for match system
+        if self.match_system:
+            self.match_system.set_rate_limiter(rate_limiter)
+            print("✅ Rate limiter set for match system")
+
+        # Set rate limiter for all captain systems
+        for channel_name, captains_system in self.captains_systems.items():
+            if hasattr(captains_system, 'set_rate_limiter'):
+                captains_system.set_rate_limiter(rate_limiter)
+                print(f"✅ Rate limiter set for {channel_name} captains system")
+
+        print("✅ Rate limiter connected to all systems")
 
     def connect_channel_systems(self):
         """Connect channel-specific systems with the queue manager"""

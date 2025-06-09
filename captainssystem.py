@@ -13,6 +13,7 @@ class CaptainsSystem:
         self.match_system = match_system
         self.bot = None
         self.db = db
+        self.rate_limiter = None
 
         # Track active selections by match ID
         self.active_selections = {}  # Map of match_id to selection state
@@ -24,6 +25,10 @@ class CaptainsSystem:
     def set_bot(self, bot):
         """Set the bot instance"""
         self.bot = bot
+
+    def set_rate_limiter(self, rate_limiter):
+        """Set the rate limiter instance"""
+        self.rate_limiter = rate_limiter
 
     def is_selection_active(self, match_id=None, channel_id=None):
         """
@@ -153,10 +158,20 @@ class CaptainsSystem:
                 await self.fallback_to_random(match_id)
                 return
 
-            # Get discord users from IDs
+            # Get discord users from IDs with rate limiting
             try:
-                captain1_user = await self.bot.fetch_user(int(captain1.get('id', 0)))
-                captain2_user = await self.bot.fetch_user(int(captain2.get('id', 0)))
+                if self.rate_limiter:
+                    captain1_user = await self.rate_limiter.fetch_member_with_limit(self.bot.get_guild(ctx.guild.id),
+                                                                                    int(captain1.get('id', 0)))
+                    await asyncio.sleep(0.2)  # Small delay between fetches
+                    captain2_user = await self.rate_limiter.fetch_member_with_limit(self.bot.get_guild(ctx.guild.id),
+                                                                                    int(captain2.get('id', 0)))
+                else:
+                    # Fallback with manual delays
+                    captain1_user = await self.bot.fetch_user(int(captain1.get('id', 0)))
+                    await asyncio.sleep(1.0)
+                    captain2_user = await self.bot.fetch_user(int(captain2.get('id', 0)))
+
             except (ValueError, discord.NotFound, discord.HTTPException) as e:
                 await channel.send(f"Error fetching captain users: {str(e)}. Falling back to random team selection.")
                 await self.fallback_to_random(match_id)
@@ -253,19 +268,25 @@ class CaptainsSystem:
             await self.fallback_to_random(match_id)
 
     async def test_dm_capability(self, user):
-        """Test if we can DM a user"""
+        """Test if we can DM a user - FIXED WITH RATE LIMITING"""
         try:
             test_embed = discord.Embed(
                 title="Captain Selection Test",
                 description="Testing DM capability...",
                 color=0x3498db
             )
-            await user.send(embed=test_embed)
-            # Clean up the test message
-            try:
+
+            if self.rate_limiter:
+                # Use rate limiter for DM operations
+                await self.rate_limiter.send_message_with_limit(user, embed=test_embed)
+                await asyncio.sleep(0.5)  # Small delay between DMs
+                await self.rate_limiter.send_message_with_limit(user,
+                                                                "✅ DM test successful! Captain selection starting...")
+            else:
+                # Fallback with manual delays
+                await user.send(embed=test_embed)
+                await asyncio.sleep(1.0)  # Manual delay to prevent rate limiting
                 await user.send("✅ DM test successful! Captain selection starting...")
-            except:
-                pass
             return True
         except (discord.Forbidden, discord.HTTPException):
             return False
@@ -649,7 +670,15 @@ class CaptainsSystem:
             view.add_item(button)
 
         # Send the message with buttons
-        message = await captain.send(embed=embed, view=view)
+        try:
+            if self.rate_limiter:
+                message = await self.rate_limiter.send_message_with_limit(captain, embed=embed, view=view)
+            else:
+                await asyncio.sleep(0.5)  # Manual delay
+                message = await captain.send(embed=embed, view=view)
+        except Exception as e:
+            print(f"Error sending captain selection DM: {e}")
+            return None
 
         # Wait for the captain to select a player or timeout
         await view.wait()
@@ -727,7 +756,15 @@ class CaptainsSystem:
             view.add_item(button)
 
         # Send the message with buttons
-        message = await captain.send(embed=embed, view=view)
+        try:
+            if self.rate_limiter:
+                message = await self.rate_limiter.send_message_with_limit(captain, embed=embed, view=view)
+            else:
+                await asyncio.sleep(0.5)  # Manual delay
+                message = await captain.send(embed=embed, view=view)
+        except Exception as e:
+            print(f"Error sending captain selection DM: {e}")
+            return []
 
         # Wait for the captain to select 2 players or timeout
         await view.wait()

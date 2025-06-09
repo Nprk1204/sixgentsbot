@@ -182,6 +182,7 @@ async def on_ready():
         print("✅ Rate limiter connected to match system")
 
         system_coordinator.set_bot(bot)
+        system_coordinator.set_rate_limiter(rate_limiter)
         bot.loop.create_task(system_coordinator.check_for_ready_matches())
         print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
 
