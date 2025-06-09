@@ -174,12 +174,13 @@ async def on_ready():
     print(f"Connected to {len(bot.guilds)} guilds")
 
     try:
-        # ADD THESE NEW LINES:
         rate_limiter.bot = bot
         rate_limiter.start_bulk_processor()
         print("✅ Rate limiting system initialized")
 
-        # EXISTING CODE CONTINUES:
+        system_coordinator.match_system.set_rate_limiter(rate_limiter)
+        print("✅ Rate limiter connected to match system")
+
         system_coordinator.set_bot(bot)
         bot.loop.create_task(system_coordinator.check_for_ready_matches())
         print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")

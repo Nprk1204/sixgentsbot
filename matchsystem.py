@@ -11,6 +11,7 @@ class MatchSystem:
         self.players = db.get_collection('players')  # For player stats
         self.queue_manager = queue_manager  # Reference to queue manager for active matches
         self.bot = None
+        self.rate_limiter = None
 
         # Tier-based MMR values
         self.TIER_MMR = {
@@ -29,6 +30,10 @@ class MatchSystem:
     def set_bot(self, bot):
         """Set the bot instance"""
         self.bot = bot
+
+    def set_rate_limiter(self, rate_limiter):
+        """Set the rate limiter instance"""
+        self.rate_limiter = rate_limiter
 
     def set_queue_manager(self, queue_manager):
         """Set the queue manager reference"""
@@ -836,9 +841,14 @@ class MatchSystem:
 
         print(f"MMR changes stored successfully for match {match_id}")
 
-        # Update Discord roles for players if ctx is provided
-        if ctx:
-            # Update roles for winners based on ranked MMR (not global)
+        # Update Discord roles for players if ctx is provided AND rate limiter is available
+        if ctx and self.rate_limiter:
+            print("Updating Discord roles for match players using rate limiter...")
+
+            # Collect all role updates to batch them efficiently
+            role_updates = []
+
+            # Process winners
             for player in winning_team:
                 player_id = player.get("id")
                 if not player_id or player_id.startswith('9000'):  # Skip dummy players
@@ -846,12 +856,19 @@ class MatchSystem:
 
                 # Only update roles for ranked MMR changes, not global
                 if not is_global_match:
-                    player_data = self.players.find_one({"id": player_id})
-                    if player_data:
-                        mmr = player_data.get("mmr", 600)
-                        await self.update_discord_role(ctx, player_id, mmr)
+                    try:
+                        player_data = self.players.find_one({"id": player_id})
+                        if player_data:
+                            mmr = player_data.get("mmr", 600)
+                            role_updates.append({
+                                'player_id': player_id,
+                                'player_name': player.get('name', 'Unknown'),
+                                'mmr': mmr
+                            })
+                    except Exception as e:
+                        print(f"Error preparing role update for winner {player.get('name', 'Unknown')}: {e}")
 
-            # Update roles for losers based on ranked MMR (not global)
+            # Process losers
             for player in losing_team:
                 player_id = player.get("id")
                 if not player_id or player_id.startswith('9000'):  # Skip dummy players
@@ -859,10 +876,32 @@ class MatchSystem:
 
                 # Only update roles for ranked MMR changes, not global
                 if not is_global_match:
-                    player_data = self.players.find_one({"id": player_id})
-                    if player_data:
-                        mmr = player_data.get("mmr", 600)
-                        await self.update_discord_role(ctx, player_id, mmr)
+                    try:
+                        player_data = self.players.find_one({"id": player_id})
+                        if player_data:
+                            mmr = player_data.get("mmr", 600)
+                            role_updates.append({
+                                'player_id': player_id,
+                                'player_name': player.get('name', 'Unknown'),
+                                'mmr': mmr
+                            })
+                    except Exception as e:
+                        print(f"Error preparing role update for loser {player.get('name', 'Unknown')}: {e}")
+
+            # Process role updates sequentially with rate limiting
+            print(f"Processing {len(role_updates)} role updates...")
+            for i, update in enumerate(role_updates):
+                try:
+                    await self.update_discord_role(ctx, update['player_id'], update['mmr'])
+                    print(f"Processed role update {i + 1}/{len(role_updates)} for {update['player_name']}")
+                except Exception as e:
+                    print(f"Error updating Discord role for {update['player_name']}: {e}")
+                    # Continue with other updates even if one fails
+
+            print("Discord role updates completed")
+
+        elif ctx and not self.rate_limiter:
+            print("Warning: No rate limiter available - skipping Discord role updates to prevent rate limiting")
 
         if self.queue_manager:
             self.queue_manager.remove_match(match_id)
@@ -886,22 +925,42 @@ class MatchSystem:
         return match_result, None
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
-        """Update a player's Discord role based on their new MMR"""
+        """Update a player's Discord role based on their new MMR - USING EXISTING RATE LIMITER"""
         try:
+            # Skip if no rate limiter is available
+            if not self.rate_limiter:
+                print("No rate limiter available - skipping Discord role update")
+                return
+
             # Define MMR thresholds for ranks
             RANK_A_THRESHOLD = 1600
             RANK_B_THRESHOLD = 1100
 
-            # Get the player's Discord member object
-            member = await ctx.guild.fetch_member(int(player_id))
+            # Get the player's Discord member object using rate limiter
+            try:
+                member = await self.rate_limiter.fetch_member_with_limit(ctx.guild, int(player_id))
+            except discord.NotFound:
+                print(f"Could not find Discord member with ID {player_id} - user may have left the server")
+                return
+            except ValueError:
+                print(f"Invalid player ID format: {player_id}")
+                return
+            except Exception as e:
+                print(f"Error fetching member {player_id}: {e}")
+                return
+
             if not member:
                 print(f"Could not find Discord member with ID {player_id}")
                 return
 
             # Get the rank roles
-            rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
-            rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
-            rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+            try:
+                rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+                rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+                rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+            except Exception as e:
+                print(f"Error getting guild roles: {e}")
+                return
 
             if not rank_a_role or not rank_b_role or not rank_c_role:
                 print("Could not find one or more rank roles")
@@ -927,26 +986,43 @@ class MatchSystem:
             if current_rank_role == new_role:
                 return
 
-            # Remove current rank role if they have one
-            if current_rank_role:
-                await member.remove_roles(current_rank_role, reason="MMR rank update")
+            # Update roles using your existing rate limiter
+            try:
+                # Remove current rank role if they have one
+                if current_rank_role:
+                    await self.rate_limiter.remove_role_with_limit(
+                        member, current_rank_role, reason="MMR rank update"
+                    )
 
-            # Add the new role
-            await member.add_roles(new_role, reason=f"MMR update: {new_mmr}")
+                # Add the new role
+                await self.rate_limiter.add_role_with_limit(
+                    member, new_role, reason=f"MMR update: {new_mmr}"
+                )
 
-            # Log the role change
-            print(
-                f"Updated roles for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
+                # Log the role change
+                print(
+                    f"Updated roles for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
 
-            # Announce the rank change if it's a promotion
-            if not current_rank_role or (
-                    (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
-                    (current_rank_role == rank_b_role and new_role == rank_a_role)
-            ):
-                await ctx.send(f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!")
+                # Announce the rank change if it's a promotion
+                if not current_rank_role or (
+                        (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
+                        (current_rank_role == rank_b_role and new_role == rank_a_role)
+                ):
+                    try:
+                        # Use rate limiter for message sending too
+                        await self.rate_limiter.send_message_with_limit(
+                            ctx.channel,
+                            f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!"
+                        )
+                    except Exception as msg_error:
+                        # If we can't send the message, just log it
+                        print(f"Could not announce promotion for {member.display_name} to {new_role.name}: {msg_error}")
+
+            except Exception as role_error:
+                print(f"Error updating roles for {member.display_name}: {role_error}")
 
         except Exception as e:
-            print(f"Error updating Discord role: {str(e)}")
+            print(f"Error in update_discord_role: {str(e)}")
 
     def update_player_mmr(self, winning_team, losing_team, match_id=None):
         """Update MMR for all players in the match with enhanced dynamic MMR changes"""
