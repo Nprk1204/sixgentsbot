@@ -3528,13 +3528,18 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
 
 
 # 4. Sub Command
-@bot.tree.command(name="sub", description="Substitute players in an active match")
+@bot.tree.command(name="sub", description="Substitute or swap players in an active match")
 @app_commands.describe(
     match_id="The ID of the match",
-    player_out="The player to remove from the match",
-    player_in="The player to add to the match"
+    action="Choose to substitute a player or swap two players",
+    player_out="The player to remove (for substitute) or first player (for swap)",
+    player_in="The player to add (for substitute) or second player (for swap)"
 )
-async def sub_slash(interaction: discord.Interaction, match_id: str, player_out: discord.Member,
+@app_commands.choices(action=[
+    app_commands.Choice(name="Substitute Player", value="substitute"),
+    app_commands.Choice(name="Swap Players", value="swap")
+])
+async def sub_slash(interaction: discord.Interaction, match_id: str, action: str, player_out: discord.Member,
                     player_in: discord.Member):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
@@ -3544,7 +3549,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
         )
         return
 
-    # Check if user has permissions - FIXED: Use the correct function name
+    # Check if user has permissions
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
         await interaction.response.send_message(
             "You need administrator permissions or the 6mod role to use this command.",
@@ -3562,10 +3567,20 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     if match.get("status") != "in_progress":
         await interaction.response.send_message(
             f"Match with ID `{match_id}` is not in progress (status: {match.get('status')}). " +
-            "Substitutions are only available for in-progress matches.",
+            "Substitutions and swaps are only available for in-progress matches.",
             ephemeral=True
         )
         return
+
+    # Route to appropriate function based on action
+    if action == "substitute":
+        await handle_substitute(interaction, match_id, match, player_out, player_in)
+    elif action == "swap":
+        await handle_swap(interaction, match_id, match, player_out, player_in)
+
+
+async def handle_substitute(interaction, match_id, match, player_out, player_in):
+    """Handle player substitution (replace player_out with player_in)"""
 
     # Get player data
     player_out_id = str(player_out.id)
@@ -3575,13 +3590,11 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     player_out_mention = player_out.mention
     player_in_mention = player_in.mention
 
-    # REMOVED: The problematic is_admin check that was causing the error
-    # The permission check above is sufficient
-
-    # Check which team player_out is on
+    # Get teams
     team1 = match.get("team1", [])
     team2 = match.get("team2", [])
 
+    # Check which team player_out is on
     player_found = False
     team_num = 0
     team_index = -1
@@ -3625,7 +3638,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
 
     if player_in_this_match:
         await interaction.response.send_message(
-            f"{player_in_mention} is already part of match `{match_id}`.",
+            f"{player_in_mention} is already part of match `{match_id}`. Use the 'Swap Players' action instead.",
             ephemeral=True
         )
         return
@@ -3675,7 +3688,7 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
     embed = discord.Embed(
         title="Player Substitution",
         description=f"Match ID: `{match_id}`",
-        color=0x00aaff
+        color=0x00aaff  # Blue for substitutions
     )
 
     embed.add_field(
@@ -3690,8 +3703,125 @@ async def sub_slash(interaction: discord.Interaction, match_id: str, player_out:
         inline=False
     )
 
+    embed.add_field(
+        name="Updated Team",
+        value=", ".join([p.get('mention', p.get('name')) for p in (team1 if team_num == 1 else team2)]),
+        inline=False
+    )
+
     embed.set_footer(
-        text=f"Requested by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        text=f"Substitution by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    await interaction.response.send_message(embed=embed)
+
+
+async def handle_swap(interaction, match_id, match, player1, player2):
+    """Handle player swap between teams"""
+
+    # Get player data
+    player1_id = str(player1.id)
+    player2_id = str(player2.id)
+    player1_mention = player1.mention
+    player2_mention = player2.mention
+
+    # Get teams
+    team1 = match.get("team1", [])
+    team2 = match.get("team2", [])
+
+    # Find both players in the match
+    player1_team = None
+    player1_index = -1
+    player2_team = None
+    player2_index = -1
+
+    # Check team1
+    for i, player in enumerate(team1):
+        if player.get("id") == player1_id:
+            player1_team = 1
+            player1_index = i
+        elif player.get("id") == player2_id:
+            player2_team = 1
+            player2_index = i
+
+    # Check team2
+    for i, player in enumerate(team2):
+        if player.get("id") == player1_id:
+            player1_team = 2
+            player1_index = i
+        elif player.get("id") == player2_id:
+            player2_team = 2
+            player2_index = i
+
+    # Validate both players are in the match
+    if player1_team is None:
+        await interaction.response.send_message(f"{player1_mention} is not in match `{match_id}`.", ephemeral=True)
+        return
+
+    if player2_team is None:
+        await interaction.response.send_message(f"{player2_mention} is not in match `{match_id}`.", ephemeral=True)
+        return
+
+    # Check they're on different teams
+    if player1_team == player2_team:
+        await interaction.response.send_message(
+            f"Both {player1_mention} and {player2_mention} are on Team {player1_team}. Can only swap players between different teams.",
+            ephemeral=True
+        )
+        return
+
+    # Perform the swap
+    if player1_team == 1:  # player1 on team1, player2 on team2
+        player1_data = team1[player1_index]
+        player2_data = team2[player2_index]
+
+        team1[player1_index] = player2_data
+        team2[player2_index] = player1_data
+
+        swap_description = f"{player1_mention} (Team 1 → Team 2) ↔ {player2_mention} (Team 2 → Team 1)"
+    else:  # player1 on team2, player2 on team1
+        player1_data = team2[player1_index]
+        player2_data = team1[player2_index]
+
+        team2[player1_index] = player2_data
+        team1[player2_index] = player1_data
+
+        swap_description = f"{player1_mention} (Team 2 → Team 1) ↔ {player2_mention} (Team 1 → Team 2)"
+
+    # Update database
+    system_coordinator.match_system.matches.update_one(
+        {"match_id": match_id},
+        {"$set": {"team1": team1, "team2": team2}}
+    )
+
+    # Update in memory
+    if match_id in system_coordinator.queue_manager.active_matches:
+        system_coordinator.queue_manager.active_matches[match_id]["team1"] = team1
+        system_coordinator.queue_manager.active_matches[match_id]["team2"] = team2
+
+    # Create response embed
+    embed = discord.Embed(
+        title="Players Swapped Between Teams",
+        description=f"Match ID: `{match_id}`",
+        color=0xff9500  # Orange for swaps
+    )
+
+    embed.add_field(
+        name="Team Swap",
+        value=swap_description,
+        inline=False
+    )
+
+    embed.add_field(
+        name="Updated Teams",
+        value=(
+            f"**Team 1:** {', '.join([p.get('mention', p.get('name')) for p in team1])}\n"
+            f"**Team 2:** {', '.join([p.get('mention', p.get('name')) for p in team2])}"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(
+        text=f"Swap by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     await interaction.response.send_message(embed=embed)
 
