@@ -925,7 +925,7 @@ class MatchSystem:
         return match_result, None
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
-        """Update a player's Discord role based on their new MMR - USING EXISTING RATE LIMITER"""
+        """Update a player's Discord role based on their new MMR - COMPREHENSIVE ERROR HANDLING"""
         try:
             # Skip if no rate limiter is available
             if not self.rate_limiter:
@@ -936,24 +936,34 @@ class MatchSystem:
             RANK_A_THRESHOLD = 1600
             RANK_B_THRESHOLD = 1100
 
-            # Get the player's Discord member object using rate limiter
+            # ENHANCED: Get the player's Discord member object with comprehensive error handling
             try:
                 member = await self.rate_limiter.fetch_member_with_limit(ctx.guild, int(player_id))
-            except discord.NotFound:
-                print(f"Could not find Discord member with ID {player_id} - user may have left the server")
-                return
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    print(f"Rate limited fetching member {player_id} for role update")
+                    return
+                elif e.status == 404:
+                    print(f"Member {player_id} not found - user may have left the server")
+                    return
+                elif e.status == 403:
+                    print(f"No permission to fetch member {player_id}")
+                    return
+                else:
+                    print(f"HTTP error fetching member {player_id}: {e}")
+                    return
             except ValueError:
                 print(f"Invalid player ID format: {player_id}")
                 return
             except Exception as e:
-                print(f"Error fetching member {player_id}: {e}")
+                print(f"Unexpected error fetching member {player_id}: {e}")
                 return
 
             if not member:
                 print(f"Could not find Discord member with ID {player_id}")
                 return
 
-            # Get the rank roles
+            # Get the rank roles with error handling
             try:
                 rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
                 rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
@@ -986,13 +996,15 @@ class MatchSystem:
             if current_rank_role == new_role:
                 return
 
-            # Update roles using your existing rate limiter
+            # ENHANCED: Update roles using rate limiter with comprehensive error handling
             try:
                 # Remove current rank role if they have one
                 if current_rank_role:
                     await self.rate_limiter.remove_role_with_limit(
                         member, current_rank_role, reason="MMR rank update"
                     )
+                    # Small delay between role operations
+                    await asyncio.sleep(0.5)
 
                 # Add the new role
                 await self.rate_limiter.add_role_with_limit(
@@ -1001,9 +1013,9 @@ class MatchSystem:
 
                 # Log the role change
                 print(
-                    f"Updated roles for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
+                    f"✅ Updated roles for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
 
-                # Announce the rank change if it's a promotion
+                # ENHANCED: Announce the rank change if it's a promotion with rate limiting
                 if not current_rank_role or (
                         (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
                         (current_rank_role == rank_b_role and new_role == rank_a_role)
@@ -1014,15 +1026,26 @@ class MatchSystem:
                             ctx.channel,
                             f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!"
                         )
+                    except discord.HTTPException as msg_error:
+                        if msg_error.status == 429:
+                            print(f"Rate limited announcing promotion for {member.display_name}")
+                        else:
+                            print(f"Error announcing promotion for {member.display_name}: {msg_error}")
                     except Exception as msg_error:
-                        # If we can't send the message, just log it
-                        print(f"Could not announce promotion for {member.display_name} to {new_role.name}: {msg_error}")
+                        print(f"Unexpected error announcing promotion for {member.display_name}: {msg_error}")
 
+            except discord.HTTPException as role_error:
+                if role_error.status == 429:
+                    print(f"Rate limited updating roles for {member.display_name}")
+                elif role_error.status == 403:
+                    print(f"No permission to update roles for {member.display_name}")
+                else:
+                    print(f"HTTP error updating roles for {member.display_name}: {role_error}")
             except Exception as role_error:
-                print(f"Error updating roles for {member.display_name}: {role_error}")
+                print(f"Unexpected error updating roles for {member.display_name}: {role_error}")
 
         except Exception as e:
-            print(f"Error in update_discord_role: {str(e)}")
+            print(f"Critical error in update_discord_role: {str(e)}")
 
     def update_player_mmr(self, winning_team, losing_team, match_id=None):
         """Update MMR for all players in the match with enhanced dynamic MMR changes"""

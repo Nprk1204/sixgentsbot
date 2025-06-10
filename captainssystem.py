@@ -268,7 +268,7 @@ class CaptainsSystem:
             await self.fallback_to_random(match_id)
 
     async def test_dm_capability(self, user):
-        """Test if we can DM a user - FIXED WITH RATE LIMITING"""
+        """Test if we can DM a user - ENHANCED WITH RATE LIMITING"""
         try:
             test_embed = discord.Embed(
                 title="Captain Selection Test",
@@ -277,18 +277,58 @@ class CaptainsSystem:
             )
 
             if self.rate_limiter:
-                # Use rate limiter for DM operations
-                await self.rate_limiter.send_message_with_limit(user, embed=test_embed)
-                await asyncio.sleep(0.5)  # Small delay between DMs
-                await self.rate_limiter.send_message_with_limit(user,
-                                                                "✅ DM test successful! Captain selection starting...")
+                # Use rate limiter for DM operations with enhanced error handling
+                try:
+                    await self.rate_limiter.send_message_with_limit(user, embed=test_embed)
+                    await asyncio.sleep(0.5)  # Small delay between DMs
+                    await self.rate_limiter.send_message_with_limit(user,
+                                                                    "✅ DM test successful! Captain selection starting...")
+                    return True
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limited
+                        retry_after = getattr(e, 'retry_after', 2)
+                        print(f"DM rate limited, waiting {retry_after}s")
+                        await asyncio.sleep(retry_after)
+                        try:
+                            # Single retry
+                            await self.rate_limiter.send_message_with_limit(user,
+                                                                            "✅ DM test successful! Captain selection starting...")
+                            return True
+                        except:
+                            print(f"DM retry failed for {user.display_name}")
+                            return False
+                    elif e.status == 403:  # Forbidden
+                        return False
+                    else:
+                        print(f"DM test HTTP error for {user.display_name}: {e}")
+                        return False
             else:
-                # Fallback with manual delays
-                await user.send(embed=test_embed)
-                await asyncio.sleep(1.0)  # Manual delay to prevent rate limiting
-                await user.send("✅ DM test successful! Captain selection starting...")
-            return True
+                # Fallback with manual delays and enhanced error handling
+                try:
+                    await user.send(embed=test_embed)
+                    await asyncio.sleep(1.5)  # Longer manual delay to prevent rate limiting
+                    await user.send("✅ DM test successful! Captain selection starting...")
+                    return True
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limited
+                        retry_after = getattr(e, 'retry_after', 3)
+                        print(f"DM rate limited (manual), waiting {retry_after}s")
+                        await asyncio.sleep(retry_after)
+                        try:
+                            await user.send("✅ DM test successful! Captain selection starting...")
+                            return True
+                        except:
+                            print(f"DM manual retry failed for {user.display_name}")
+                            return False
+                    elif e.status == 403:  # Forbidden
+                        return False
+                    else:
+                        print(f"DM test manual HTTP error for {user.display_name}: {e}")
+                        return False
         except (discord.Forbidden, discord.HTTPException):
+            return False
+        except Exception as e:
+            print(f"Unexpected error in DM test for {user.display_name}: {e}")
             return False
 
     async def channel_based_captain_selection(self, channel, match_id):
@@ -621,12 +661,11 @@ class CaptainsSystem:
         return player_mmrs
 
     async def captain1_selection(self, captain, players, player_mmrs, channel):
-        """Handle captain 1's selection with buttons - 5 minute timeout"""
-        # Determine if this is a global match
+        """Handle captain 1's selection with buttons - ENHANCED rate limiting"""
         is_global = channel.name.lower() == "global"
         mmr_type = "Global MMR" if is_global else "MMR"
 
-        # Create an embed with player information including MMR
+        # Create embed
         embed = discord.Embed(
             title="**You are Captain 1!**",
             description="Please select **ONE** player by clicking the button next to their name.",
@@ -645,13 +684,11 @@ class CaptainsSystem:
 
         embed.set_footer(text="You have 5 minutes to choose.")
 
-        # Create a view with buttons for each player
-        view = View(timeout=300)  # 5 minute timeout (300 seconds)
-
-        # Create a dictionary to store the selected player
+        # Create view with buttons
+        view = View(timeout=300)
         result = {"selected_player": None}
 
-        # Add a button for each player
+        # Add buttons for each player
         for i, player in enumerate(players):
             button = Button(
                 style=ButtonStyle.primary,
@@ -659,7 +696,6 @@ class CaptainsSystem:
                 custom_id=f"select_{i}"
             )
 
-            # Define button callback
             async def button_callback(interaction, player_index=i):
                 if interaction.user.id == int(captain.id):
                     result["selected_player"] = players[player_index]
@@ -669,21 +705,37 @@ class CaptainsSystem:
             button.callback = button_callback
             view.add_item(button)
 
-        # Send the message with buttons
+        # ENHANCED: Send the message with buttons with comprehensive error handling
         try:
             if self.rate_limiter:
                 message = await self.rate_limiter.send_message_with_limit(captain, embed=embed, view=view)
             else:
-                await asyncio.sleep(0.5)  # Manual delay
-                message = await captain.send(embed=embed, view=view)
+                # Fallback with comprehensive retry logic
+                try:
+                    message = await captain.send(embed=embed, view=view)
+                except discord.HTTPException as e:
+                    if e.status == 429:
+                        retry_after = getattr(e, 'retry_after', 2)
+                        print(f"Captain DM rate limited, waiting {retry_after}s")
+                        await asyncio.sleep(retry_after)
+                        message = await captain.send(embed=embed, view=view)
+                    else:
+                        raise
+        except discord.Forbidden:
+            print(f"Cannot DM captain {captain.display_name} - DMs disabled")
+            return None
+        except discord.HTTPException as e:
+            if e.status == 429:
+                print(f"Captain DM still rate limited after retry: {captain.display_name}")
+            else:
+                print(f"HTTP error sending captain DM: {e}")
+            return None
         except Exception as e:
-            print(f"Error sending captain selection DM: {e}")
+            print(f"Unexpected error sending captain selection DM: {e}")
             return None
 
-        # Wait for the captain to select a player or timeout
+        # Wait for selection
         await view.wait()
-
-        # Return the selected player or None if timed out
         return result["selected_player"]
 
     async def captain2_selection(self, captain, players, player_mmrs, channel):

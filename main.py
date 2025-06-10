@@ -17,6 +17,23 @@ import uuid
 import random
 from rate_limiter import DiscordRateLimiter, BulkOperationHelper, safe_role_operation
 
+# Rate limiting configuration
+DISCORD_RATE_LIMIT_ENABLED = True
+MAX_CONCURRENT_ROLE_OPERATIONS = 3
+DELAY_BETWEEN_ROLE_OPERATIONS = 0.5
+GUILD_SYNC_DELAY = 1.0
+DM_RETRY_DELAY = 2.0
+MEMBER_FETCH_DELAY = 0.1
+
+print("🚀 Enhanced rate limiting system loaded")
+print("📊 Configuration:")
+print(f"  • Rate limiting enabled: {DISCORD_RATE_LIMIT_ENABLED}")
+print(f"  • Max concurrent role ops: {MAX_CONCURRENT_ROLE_OPERATIONS}")
+print(f"  • Role operation delay: {DELAY_BETWEEN_ROLE_OPERATIONS}s")
+print(f"  • Guild sync delay: {GUILD_SYNC_DELAY}s")
+print(f"  • DM retry delay: {DM_RETRY_DELAY}s")
+print(f"  • Member fetch delay: {MEMBER_FETCH_DELAY}s")
+
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -126,6 +143,103 @@ async def is_duplicate_command(ctx):
 
     return False
 
+async def safe_fetch_member(guild, user_id, fallback_name="Unknown"):
+    """Safely fetch a Discord member with rate limiting protection"""
+    try:
+        if rate_limiter:
+            return await rate_limiter.fetch_member_with_limit(guild, int(user_id))
+        else:
+            # Manual rate limiting fallback
+            await asyncio.sleep(0.1)  # Small delay
+            return await guild.fetch_member(int(user_id))
+    except discord.HTTPException as e:
+        if e.status == 429:
+            print(f"Rate limited fetching member {user_id}")
+            return None
+        elif e.status == 404:
+            print(f"Member {user_id} not found")
+            return None
+        else:
+            print(f"HTTP error fetching member {user_id}: {e}")
+            return None
+    except ValueError:
+        print(f"Invalid user ID: {user_id}")
+        return None
+    except Exception as e:
+        print(f"Unexpected error fetching member {user_id}: {e}")
+        return None
+
+async def safe_role_operation(member, operation, *roles, reason=None):
+    """Safely perform role operations with rate limiting"""
+    try:
+        if rate_limiter:
+            if operation == "add":
+                await rate_limiter.add_role_with_limit(member, *roles, reason=reason)
+            elif operation == "remove":
+                await rate_limiter.remove_role_with_limit(member, *roles, reason=reason)
+        else:
+            # Manual rate limiting fallback
+            await asyncio.sleep(0.5)
+            if operation == "add":
+                await member.add_roles(*roles, reason=reason)
+            elif operation == "remove":
+                await member.remove_roles(*roles, reason=reason)
+        return True
+    except discord.HTTPException as e:
+        if e.status == 429:
+            retry_after = getattr(e, 'retry_after', 2)
+            print(f"Rate limited on role operation, waiting {retry_after}s")
+            await asyncio.sleep(retry_after)
+            try:
+                if operation == "add":
+                    await member.add_roles(*roles, reason=f"{reason} - retry")
+                elif operation == "remove":
+                    await member.remove_roles(*roles, reason=f"{reason} - retry")
+                return True
+            except Exception as retry_error:
+                print(f"Role operation retry failed: {retry_error}")
+                return False
+        else:
+            print(f"Role operation failed: {e}")
+            return False
+    except Exception as e:
+        print(f"Unexpected error in role operation: {e}")
+        return False
+
+
+async def safe_send_followup(interaction, content=None, embed=None, ephemeral=False, max_retries=2):
+    """Safely send followup messages with rate limiting protection"""
+    for attempt in range(max_retries):
+        try:
+            if rate_limiter:
+                # Use rate limiter if available
+                return await rate_limiter.send_message_with_limit(
+                    interaction.followup, content=content, embed=embed, ephemeral=ephemeral
+                )
+            else:
+                # Manual delay fallback
+                if attempt > 0:
+                    await asyncio.sleep(1.0)
+                return await interaction.followup.send(content=content, embed=embed, ephemeral=ephemeral)
+        except discord.HTTPException as e:
+            if e.status == 429 and attempt < max_retries - 1:
+                retry_after = getattr(e, 'retry_after', 2)
+                print(f"Followup rate limited, waiting {retry_after}s (attempt {attempt + 1})")
+                await asyncio.sleep(retry_after)
+                continue
+            else:
+                raise
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"Followup error, retrying: {e}")
+                await asyncio.sleep(1.0)
+                continue
+            else:
+                raise
+
+    # If we get here, all retries failed
+    raise Exception(f"Failed to send followup after {max_retries} attempts")
+
 
 # Helper function to check if command is used in a queue-specific channel
 def is_queue_channel(channel):
@@ -174,38 +288,78 @@ async def on_ready():
     print(f"Connected to {len(bot.guilds)} guilds")
 
     try:
+        # ENHANCED rate limiter initialization with error handling
         rate_limiter.bot = bot
-        rate_limiter.start_bulk_processor()
-        print("✅ Rate limiting system initialized")
 
-        system_coordinator.match_system.set_rate_limiter(rate_limiter)
-        print("✅ Rate limiter connected to match system")
+        try:
+            rate_limiter.start_bulk_processor()
+            print("✅ Rate limiting system initialized successfully")
+        except Exception as rl_error:
+            print(f"⚠️ Rate limiter initialization warning: {rl_error}")
+            print("Bot will continue with reduced rate limiting capability")
 
-        system_coordinator.set_bot(bot)
-        system_coordinator.set_rate_limiter(rate_limiter)
-        bot.loop.create_task(system_coordinator.check_for_ready_matches())
-        print(f"BOT INSTANCE ACTIVE - {datetime.datetime.now(datetime.UTC)}")
+        # Connect rate limiter to systems
+        try:
+            system_coordinator.match_system.set_rate_limiter(rate_limiter)
+            print("✅ Rate limiter connected to match system")
+        except Exception as ms_error:
+            print(f"⚠️ Error connecting rate limiter to match system: {ms_error}")
+
+        try:
+            system_coordinator.set_bot(bot)
+            system_coordinator.set_rate_limiter(rate_limiter)
+            print("✅ System coordinator initialized")
+        except Exception as sc_error:
+            print(f"⚠️ Error initializing system coordinator: {sc_error}")
+
+        # Start background tasks with error handling
+        try:
+            bot.loop.create_task(system_coordinator.check_for_ready_matches())
+            print(f"✅ Background tasks started - {datetime.datetime.now(datetime.UTC)}")
+        except Exception as task_error:
+            print(f"⚠️ Background task warning: {task_error}")
 
         print("Syncing global commands...")
-        await bot.tree.sync()
+        try:
+            await bot.tree.sync()
+            print("✅ Global commands synced")
+        except Exception as sync_error:
+            print(f"⚠️ Error syncing global commands: {sync_error}")
 
         print("Syncing guild-specific commands...")
-        for guild in bot.guilds:
+        for i, guild in enumerate(bot.guilds):
             try:
                 await bot.tree.sync(guild=guild)
-                print(f"Synced commands to guild: {guild.name} (ID: {guild.id})")
+                print(f"✅ Synced commands to guild: {guild.name} (ID: {guild.id})")
+
+                # CRITICAL: Add delay between guild syncs to prevent rate limiting
+                if i < len(bot.guilds) - 1:  # Don't delay after the last guild
+                    await asyncio.sleep(1.0)  # 1 second delay between each guild sync
+
+            except discord.HTTPException as guild_error:
+                if guild_error.status == 429:
+                    retry_after = getattr(guild_error, 'retry_after', 5)
+                    print(f"⚠️ Rate limited syncing to {guild.name}, waiting {retry_after}s")
+                    await asyncio.sleep(retry_after)
+                    try:
+                        await bot.tree.sync(guild=guild)
+                        print(f"✅ Retry successful for guild: {guild.name}")
+                    except Exception as retry_error:
+                        print(f"❌ Retry failed for guild {guild.name}: {retry_error}")
+                else:
+                    print(f"❌ Error syncing to guild {guild.name}: {guild_error}")
             except Exception as guild_error:
-                print(f"Error syncing to guild {guild.name}: {guild_error}")
+                print(f"❌ Unexpected error syncing to guild {guild.name}: {guild_error}")
 
         commands = bot.tree.get_commands()
-        print(f"Registered {len(commands)} global application commands:")
+        print(f"✅ Registered {len(commands)} global application commands")
         for cmd in commands:
-            print(f"- /{cmd.name}")
+            print(f"  - /{cmd.name}")
 
-        print("Command synchronization complete.")
+        print("✅ Command synchronization complete.")
 
     except Exception as e:
-        print(f"Error during bot initialization: {e}")
+        print(f"❌ Critical error during bot initialization: {e}")
         import traceback
         traceback.print_exc()
 
@@ -543,6 +697,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     print(f"Command error: {error}")
 
     try:
+        # Enhanced error handling for rate limiting issues
         if isinstance(error, app_commands.errors.CommandNotFound):
             if not interaction.response.is_done():
                 await interaction.response.send_message("Command not found. Use `/help` to see available commands.",
@@ -555,15 +710,37 @@ async def on_app_command_error(interaction: discord.Interaction, error):
             if isinstance(error.original, discord.errors.NotFound):
                 print(f"Interaction timed out: {error.original}")
                 return
+            elif isinstance(error.original, discord.HTTPException):
+                if error.original.status == 429:
+                    print(f"Command rate limited: {error.original}")
+                    if not interaction.response.is_done():
+                        try:
+                            await interaction.response.send_message(
+                                "⚠️ The bot is currently rate limited. Please wait a moment and try again.",
+                                ephemeral=True
+                            )
+                        except:
+                            pass  # If we can't even send this, just log it
+                    return
+                else:
+                    print(f"HTTP error in command: {error.original}")
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message("A network error occurred. Please try again.", ephemeral=True)
             else:
                 print(f"Command invoke error: {error.original}")
                 if not interaction.response.is_done():
                     await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
         else:
             if not interaction.response.is_done():
-                await interaction.response.send_message("An error occurred. Please try again.", ephemeral=True)
+                await interaction.response.send_message("An unexpected error occurred. Please try again.", ephemeral=True)
     except Exception as e:
         print(f"Error in error handler: {e}")
+        # Last resort - try to log the issue
+        try:
+            print(f"Original error that caused handler failure: {error}")
+            print(f"Handler error: {e}")
+        except:
+            pass
 
 
 @bot.tree.command(name="status", description="Shows the current queue status")
@@ -690,7 +867,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         await interaction.response.send_message("Invalid result. Please use 'win' or 'loss'.", ephemeral=True)
         return
 
-    # ADDED: Check if the match was created in this specific channel
+    # Check if the match was created in this specific channel
     current_channel_id = str(interaction.channel.id)
 
     # Find the match first to check which channel it belongs to
@@ -761,7 +938,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     print(f"Match type: {mmr_type}")
     print(f"MMR changes available: {len(match_result.get('mmr_changes', []))}")
 
-    # FIXED: Extract MMR changes and streaks from match result properly
+    # Extract MMR changes and streaks from match result properly
     mmr_changes_by_player = {}
     for change in match_result.get("mmr_changes", []):
         player_id = change.get("player_id")
@@ -774,8 +951,6 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                 "old_mmr": change.get("old_mmr", 0),
                 "new_mmr": change.get("new_mmr", 0)
             }
-            print(
-                f"Player {player_id}: MMR change {change.get('mmr_change', 0)}, streak {change.get('streak', 0)}, is_global: {change.get('is_global', False)}")
 
     # Initialize arrays for MMR changes and streaks
     winning_team_mmr_changes = []
@@ -783,23 +958,22 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     winning_team_streaks = []
     losing_team_streaks = []
 
-    # FIXED: Extract MMR changes for winning team with proper global/ranked filtering
+    # Extract MMR changes for winning team with proper global/ranked filtering
     for player in winning_team:
         player_id = player.get("id")
 
         if player_id and player_id in mmr_changes_by_player:
             change_data = mmr_changes_by_player[player_id]
 
-            # FIXED: Only show MMR changes that match the current match type
+            # Only show MMR changes that match the current match type
             change_is_global = change_data.get("is_global", False)
-            if change_is_global == is_global:  # Only show if match types align
+            if change_is_global == is_global:
                 mmr_change = change_data["mmr_change"]
                 streak = change_data["streak"]
 
-                # UPDATED: Show just the MMR value without "Global" or "Ranked" prefix
                 winning_team_mmr_changes.append(f"+{mmr_change} MMR")
 
-                # FIXED: Format streak display with emojis based on the new streak value
+                # Format streak display with emojis
                 if streak >= 3:
                     winning_team_streaks.append(f"🔥 {streak}W")
                 elif streak == 2:
@@ -808,38 +982,32 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                     winning_team_streaks.append(f"↗️ {streak}W")
                 else:
                     winning_team_streaks.append("—")
-
-                print(f"Winner {player.get('name', 'Unknown')}: +{mmr_change} MMR, streak {streak}")
             else:
-                print(
-                    f"Skipping MMR display for {player.get('name', 'Unknown')} - wrong match type (change_is_global: {change_is_global}, match_is_global: {is_global})")
                 winning_team_mmr_changes.append("—")
                 winning_team_streaks.append("—")
         elif player_id and player_id.startswith('9000'):  # Dummy player
             winning_team_mmr_changes.append("+0 MMR")
             winning_team_streaks.append("—")
         else:
-            print(f"No MMR change found for winner {player.get('name', 'Unknown')} (ID: {player_id})")
             winning_team_mmr_changes.append("—")
             winning_team_streaks.append("—")
 
-    # FIXED: Extract MMR changes for losing team with proper global/ranked filtering
+    # Extract MMR changes for losing team with proper global/ranked filtering
     for player in losing_team:
         player_id = player.get("id")
 
         if player_id and player_id in mmr_changes_by_player:
             change_data = mmr_changes_by_player[player_id]
 
-            # FIXED: Only show MMR changes that match the current match type
+            # Only show MMR changes that match the current match type
             change_is_global = change_data.get("is_global", False)
-            if change_is_global == is_global:  # Only show if match types align
+            if change_is_global == is_global:
                 mmr_change = change_data["mmr_change"]
                 streak = change_data["streak"]
 
-                # UPDATED: Show just the MMR value without "Global" or "Ranked" prefix
                 losing_team_mmr_changes.append(f"{mmr_change} MMR")  # Already negative
 
-                # FIXED: Format streak display for losses
+                # Format streak display for losses
                 if streak <= -3:
                     losing_team_streaks.append(f"❄️ {abs(streak)}L")
                 elif streak == -2:
@@ -848,22 +1016,17 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
                     losing_team_streaks.append(f"↘️ {abs(streak)}L")
                 else:
                     losing_team_streaks.append("—")
-
-                print(f"Loser {player.get('name', 'Unknown')}: {mmr_change} MMR, streak {streak}")
             else:
-                print(
-                    f"Skipping MMR display for {player.get('name', 'Unknown')} - wrong match type (change_is_global: {change_is_global}, match_is_global: {is_global})")
                 losing_team_mmr_changes.append("—")
                 losing_team_streaks.append("—")
         elif player_id and player_id.startswith('9000'):  # Dummy player
             losing_team_mmr_changes.append("-0 MMR")
             losing_team_streaks.append("—")
         else:
-            print(f"No MMR change found for loser {player.get('name', 'Unknown')} (ID: {player_id})")
             losing_team_mmr_changes.append("—")
             losing_team_streaks.append("—")
 
-    # FIXED: Create the embed with enhanced formatting to include match type and streaks
+    # Create the embed with enhanced formatting
     embed = discord.Embed(
         title=f"{mmr_type} Match Results",
         description=f"Match completed",
@@ -880,15 +1043,16 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Add Winners header
     embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
 
-    # Create individual fields for each winning player with better formatting
+    # FIXED: Create individual fields for each winning player with SAFE member fetching
     for i, player in enumerate(winning_team):
         try:
-            member = await interaction.guild.fetch_member(int(player.get("id", 0)))
+            # SAFE member fetching with fallback to stored name
+            member = await safe_fetch_member(interaction.guild, player.get("id", 0))
             name = member.display_name if member else player.get('name', 'Unknown')
         except:
             name = player.get("name", "Unknown")
 
-        # FIXED: Enhanced display with simplified MMR format
+        # Enhanced display with simplified MMR format
         mmr_display = winning_team_mmr_changes[i] if i < len(winning_team_mmr_changes) else "—"
         streak_display = winning_team_streaks[i] if i < len(winning_team_streaks) else "—"
 
@@ -898,7 +1062,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
             inline=True
         )
 
-    # Spacer field if needed to ensure proper alignment (for 3-column layout)
+    # Spacer field if needed for proper alignment (for 3-column layout)
     if len(winning_team) % 3 == 1:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
@@ -908,15 +1072,16 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
     # Add Losers header
     embed.add_field(name="😔 Losers", value="\u200b", inline=False)
 
-    # Create individual fields for each losing player with better formatting
+    # FIXED: Create individual fields for each losing player with SAFE member fetching
     for i, player in enumerate(losing_team):
         try:
-            member = await interaction.guild.fetch_member(int(player.get("id", 0)))
+            # SAFE member fetching with fallback to stored name
+            member = await safe_fetch_member(interaction.guild, player.get("id", 0))
             name = member.display_name if member else player.get('name', 'Unknown')
         except:
             name = player.get("name", "Unknown")
 
-        # FIXED: Enhanced display with simplified MMR format
+        # Enhanced display with simplified MMR format
         mmr_display = losing_team_mmr_changes[i] if i < len(losing_team_mmr_changes) else "—"
         streak_display = losing_team_streaks[i] if i < len(losing_team_streaks) else "—"
 
@@ -926,14 +1091,14 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
             inline=True
         )
 
-    # Spacer field if needed to ensure proper alignment (for 3-column layout)
+    # Spacer field if needed for proper alignment (for 3-column layout)
     if len(losing_team) % 3 == 1:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
     elif len(losing_team) % 3 == 2:
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-    # FIXED: Enhanced MMR System explanation with streak info
+    # Enhanced MMR System explanation with streak info
     embed.add_field(
         name="📊 MMR & Streak System",
         value=(
@@ -949,18 +1114,7 @@ async def report_slash(interaction: discord.Interaction, match_id: str, result: 
         text=f"Reported by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
 
-    # FIXED: Add debug info if no MMR changes were found
-    if not mmr_changes_by_player:
-        embed.add_field(
-            name="⚠️ Debug Info",
-            value="No MMR changes recorded for this match. This may indicate a system error.",
-            inline=False
-        )
-        print(f"WARNING: No MMR changes found in match result for match {match_id}")
-
     await interaction.followup.send(embed=embed)
-
-    print(f"Match report display completed for {match_id}")
 
 
 @bot.tree.command(name="adminreport", description="Admin command to report match results")
@@ -1190,9 +1344,8 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
                 tier = "Rank C"
                 mmr = 600
             else:
-                # No role or verification found - show rank verification required embed
+                # No role or verification found
                 if is_self_check:
-                    # Show rank verification required embed for self
                     embed = discord.Embed(
                         title="Rank Verification Required",
                         description="You need to verify your Rocket League rank to see your stats.",
@@ -1210,7 +1363,6 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
                     )
                     await interaction.response.send_message(embed=embed, ephemeral=True)
                 else:
-                    # Show simple message for checking other unverified users
                     embed = discord.Embed(
                         title="No Rank Data",
                         description=f"{member.mention} hasn't verified their rank yet.",
@@ -1236,14 +1388,12 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
             "global_wins": 0,
             "global_losses": 0,
             "global_matches": 0,
-            # FIXED: Add ALL streak fields with defaults
             "current_streak": 0,
             "longest_win_streak": 0,
             "longest_loss_streak": 0,
             "global_current_streak": 0,
             "global_longest_win_streak": 0,
             "global_longest_loss_streak": 0,
-            # NEW: Add rank protection fields
             "last_promotion": None
         }
 
@@ -1258,7 +1408,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     global_matches = player_data.get("global_matches", 0)
     is_new = player_data.get("is_new", False)
 
-    # FIXED: Get ALL streak information
+    # Get ALL streak information
     current_streak = player_data.get("current_streak", 0)
     longest_win_streak = player_data.get("longest_win_streak", 0)
     longest_loss_streak = player_data.get("longest_loss_streak", 0)
@@ -1266,7 +1416,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     global_longest_win_streak = player_data.get("global_longest_win_streak", 0)
     global_longest_loss_streak = player_data.get("global_longest_loss_streak", 0)
 
-    # NEW: Get rank protection information
+    # Get rank protection information
     last_promotion = player_data.get("last_promotion")
     has_promotion_protection = False
     games_since_promotion = 0
@@ -1333,7 +1483,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     # Add ranked section
     embed.add_field(name="__Ranked Stats__", value="", inline=False)
 
-    # NEW: Enhanced rank display with protection status
+    # Enhanced rank display with protection status
     rank_display = tier
     if has_promotion_protection:
         rank_display += f" 🛡️ (Protected: {3 - games_since_promotion} games left)"
@@ -1352,7 +1502,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     embed.add_field(name="Record", value=f"{wins}W - {losses}L", inline=True)
     embed.add_field(name="Matches", value=str(matches), inline=True)
 
-    # FIXED: Add ranked streak information
+    # Add ranked streak information
     if current_streak != 0:
         streak_display = ""
         if current_streak > 0:
@@ -1381,7 +1531,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     embed.add_field(name="Record", value=f"{global_wins}W - {global_losses}L", inline=True)
     embed.add_field(name="Matches", value=str(global_matches), inline=True)
 
-    # FIXED: Add global streak information
+    # Add global streak information
     if global_current_streak != 0:
         global_streak_display = ""
         if global_current_streak > 0:
@@ -1397,7 +1547,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
 
         embed.add_field(name="Global Streak", value=global_streak_display, inline=True)
 
-    # NEW: Add Enhanced MMR System section
+    # Enhanced MMR System section
     if not is_new and matches > 0:
         embed.add_field(name="__🎯 Enhanced MMR System__", value="", inline=False)
 
@@ -1415,7 +1565,6 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
         if has_promotion_protection:
             system_info.append(f"🛡️ **Promotion Protection**: {3 - games_since_promotion} games of 50% loss reduction")
         elif mmr >= 1100:  # Check for demotion protection
-            # Check distance from rank boundaries
             if mmr < 1150:  # Close to Rank B/C boundary
                 system_info.append("🛡️ **Demotion Protection**: Reduced losses near rank boundary")
             elif mmr >= 1600 and mmr < 1650:  # Close to Rank A/B boundary
@@ -1437,7 +1586,7 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
         embed.set_footer(
             text="⭐ New player - this is your starting MMR based on rank verification. Play matches to earn your spot on the leaderboard!")
     else:
-        # FIXED: Add comprehensive streak info in footer
+        # Add comprehensive streak info in footer
         footer_info = []
         if longest_win_streak >= 3:
             footer_info.append(f"Best ranked streak: {longest_win_streak} wins")
@@ -3302,6 +3451,7 @@ async def remove_discord_role_rate_limited(member, *roles, reason=None):
         print(f"Error removing roles from {member.display_name}: {e}")
         raise  # Re-raise to be caught by the calling code
 
+
 @bot.tree.command(name="resetplayer", description="Reset all data for a specific player (Admin only)")
 @app_commands.describe(
     member="The member whose data you want to reset",
@@ -3391,7 +3541,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
     }
 
     try:
-        # 1. Get current player data before deletion (for summary)
+        # Get current player data before deletion (for summary)
         player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
         current_stats = {}
@@ -3409,7 +3559,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
                 "global_current_streak": player_data.get("global_current_streak", 0)
             }
 
-        # 2. Delete player data from players collection
+        # Delete player data from players collection
         try:
             result = system_coordinator.match_system.players.delete_one({"id": player_id})
             if result.deleted_count > 0:
@@ -3420,7 +3570,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
         except Exception as e:
             reset_summary["errors"].append(f"Failed to delete player data: {str(e)}")
 
-        # 3. Delete rank verification from ranks collection
+        # Delete rank verification from ranks collection
         try:
             ranks_collection = db.get_collection('ranks')
             result = ranks_collection.delete_one({"discord_id": player_id})
@@ -3432,7 +3582,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
         except Exception as e:
             reset_summary["errors"].append(f"Failed to delete rank verification: {str(e)}")
 
-        # 4. Remove Discord rank roles
+        # FIXED: Remove Discord rank roles with SAFE operations
         try:
             # Get rank roles
             rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
@@ -3444,20 +3594,24 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
             member_rank_roles = [role for role in member.roles if role in rank_roles]
 
             if member_rank_roles:
-                await member.remove_roles(*member_rank_roles, reason=f"Player reset by {interaction.user.display_name}")
-                reset_summary["discord_roles"] = True
-                print(f"Removed {len(member_rank_roles)} rank role(s) from {player_name}")
+                # Use SAFE role operation function
+                success = await safe_role_operation(
+                    member, "remove", *member_rank_roles,
+                    reason=f"Player reset by {interaction.user.display_name}"
+                )
+
+                if success:
+                    reset_summary["discord_roles"] = True
+                    print(f"Removed {len(member_rank_roles)} rank role(s) from {player_name}")
+                else:
+                    reset_summary["errors"].append("Failed to remove Discord roles (rate limited or permission error)")
             else:
                 print(f"No rank roles found for {player_name}")
 
-        except discord.Forbidden:
-            reset_summary["errors"].append("No permission to remove Discord roles")
-        except discord.HTTPException as e:
-            reset_summary["errors"].append(f"Discord error removing roles: {str(e)}")
         except Exception as e:
             reset_summary["errors"].append(f"Unexpected error removing roles: {str(e)}")
 
-        # 5. Remove player from player_matches tracking (if somehow still there)
+        # Remove player from player_matches tracking (if somehow still there)
         if player_id in system_coordinator.queue_manager.player_matches:
             del system_coordinator.queue_manager.player_matches[player_id]
 
@@ -3543,7 +3697,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
 
     await interaction.followup.send(embed=embed)
 
-    # Send a DM to the player (optional, with error handling)
+    # FIXED: Send a DM to the player with SAFE messaging
     try:
         dm_embed = discord.Embed(
             title="Your 6 Mans Data Has Been Reset",
@@ -3574,13 +3728,24 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
 
         dm_embed.set_footer(text="If you have questions, contact a server administrator")
 
-        await member.send(embed=dm_embed)
+        # Use safe DM sending
+        if rate_limiter:
+            await rate_limiter.send_message_with_limit(member, embed=dm_embed)
+        else:
+            await asyncio.sleep(1.0)  # Manual delay
+            await member.send(embed=dm_embed)
+
         print(f"Sent reset notification DM to {player_name}")
 
     except discord.Forbidden:
         print(f"Could not send DM to {player_name} - DMs disabled")
+    except discord.HTTPException as e:
+        if e.status == 429:
+            print(f"Rate limited sending DM to {player_name}")
+        else:
+            print(f"Error sending DM to {player_name}: {str(e)}")
     except Exception as dm_error:
-        print(f"Error sending DM to {player_name}: {str(dm_error)}")
+        print(f"Unexpected error sending DM to {player_name}: {str(dm_error)}")
 
     print(f"Player reset completed for {player_name} by {interaction.user.display_name}")
 
@@ -3918,7 +4083,6 @@ async def streak_slash(interaction: discord.Interaction, member: discord.Member 
         member = interaction.user
 
     player_id = str(member.id)
-    # Fix: Use players.find_one directly instead of get_player_stats
     player_data = system_coordinator.match_system.players.find_one({"id": player_id})
 
     if not player_data:
@@ -3960,8 +4124,11 @@ async def streak_slash(interaction: discord.Interaction, member: discord.Member 
         color=0x7289da  # Discord Blurple as default
     )
 
-    # Add player avatar
-    embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+    # SAFE: Add player avatar with error handling
+    try:
+        embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+    except:
+        pass  # Skip thumbnail if there's an error
 
     # RANKED STREAKS SECTION
     embed.add_field(
