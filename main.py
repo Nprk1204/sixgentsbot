@@ -1488,14 +1488,16 @@ async def rank_slash_enhanced(interaction: discord.Interaction, member: discord.
                         value="• Your starting MMR based on your Rocket League rank\n• Access to all queues\n• Stat tracking\n• Leaderboard placement",
                         inline=False
                     )
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    # FIX: Use followup instead of response
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                 else:
                     embed = discord.Embed(
                         title="No Rank Data",
                         description=f"{member.mention} hasn't verified their rank yet.",
                         color=0x95a5a6
                     )
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    # FIX: Use followup instead of response
+                    await interaction.followup.send(embed=embed, ephemeral=True)
                 return
         else:
             # Use data from rank record
@@ -1731,7 +1733,8 @@ async def rank_slash_enhanced(interaction: discord.Interaction, member: discord.
 
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
 
-    await interaction.response.send_message(embed=embed)
+    # FIX: Use followup instead of response since we already deferred
+    await interaction.followup.send(embed=embed)
 
     # Add final delay to prevent rapid successive /rank commands
     await asyncio.sleep(0.5)
