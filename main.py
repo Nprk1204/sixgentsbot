@@ -18,6 +18,7 @@ import random
 from rate_limiter import DiscordRateLimiter
 
 # Rate limiting configuration
+EMERGENCY_MODE = False
 DISCORD_RATE_LIMIT_ENABLED = True
 MAX_CONCURRENT_ROLE_OPERATIONS = 1  # Reduced from 3 to 1 for maximum safety
 DELAY_BETWEEN_ROLE_OPERATIONS = 2.0  # Increased from 0.5 to 2.0 seconds
@@ -144,23 +145,45 @@ async def is_duplicate_command(ctx):
 
     return False
 
+
 async def safe_fetch_member(guild, user_id, fallback_name="Unknown"):
-    """Safely fetch a Discord member with enhanced rate limiting protection"""
+    """Safely fetch a Discord member with emergency mode protection"""
+    global EMERGENCY_MODE
+
+    # Skip all fetches during emergency mode
+    if EMERGENCY_MODE:
+        print(f"🚨 Emergency mode: Skipping member fetch for {user_id}")
+        return None
+
     try:
+        # CRITICAL: Skip dummy players immediately - don't try to fetch them
+        if str(user_id).startswith('9000'):
+            print(f"ℹ️ Skipping dummy player fetch: {user_id}")
+            return None
+
+        # Skip invalid IDs
+        if not str(user_id).isdigit():
+            print(f"⚠️ Invalid user ID format: {user_id}")
+            return None
+
+        user_id = int(user_id)  # Convert to int after validation
+
         if rate_limiter:
             # Add random delay before fetching
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            return await rate_limiter.fetch_member_with_limit(guild, int(user_id), max_retries=2)
+            await asyncio.sleep(random.uniform(2.0, 4.0))  # Increased delay
+            return await rate_limiter.fetch_member_with_limit(guild, user_id, max_retries=1)
         else:
-            # Manual rate limiting fallback with longer delays
-            await asyncio.sleep(random.uniform(1.0, 3.0))  # Longer delay
-            return await guild.fetch_member(int(user_id))
+            # Manual rate limiting fallback with much longer delays
+            await asyncio.sleep(random.uniform(3.0, 6.0))  # Much longer delay
+            return await guild.fetch_member(user_id)
+
     except discord.HTTPException as e:
         if e.status == 429:
-            print(f"⚠️ Rate limited fetching member {user_id}")
+            print(f"⚠️ Rate limited fetching member {user_id} - backing off")
+            # Don't retry immediately on rate limit
             return None
         elif e.status == 404:
-            print(f"ℹ️ Member {user_id} not found")
+            print(f"ℹ️ Member {user_id} not found (404)")
             return None
         else:
             print(f"❌ HTTP error fetching member {user_id}: {e}")
@@ -171,21 +194,23 @@ async def safe_fetch_member(guild, user_id, fallback_name="Unknown"):
     except Exception as e:
         print(f"❌ Unexpected error fetching member {user_id}: {e}")
         return None
-        return None
 
 
 async def emergency_rate_limit_recovery():
-    """Emergency function to reset rate limiter state if needed"""
-    global rate_limiter
+    """Emergency function to handle severe rate limiting"""
+    print("🆘 EMERGENCY: Severe rate limiting detected!")
+    print("🚨 Implementing emergency recovery measures...")
 
-    if rate_limiter:
-        print("🆘 Emergency rate limit recovery initiated...")
-        rate_limiter.reset_failure_counts()
+    # Disable all background tasks temporarily
+    global EMERGENCY_MODE
+    EMERGENCY_MODE = True
 
-        # Add a long cooling-off period
-        await asyncio.sleep(60.0)  # 1 minute cooling off
+    # Long cooling-off period
+    print("❄️ Entering 5-minute cooling-off period...")
+    await asyncio.sleep(300)  # 5 minutes
 
-        print("✅ Emergency recovery completed")
+    print("✅ Emergency recovery completed - resuming limited operations")
+    EMERGENCY_MODE = False
 
 
 def check_rate_limit_health():
