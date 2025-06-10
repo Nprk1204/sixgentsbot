@@ -1,8 +1,7 @@
-# rate_limiter.py
 """
 Advanced Discord rate limiter for the 6 Mans bot.
 Handles both individual operations and efficient bulk operations 
-while respecting Discord's rate limits.
+while respecting Discord's rate limits more aggressively.
 """
 
 import asyncio
@@ -11,240 +10,221 @@ from typing import List, Dict, Optional, Callable, Any
 import discord
 from discord.ext import commands
 import logging
+import random
 
 
 class DiscordRateLimiter:
     """
-    Advanced Discord rate limiter that handles both individual operations
-    and efficient bulk operations while respecting Discord's rate limits.
+    Enhanced Discord rate limiter with aggressive rate limiting protection
     """
 
     def __init__(self, bot: commands.Bot = None):
         self.bot = bot
 
-        # Rate limit configurations
+        # ENHANCED: More conservative rate limits
         self.rate_limits = {
             'role_modification': {
-                'requests_per_second': 5,
-                'burst_limit': 10,
-                'delay_between_requests': 0.2
+                'requests_per_second': 2,  # Reduced from 5 to 2
+                'burst_limit': 5,  # Reduced from 10 to 5
+                'delay_between_requests': 1.0,  # Increased from 0.2 to 1.0
+                'backoff_multiplier': 2.0,
+                'max_backoff': 30.0
             },
             'member_fetch': {
-                'requests_per_second': 50,  # Discord allows up to 50/second
-                'burst_limit': 100,
-                'delay_between_requests': 0.02
+                'requests_per_second': 10,  # Reduced from 50 to 10
+                'burst_limit': 20,  # Reduced from 100 to 20
+                'delay_between_requests': 0.2,  # Increased from 0.02 to 0.2
+                'backoff_multiplier': 1.5,
+                'max_backoff': 15.0
             },
             'message_send': {
-                'requests_per_second': 10,
-                'burst_limit': 20,
-                'delay_between_requests': 0.1
+                'requests_per_second': 3,  # Reduced from 10 to 3
+                'burst_limit': 6,  # Reduced from 20 to 6
+                'delay_between_requests': 0.5,  # Increased from 0.1 to 0.5
+                'backoff_multiplier': 2.0,
+                'max_backoff': 20.0
             },
             'guild_operations': {
-                'requests_per_second': 10,
-                'burst_limit': 20,
-                'delay_between_requests': 0.1
+                'requests_per_second': 2,  # Reduced from 10 to 2
+                'burst_limit': 4,  # Reduced from 20 to 4
+                'delay_between_requests': 1.0,  # Increased from 0.1 to 1.0
+                'backoff_multiplier': 2.0,
+                'max_backoff': 25.0
             }
         }
 
         # Track rate limit state per operation type
         self.rate_limit_state = {}
 
-        # Bulk operation queue
-        self.bulk_queues = {
-            'role_removals': [],
-            'role_additions': [],
-            'member_fetches': []
-        }
+        # ENHANCED: Track consecutive failures for backoff
+        self.failure_counts = {}
+        self.last_failure_times = {}
 
-        # Background task for processing bulk operations
-        self.bulk_processor_task = None
+        # Add jitter to prevent thundering herd
+        self.use_jitter = True
 
-    def start_bulk_processor(self):
-        """Start the background bulk processor"""
-        if self.bulk_processor_task is None or self.bulk_processor_task.done():
-            self.bulk_processor_task = asyncio.create_task(self._bulk_processor())
+    async def remove_role_with_limit(self, member: discord.Member, *roles, reason: str = None, max_retries: int = 5):
+        """Remove roles with enhanced rate limiting and retry logic"""
+        return await self._enhanced_rate_limited_operation(
+            'role_modification',
+            member.remove_roles,
+            max_retries,
+            *roles,
+            reason=reason
+        )
 
-    def stop_bulk_processor(self):
-        """Stop the background bulk processor"""
-        if self.bulk_processor_task and not self.bulk_processor_task.done():
-            self.bulk_processor_task.cancel()
+    async def add_role_with_limit(self, member: discord.Member, *roles, reason: str = None, max_retries: int = 5):
+        """Add roles with enhanced rate limiting and retry logic"""
+        return await self._enhanced_rate_limited_operation(
+            'role_modification',
+            member.add_roles,
+            max_retries,
+            *roles,
+            reason=reason
+        )
 
-    async def _bulk_processor(self):
-        """Background task that processes bulk operations efficiently"""
-        while True:
-            try:
-                # Process role removals in batches
-                if self.bulk_queues['role_removals']:
-                    await self._process_role_removal_batch()
+    async def fetch_member_with_limit(self, guild: discord.Guild, user_id: int, max_retries: int = 3):
+        """Fetch member with enhanced rate limiting"""
+        return await self._enhanced_rate_limited_operation(
+            'member_fetch',
+            guild.fetch_member,
+            max_retries,
+            user_id
+        )
 
-                # Process role additions in batches
-                if self.bulk_queues['role_additions']:
-                    await self._process_role_addition_batch()
+    async def send_message_with_limit(self, channel, *args, max_retries: int = 3, **kwargs):
+        """Send message with enhanced rate limiting"""
+        return await self._enhanced_rate_limited_operation(
+            'message_send',
+            channel.send,
+            max_retries,
+            *args,
+            **kwargs
+        )
 
-                # Process member fetches in batches
-                if self.bulk_queues['member_fetches']:
-                    await self._process_member_fetch_batch()
+    async def _enhanced_rate_limited_operation(self, operation_type: str, func: Callable, max_retries: int, *args,
+                                               **kwargs):
+        """Execute an operation with enhanced rate limiting and exponential backoff"""
 
-                # Small delay between batch processing cycles
-                await asyncio.sleep(0.1)
-
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logging.error(f"Error in bulk processor: {e}")
-                await asyncio.sleep(1)  # Longer delay on error
-
-    async def _process_role_removal_batch(self):
-        """Process a batch of role removals efficiently"""
-        batch_size = 5  # Process 5 at a time to respect rate limits
-        batch = self.bulk_queues['role_removals'][:batch_size]
-        self.bulk_queues['role_removals'] = self.bulk_queues['role_removals'][batch_size:]
-
-        for operation in batch:
-            try:
-                member = operation['member']
-                roles = operation['roles']
-                reason = operation.get('reason', 'Bulk role removal')
-                callback = operation.get('callback')
-
-                await member.remove_roles(*roles, reason=reason)
-
-                if callback:
-                    await callback(member, roles, True, None)
-
-            except Exception as e:
-                logging.error(f"Error removing roles from {operation['member']}: {e}")
-                if operation.get('callback'):
-                    await operation['callback'](operation['member'], operation['roles'], False, e)
-
-            # Rate limit delay
-            await asyncio.sleep(self.rate_limits['role_modification']['delay_between_requests'])
-
-    async def _process_role_addition_batch(self):
-        """Process a batch of role additions efficiently"""
-        batch_size = 5
-        batch = self.bulk_queues['role_additions'][:batch_size]
-        self.bulk_queues['role_additions'] = self.bulk_queues['role_additions'][batch_size:]
-
-        for operation in batch:
-            try:
-                member = operation['member']
-                roles = operation['roles']
-                reason = operation.get('reason', 'Bulk role addition')
-                callback = operation.get('callback')
-
-                await member.add_roles(*roles, reason=reason)
-
-                if callback:
-                    await callback(member, roles, True, None)
-
-            except Exception as e:
-                logging.error(f"Error adding roles to {operation['member']}: {e}")
-                if operation.get('callback'):
-                    await operation['callback'](operation['member'], operation['roles'], False, e)
-
-            await asyncio.sleep(self.rate_limits['role_modification']['delay_between_requests'])
-
-    async def _process_member_fetch_batch(self):
-        """Process a batch of member fetches efficiently"""
-        batch_size = 20  # Higher batch size for fetches
-        batch = self.bulk_queues['member_fetches'][:batch_size]
-        self.bulk_queues['member_fetches'] = self.bulk_queues['member_fetches'][batch_size:]
-
-        for operation in batch:
-            try:
-                guild = operation['guild']
-                user_id = operation['user_id']
-                callback = operation.get('callback')
-
-                member = await guild.fetch_member(user_id)
-
-                if callback:
-                    await callback(member, True, None)
-
-            except Exception as e:
-                logging.error(f"Error fetching member {operation['user_id']}: {e}")
-                if operation.get('callback'):
-                    await operation['callback'](None, False, e)
-
-            await asyncio.sleep(self.rate_limits['member_fetch']['delay_between_requests'])
-
-    # PUBLIC API METHODS
-
-    async def remove_roles_bulk(self, operations: List[Dict], progress_callback: Optional[Callable] = None):
-        """
-        Queue bulk role removals for efficient processing
-
-        Args:
-            operations: List of dicts with 'member', 'roles', 'reason', 'callback'
-            progress_callback: Optional callback for progress updates
-        """
-        self.bulk_queues['role_removals'].extend(operations)
-        self.start_bulk_processor()
-
-        if progress_callback:
-            await progress_callback(f"Queued {len(operations)} role removal operations")
-
-    async def add_roles_bulk(self, operations: List[Dict], progress_callback: Optional[Callable] = None):
-        """Queue bulk role additions for efficient processing"""
-        self.bulk_queues['role_additions'].extend(operations)
-        self.start_bulk_processor()
-
-        if progress_callback:
-            await progress_callback(f"Queued {len(operations)} role addition operations")
-
-    async def fetch_members_bulk(self, operations: List[Dict], progress_callback: Optional[Callable] = None):
-        """Queue bulk member fetches for efficient processing"""
-        self.bulk_queues['member_fetches'].extend(operations)
-        self.start_bulk_processor()
-
-        if progress_callback:
-            await progress_callback(f"Queued {len(operations)} member fetch operations")
-
-    async def remove_role_with_limit(self, member: discord.Member, *roles, reason: str = None):
-        """Remove roles with individual rate limiting"""
-        await self._rate_limited_operation('role_modification',
-                                           member.remove_roles, *roles, reason=reason)
-
-    async def add_role_with_limit(self, member: discord.Member, *roles, reason: str = None):
-        """Add roles with individual rate limiting"""
-        await self._rate_limited_operation('role_modification',
-                                           member.add_roles, *roles, reason=reason)
-
-    async def fetch_member_with_limit(self, guild: discord.Guild, user_id: int):
-        """Fetch member with rate limiting"""
-        return await self._rate_limited_operation('member_fetch',
-                                                  guild.fetch_member, user_id)
-
-    async def send_message_with_limit(self, channel, *args, **kwargs):
-        """Send message with rate limiting"""
-        return await self._rate_limited_operation('message_send',
-                                                  channel.send, *args, **kwargs)
-
-    async def _rate_limited_operation(self, operation_type: str, func: Callable, *args, **kwargs):
-        """Execute an operation with rate limiting"""
-        # Initialize rate limit state if not exists
+        # Initialize tracking if needed
         if operation_type not in self.rate_limit_state:
             self.rate_limit_state[operation_type] = {
                 'last_request': 0,
                 'request_count': 0,
                 'reset_time': time.time()
             }
+            self.failure_counts[operation_type] = 0
+            self.last_failure_times[operation_type] = 0
 
-        state = self.rate_limit_state[operation_type]
         config = self.rate_limits[operation_type]
 
+        # Check if we're in backoff period due to recent failures
+        current_time = time.time()
+        if self.failure_counts[operation_type] > 0:
+            time_since_failure = current_time - self.last_failure_times[operation_type]
+            required_backoff = min(
+                config['delay_between_requests'] * (
+                            config['backoff_multiplier'] ** self.failure_counts[operation_type]),
+                config['max_backoff']
+            )
+
+            if time_since_failure < required_backoff:
+                wait_time = required_backoff - time_since_failure
+                if self.use_jitter:
+                    wait_time += random.uniform(0, wait_time * 0.1)  # Add up to 10% jitter
+
+                print(
+                    f"⏳ Backoff wait for {operation_type}: {wait_time:.2f}s (failure count: {self.failure_counts[operation_type]})")
+                await asyncio.sleep(wait_time)
+
+        # Attempt the operation with retries
+        for attempt in range(max_retries):
+            try:
+                # Apply rate limiting before each attempt
+                await self._apply_rate_limiting(operation_type)
+
+                # Execute the operation
+                result = await func(*args, **kwargs)
+
+                # Success - reset failure count
+                self.failure_counts[operation_type] = 0
+                self.rate_limit_state[operation_type]['request_count'] += 1
+                self.rate_limit_state[operation_type]['last_request'] = time.time()
+
+                return result
+
+            except discord.HTTPException as e:
+                if e.status == 429:  # Rate limited
+                    self.failure_counts[operation_type] += 1
+                    self.last_failure_times[operation_type] = time.time()
+
+                    # Get retry_after from Discord or use exponential backoff
+                    retry_after = getattr(e, 'retry_after', None)
+                    if retry_after is None:
+                        retry_after = min(
+                            config['delay_between_requests'] * (2 ** attempt),
+                            config['max_backoff']
+                        )
+
+                    # Add jitter to prevent synchronized retries
+                    if self.use_jitter:
+                        jitter = random.uniform(0, retry_after * 0.2)  # Up to 20% jitter
+                        retry_after += jitter
+
+                    print(
+                        f"🚫 Rate limited ({operation_type}, attempt {attempt + 1}/{max_retries}): waiting {retry_after:.2f}s")
+
+                    if attempt < max_retries - 1:  # Don't wait on last attempt
+                        await asyncio.sleep(retry_after)
+                        continue
+                    else:
+                        print(f"❌ {operation_type} failed after {max_retries} attempts due to rate limiting")
+                        raise
+
+                elif e.status == 403:  # Forbidden
+                    print(f"❌ Permission denied for {operation_type}: {e}")
+                    raise
+
+                elif e.status == 404:  # Not found
+                    print(f"❌ Resource not found for {operation_type}: {e}")
+                    raise
+
+                else:  # Other HTTP errors
+                    print(f"❌ HTTP {e.status} error for {operation_type}: {e}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** attempt)  # Exponential backoff for other errors
+                        continue
+                    else:
+                        raise
+
+            except Exception as e:
+                print(f"❌ Unexpected error in {operation_type} (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1 + attempt)  # Linear backoff for unexpected errors
+                    continue
+                else:
+                    raise
+
+        # Should not reach here, but just in case
+        raise Exception(f"Failed to complete {operation_type} after {max_retries} attempts")
+
+    async def _apply_rate_limiting(self, operation_type: str):
+        """Apply rate limiting before making a request"""
+        state = self.rate_limit_state[operation_type]
+        config = self.rate_limits[operation_type]
         current_time = time.time()
 
-        # Reset counter if enough time has passed
+        # Reset request count if enough time has passed
         if current_time - state['reset_time'] >= 1.0:
             state['request_count'] = 0
             state['reset_time'] = current_time
 
-        # Check if we need to wait
+        # Check if we've hit the rate limit
         if state['request_count'] >= config['requests_per_second']:
             wait_time = 1.0 - (current_time - state['reset_time'])
             if wait_time > 0:
+                if self.use_jitter:
+                    wait_time += random.uniform(0, 0.1)  # Small jitter
                 await asyncio.sleep(wait_time)
                 # Reset after waiting
                 state['request_count'] = 0
@@ -252,344 +232,178 @@ class DiscordRateLimiter:
 
         # Ensure minimum delay between requests
         time_since_last = current_time - state['last_request']
-        if time_since_last < config['delay_between_requests']:
-            await asyncio.sleep(config['delay_between_requests'] - time_since_last)
+        min_delay = config['delay_between_requests']
 
-        # Execute the operation
-        try:
-            result = await func(*args, **kwargs)
-            state['request_count'] += 1
-            state['last_request'] = time.time()
-            return result
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = e.retry_after if hasattr(e, 'retry_after') else 1.0
-                logging.warning(f"Rate limited for {operation_type}, waiting {retry_after}s")
-                await asyncio.sleep(retry_after)
-                # Retry once
-                result = await func(*args, **kwargs)
-                state['request_count'] += 1
-                state['last_request'] = time.time()
-                return result
-            else:
-                raise
+        # Increase delay if we've had recent failures
+        if self.failure_counts[operation_type] > 0:
+            min_delay *= (1 + self.failure_counts[operation_type] * 0.5)
 
+        if time_since_last < min_delay:
+            wait_time = min_delay - time_since_last
+            if self.use_jitter:
+                wait_time += random.uniform(0, wait_time * 0.1)
+            await asyncio.sleep(wait_time)
 
-class BulkOperationHelper:
-    """Helper class for efficient bulk operations in Discord commands"""
+    def get_rate_limit_status(self) -> Dict:
+        """Get current rate limiting status for debugging"""
+        status = {}
+        current_time = time.time()
 
-    def __init__(self, rate_limiter: DiscordRateLimiter):
-        self.rate_limiter = rate_limiter
+        for op_type, state in self.rate_limit_state.items():
+            config = self.rate_limits[op_type]
+            time_since_reset = current_time - state['reset_time']
+            time_since_last = current_time - state['last_request']
 
-    async def bulk_role_removal_with_progress(self,
-                                              guild: discord.Guild,
-                                              role_names: List[str],
-                                              interaction: discord.Interaction = None,
-                                              progress_messages: bool = True):
-        """
-        Efficiently remove roles from all members with progress tracking
-
-        Returns:
-            Dict with results: {
-                'success_count': int,
-                'error_count': int, 
-                'errors': List[str],
-                'members_processed': int
+            status[op_type] = {
+                'current_requests': state['request_count'],
+                'max_requests_per_second': config['requests_per_second'],
+                'time_since_reset': time_since_reset,
+                'time_since_last_request': time_since_last,
+                'failure_count': self.failure_counts.get(op_type, 0),
+                'in_backoff': self.failure_counts.get(op_type, 0) > 0 and
+                              (current_time - self.last_failure_times.get(op_type, 0)) < config[
+                                  'delay_between_requests']
             }
-        """
-        results = {
-            'success_count': 0,
-            'error_count': 0,
-            'errors': [],
-            'members_processed': 0
-        }
 
-        # Get all roles to remove
-        roles_to_remove = []
-        for role_name in role_names:
-            role = discord.utils.get(guild.roles, name=role_name)
-            if role:
-                roles_to_remove.append(role)
+        return status
 
-        if not roles_to_remove:
-            return results
+    async def health_check(self) -> bool:
+        """Check if the rate limiter is in a healthy state"""
+        total_failures = sum(self.failure_counts.values())
+        return total_failures < 10  # Consider unhealthy if more than 10 total failures
 
-        # Progress tracking
-        last_progress_time = time.time()
-        progress_interval = 5.0  # Update every 5 seconds
-
-        async def progress_callback(message: str):
-            nonlocal last_progress_time
-            current_time = time.time()
-            if progress_messages and interaction and (current_time - last_progress_time > progress_interval):
-                try:
-                    await interaction.followup.send(f"📊 Progress: {message}", ephemeral=True)
-                    last_progress_time = current_time
-                except:
-                    pass  # Ignore if we can't send progress updates
-
-        # Collect members who have these roles
-        members_with_roles = []
-
-        if progress_messages and interaction:
-            await interaction.followup.send("🔍 Scanning server members...", ephemeral=True)
-
-        # Use bulk member fetching if we need to fetch members
-        member_count = 0
-        for member in guild.members:
-            member_roles = [role for role in member.roles if role in roles_to_remove]
-            if member_roles:
-                members_with_roles.append({
-                    'member': member,
-                    'roles': member_roles,
-                    'reason': 'Bulk role removal operation'
-                })
-                member_count += 1
-
-            # Periodic progress updates during scanning
-            if member_count % 100 == 0 and progress_messages:
-                await progress_callback(f"Found {member_count} members with roles to remove...")
-
-        if not members_with_roles:
-            if progress_messages and interaction:
-                await interaction.followup.send("✅ No members found with specified roles.", ephemeral=True)
-            return results
-
-        if progress_messages and interaction:
-            await interaction.followup.send(
-                f"🚀 Starting bulk role removal for {len(members_with_roles)} members...",
-                ephemeral=True
-            )
-
-        # Add callback to track results
-        async def result_callback(member, roles, success, error):
-            if success:
-                results['success_count'] += 1
-            else:
-                results['error_count'] += 1
-                results['errors'].append(f"{member.display_name}: {str(error)}")
-
-            results['members_processed'] += 1
-
-            # Progress updates
-            if results['members_processed'] % 10 == 0:
-                await progress_callback(
-                    f"Processed {results['members_processed']}/{len(members_with_roles)} members "
-                    f"(✅ {results['success_count']} ❌ {results['error_count']})"
-                )
-
-        # Add callbacks to operations
-        for operation in members_with_roles:
-            operation['callback'] = result_callback
-
-        # Queue the bulk operations
-        await self.rate_limiter.remove_roles_bulk(members_with_roles, progress_callback)
-
-        # Wait for completion
-        start_time = time.time()
-        while results['members_processed'] < len(members_with_roles):
-            await asyncio.sleep(0.5)
-
-            # Timeout after 10 minutes
-            if time.time() - start_time > 600:
-                break
-
-        return results
-
-    async def smart_member_search(self,
-                                  guild: discord.Guild,
-                                  search_criteria: Dict,
-                                  interaction: discord.Interaction = None) -> List[discord.Member]:
-        """
-        Efficiently search for members based on various criteria
-
-        Args:
-            guild: Discord guild
-            search_criteria: Dict with keys like 'role_names', 'name_contains', etc.
-            interaction: For progress updates
-
-        Returns:
-            List of matching members
-        """
-        matching_members = []
-
-        # Check if we need to use member cache or fetch from API
-        if len(guild.members) < guild.member_count:
-            # Need to fetch more members
-            if interaction:
-                await interaction.followup.send("🔄 Loading complete member list...", ephemeral=True)
-
-            try:
-                await guild.chunk(cache=True)
-            except Exception as e:
-                logging.error(f"Error chunking guild: {e}")
-
-        # Apply search criteria
-        for member in guild.members:
-            matches = True
-
-            # Check role criteria
-            if 'role_names' in search_criteria:
-                required_roles = search_criteria['role_names']
-                member_role_names = [role.name for role in member.roles]
-                if not any(role_name in member_role_names for role_name in required_roles):
-                    matches = False
-
-            # Check name criteria
-            if 'name_contains' in search_criteria and matches:
-                name_search = search_criteria['name_contains'].lower()
-                if (name_search not in member.display_name.lower() and
-                        name_search not in member.name.lower()):
-                    matches = False
-
-            # Check bot criteria
-            if 'exclude_bots' in search_criteria and search_criteria['exclude_bots'] and matches:
-                if member.bot:
-                    matches = False
-
-            if matches:
-                matching_members.append(member)
-
-        return matching_members
+    def reset_failure_counts(self):
+        """Reset all failure counts (for manual recovery)"""
+        self.failure_counts = {op_type: 0 for op_type in self.rate_limits.keys()}
+        self.last_failure_times = {op_type: 0 for op_type in self.rate_limits.keys()}
+        print("🔄 Rate limiter failure counts reset")
 
 
-# Helper functions for easy integration
-async def safe_role_operation(rate_limiter: DiscordRateLimiter, member: discord.Member, operation: str, *roles,
-                              reason: str = None):
+# Enhanced safe operation functions
+async def ultra_safe_role_operation(rate_limiter: DiscordRateLimiter, member: discord.Member,
+                                    operation: str, *roles, reason: str = None, max_wait: float = 60.0):
     """
-    Safely perform role operations with rate limiting
+    Ultra-safe role operation with maximum protection against rate limiting
 
     Args:
-        rate_limiter: The rate limiter instance
+        rate_limiter: The enhanced rate limiter instance
         member: Discord member
         operation: 'add' or 'remove'
         roles: Roles to add/remove
         reason: Reason for the operation
+        max_wait: Maximum time to wait for completion
+
+    Returns:
+        Tuple of (success: bool, error_message: str or None)
     """
+    start_time = time.time()
+
     try:
+        # Add extra safety delay before starting
+        await asyncio.sleep(random.uniform(0.5, 1.5))
+
         if operation == 'add':
-            await rate_limiter.add_role_with_limit(member, *roles, reason=reason)
+            await rate_limiter.add_role_with_limit(member, *roles, reason=reason, max_retries=3)
         elif operation == 'remove':
-            await rate_limiter.remove_role_with_limit(member, *roles, reason=reason)
+            await rate_limiter.remove_role_with_limit(member, *roles, reason=reason, max_retries=3)
+        else:
+            return False, f"Invalid operation: {operation}"
+
+        # Add extra safety delay after completion
+        await asyncio.sleep(random.uniform(0.5, 1.0))
+
+        elapsed = time.time() - start_time
+        print(f"✅ Ultra-safe {operation} operation completed in {elapsed:.2f}s for {member.display_name}")
+
         return True, None
+
+    except asyncio.TimeoutError:
+        return False, f"Operation timed out after {max_wait}s"
+    except discord.HTTPException as e:
+        if e.status == 429:
+            return False, f"Rate limited (this should be rare with enhanced protection)"
+        elif e.status == 403:
+            return False, f"Permission denied"
+        elif e.status == 404:
+            return False, f"Member or role not found"
+        else:
+            return False, f"Discord API error {e.status}: {str(e)}"
     except Exception as e:
-        return False, str(e)
+        return False, f"Unexpected error: {str(e)}"
 
 
-async def send_progress_update(rate_limiter: DiscordRateLimiter, channel, message: str, delay: float = 1.0):
-    """Send progress updates with rate limiting to avoid spam"""
-    try:
-        await rate_limiter.send_message_with_limit(channel, message)
-        await asyncio.sleep(delay)  # Additional delay for readability
-    except Exception as e:
-        logging.error(f"Failed to send progress update: {e}")
-
-    async def handle_rate_limit_with_backoff(self, func, *args, max_retries=3, **kwargs):
-        """Handle rate limits with exponential backoff"""
-        for attempt in range(max_retries):
-            try:
-                return await func(*args, **kwargs)
-            except discord.HTTPException as e:
-                if e.status == 429:  # Rate limited
-                    retry_after = getattr(e, 'retry_after', 2 ** attempt)
-                    print(f"Rate limited, waiting {retry_after}s (attempt {attempt + 1}/{max_retries})")
-                    await asyncio.sleep(retry_after)
-                    continue
-                elif e.status == 403:  # Forbidden - might be permissions issue
-                    print(f"Permission denied for operation: {e}")
-                    raise
-                else:
-                    print(f"HTTP error {e.status}: {e}")
-                    raise
-            except Exception as e:
-                print(f"Unexpected error in rate limit handler: {e}")
-                if attempt == max_retries - 1:
-                    raise
-                await asyncio.sleep(2 ** attempt)
-
-        raise Exception(f"Failed after {max_retries} attempts")
-
-
-# 2. Improved role removal function with better error handling
-async def safe_bulk_role_removal(guild, role_names, max_concurrent=5, delay_between_batches=2.0):
+async def batch_role_operations_with_extreme_safety(rate_limiter: DiscordRateLimiter,
+                                                    operations: List[Dict],
+                                                    progress_callback=None):
     """
-    Safely remove roles from all members with strict rate limiting
+    Process role operations in batches with extreme safety measures
+
+    Args:
+        rate_limiter: Enhanced rate limiter
+        operations: List of dicts with 'member', 'operation', 'roles', 'reason'
+        progress_callback: Optional async function for progress updates
+
+    Returns:
+        Dict with results
     """
-    # Find all roles to remove
-    roles_to_remove = [discord.utils.get(guild.roles, name=name) for name in role_names]
-    roles_to_remove = [role for role in roles_to_remove if role is not None]
-
-    if not roles_to_remove:
-        return {"success": 0, "errors": [], "message": "No roles found to remove"}
-
-    # Find members with these roles
-    members_with_roles = []
-    for member in guild.members:
-        if member.bot:
-            continue
-        member_roles = [role for role in member.roles if role in roles_to_remove]
-        if member_roles:
-            members_with_roles.append((member, member_roles))
-
-    if not members_with_roles:
-        return {"success": 0, "errors": [], "message": "No members found with specified roles"}
-
-    print(f"Found {len(members_with_roles)} members with roles to remove")
-
-    success_count = 0
-    errors = []
-
-    # Process in small batches with delays
-    for i in range(0, len(members_with_roles), max_concurrent):
-        batch = members_with_roles[i:i + max_concurrent]
-
-        # Process each member in the batch
-        batch_tasks = []
-        for member, member_roles in batch:
-            async def remove_roles_for_member(m, roles):
-                try:
-                    await m.remove_roles(*roles, reason="Leaderboard reset")
-                    return True, None
-                except discord.Forbidden:
-                    return False, f"No permission to remove roles from {m.display_name}"
-                except discord.HTTPException as e:
-                    if e.status == 429:
-                        # Wait and retry once
-                        await asyncio.sleep(getattr(e, 'retry_after', 5))
-                        try:
-                            await m.remove_roles(*roles, reason="Leaderboard reset - retry")
-                            return True, None
-                        except Exception as retry_error:
-                            return False, f"Rate limited retry failed for {m.display_name}: {str(retry_error)}"
-                    else:
-                        return False, f"HTTP error for {m.display_name}: {str(e)}"
-                except Exception as e:
-                    return False, f"Unexpected error for {m.display_name}: {str(e)}"
-
-            batch_tasks.append(remove_roles_for_member(member, member_roles))
-
-        # Wait for all tasks in this batch to complete
-        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-
-        # Process results
-        for result in batch_results:
-            if isinstance(result, Exception):
-                errors.append(f"Task exception: {str(result)}")
-            elif result[0]:  # Success
-                success_count += 1
-            else:  # Error
-                errors.append(result[1])
-
-        # Progress update
-        progress = min(i + max_concurrent, len(members_with_roles))
-        print(f"Processed {progress}/{len(members_with_roles)} members (✅ {success_count} ❌ {len(errors)})")
-
-        # Delay between batches to respect rate limits
-        if i + max_concurrent < len(members_with_roles):
-            await asyncio.sleep(delay_between_batches)
-
-    return {
-        "success": success_count,
-        "errors": errors,
-        "message": f"Completed: {success_count} successful, {len(errors)} errors"
+    results = {
+        'total': len(operations),
+        'successful': 0,
+        'failed': 0,
+        'errors': []
     }
+
+    print(f"🚀 Starting batch role operations for {len(operations)} members with extreme safety")
+
+    # Process one at a time with long delays for maximum safety
+    for i, op in enumerate(operations):
+        try:
+            member = op['member']
+            operation = op['operation']  # 'add' or 'remove'
+            roles = op['roles']
+            reason = op.get('reason', 'Batch operation')
+
+            # Progress update
+            if progress_callback and i % 5 == 0:
+                try:
+                    await progress_callback(f"Processing {i + 1}/{len(operations)} members...")
+                except:
+                    pass  # Ignore progress callback errors
+
+            # Ultra-safe operation
+            success, error = await ultra_safe_role_operation(
+                rate_limiter, member, operation, *roles, reason=reason
+            )
+
+            if success:
+                results['successful'] += 1
+                print(f"✅ {i + 1}/{len(operations)}: {operation} roles for {member.display_name}")
+            else:
+                results['failed'] += 1
+                results['errors'].append(f"{member.display_name}: {error}")
+                print(f"❌ {i + 1}/{len(operations)}: Failed for {member.display_name} - {error}")
+
+            # CRITICAL: Long delay between each member (5-10 seconds)
+            if i < len(operations) - 1:  # Don't wait after the last operation
+                delay = random.uniform(5.0, 10.0)  # 5-10 second random delay
+                print(f"⏳ Waiting {delay:.1f}s before next operation...")
+                await asyncio.sleep(delay)
+
+                # Extra long delay every 10 operations
+                if (i + 1) % 10 == 0:
+                    extra_delay = random.uniform(30.0, 60.0)  # 30-60 second break
+                    print(f"🛑 Taking extended break: {extra_delay:.1f}s (processed {i + 1} members)")
+                    await asyncio.sleep(extra_delay)
+
+        except Exception as e:
+            results['failed'] += 1
+            error_msg = f"Critical error processing {op.get('member', 'unknown')}: {str(e)}"
+            results['errors'].append(error_msg)
+            print(f"❌ {error_msg}")
+
+            # Still wait on error to prevent rapid fire
+            await asyncio.sleep(random.uniform(3.0, 5.0))
+
+    print(f"🏁 Batch operations completed: {results['successful']} successful, {results['failed']} failed")
+
+    return results
