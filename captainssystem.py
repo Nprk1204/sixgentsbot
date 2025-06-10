@@ -161,11 +161,11 @@ class CaptainsSystem:
             # Get discord users from IDs with rate limiting
             try:
                 if self.rate_limiter:
-                    captain1_user = await self.rate_limiter.fetch_member_with_limit(self.bot.get_guild(ctx.guild.id),
-                                                                                    int(captain1.get('id', 0)))
+                    captain1_user = await self.rate_limiter.fetch_member_with_limit(channel.guild, int(captain1.get('id', 0)))
+
                     await asyncio.sleep(0.2)  # Small delay between fetches
-                    captain2_user = await self.rate_limiter.fetch_member_with_limit(self.bot.get_guild(ctx.guild.id),
-                                                                                    int(captain2.get('id', 0)))
+                    captain2_user = await self.rate_limiter.fetch_member_with_limit(channel.guild, int(captain2.get('id', 0)))
+
                 else:
                     # Fallback with manual delays
                     captain1_user = await self.bot.fetch_user(int(captain1.get('id', 0)))
@@ -603,9 +603,6 @@ class CaptainsSystem:
 
         # Clean up
         self.cancel_selection(match_id=match_id)
-
-    # ... [Keep all your existing methods: get_player_mmrs, captain1_selection, captain2_selection,
-    # create_teams_embed, calculate_team_mmr, fallback_to_random, etc. - they remain unchanged] ...
 
     async def get_player_mmrs(self, players, channel=None):
         """
