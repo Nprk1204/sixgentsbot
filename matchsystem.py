@@ -40,11 +40,11 @@ class MatchSystem:
         """Set the queue manager reference"""
         self.queue_manager = queue_manager
 
-    def is_dummy_player(player_id):
+    def is_dummy_player(self, player_id):
         """Check if a player ID belongs to a dummy/test player"""
         return str(player_id).startswith('9000')
 
-    def is_real_player(player_id):
+    def is_real_player(self, player_id):
         """Check if a player ID belongs to a real Discord user"""
         return not str(player_id).startswith('9000')
 
@@ -1084,10 +1084,10 @@ class MatchSystem:
             # Add delay even on error to prevent rapid retries
             await asyncio.sleep(1.0)
 
-    async def update_discord_role_safe(self, ctx, player_id, new_mmr):
-        """ULTRA-SAFE Discord role update method with extensive rate limiting protection"""
+    async def update_discord_role_ultra_safe(self, ctx, player_id, new_mmr):
+        """ULTRA-SAFE Discord role update method with extreme rate limiting protection"""
         try:
-            # CRITICAL: Double-check this is not a dummy player
+            # CRITICAL: Triple-check this is not a dummy player
             if self.is_dummy_player(player_id):
                 print(f"🚨 SAFETY CHECK: Attempted to update role for dummy player {player_id} - BLOCKED")
                 return
@@ -1097,21 +1097,22 @@ class MatchSystem:
                 print(f"⚠️ No rate limiter available - skipping role update for player {player_id}")
                 return
 
-            print(f"🔄 Starting SAFE role update for player {player_id} (MMR: {new_mmr})")
+            print(f"🔄 Starting ULTRA-SAFE role update for player {player_id} (MMR: {new_mmr})")
 
             # Define MMR thresholds for ranks
             RANK_A_THRESHOLD = 1600
             RANK_B_THRESHOLD = 1100
 
-            # ULTRA-SAFE member fetching with extensive delays
+            # ULTRA-SAFE member fetching with extensive delays and retries
             member = None
-            max_retries = 3
+            max_retries = 5
             for attempt in range(max_retries):
                 try:
                     print(f"🔍 Attempt {attempt + 1}/{max_retries}: Fetching member {player_id}")
 
-                    # Pre-fetch delay
-                    await asyncio.sleep(2.0)
+                    # ENHANCED: Pre-fetch delay that increases with each attempt
+                    delay = 3.0 * (attempt + 1)  # 3s, 6s, 9s, 12s, 15s
+                    await asyncio.sleep(delay)
 
                     member = await self.rate_limiter.fetch_member_with_limit(ctx.guild, int(player_id))
 
@@ -1121,7 +1122,7 @@ class MatchSystem:
 
                 except discord.HTTPException as e:
                     if e.status == 429:
-                        wait_time = 10.0 * (attempt + 1)  # Exponential backoff
+                        wait_time = max(15.0 * (attempt + 1), getattr(e, 'retry_after', 15))  # Minimum 15s, escalating
                         print(f"⚠️ Rate limited on attempt {attempt + 1}, waiting {wait_time}s")
                         await asyncio.sleep(wait_time)
                         continue
@@ -1140,7 +1141,7 @@ class MatchSystem:
                     print(f"❌ Unexpected error fetching member {player_id}: {e}")
                     if attempt == max_retries - 1:
                         return
-                    await asyncio.sleep(3.0)
+                    await asyncio.sleep(5.0)
 
             if not member:
                 print(f"❌ Could not fetch member {player_id} after {max_retries} attempts")
@@ -1182,54 +1183,106 @@ class MatchSystem:
             print(
                 f"🔄 Updating role for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
 
-            # ULTRA-SAFE role updates with extensive delays
+            # ULTRA-SAFE role updates with EXTREME delays and multiple approaches
             try:
-                # Remove old role with delay
-                if current_rank_role:
-                    print(f"🗑️ Removing old role: {current_rank_role.name}")
-                    await self.rate_limiter.remove_role_with_limit(
-                        member, current_rank_role, reason="MMR rank update"
-                    )
-                    await asyncio.sleep(3.0)  # 3 second delay after removal
+                role_update_success = False
 
-                # Add new role with delay
-                print(f"➕ Adding new role: {new_role.name}")
-                await self.rate_limiter.add_role_with_limit(
-                    member, new_role, reason=f"MMR update: {new_mmr}"
-                )
-                await asyncio.sleep(2.0)  # 2 second delay after addition
-
-                print(f"✅ Successfully updated role for {member.display_name}")
-
-                # Handle promotion announcement (with additional safety)
-                if not current_rank_role or (
-                        (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
-                        (current_rank_role == rank_b_role and new_role == rank_a_role)
-                ):
-                    try:
-                        print(f"🎉 Sending promotion message for {member.display_name}")
-                        await asyncio.sleep(2.0)  # Delay before promotion message
-                        await self.rate_limiter.send_message_with_limit(
-                            ctx.channel,
-                            f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!"
+                # Method 1: Rate limiter approach
+                try:
+                    # Remove old role with delay
+                    if current_rank_role:
+                        print(f"🗑️ Removing old role: {current_rank_role.name}")
+                        await self.rate_limiter.remove_role_with_limit(
+                            member, current_rank_role, reason="MMR rank update"
                         )
-                    except Exception as msg_error:
-                        print(f"⚠️ Could not send promotion message: {msg_error}")
+                        await asyncio.sleep(5.0)  # 5 second delay after removal
 
-            except discord.HTTPException as role_error:
-                if role_error.status == 429:
-                    print(f"❌ Rate limited during role update for {member.display_name} - update skipped")
+                    # Add new role with delay
+                    print(f"➕ Adding new role: {new_role.name}")
+                    await self.rate_limiter.add_role_with_limit(
+                        member, new_role, reason=f"MMR update: {new_mmr}"
+                    )
+                    await asyncio.sleep(3.0)  # 3 second delay after addition
+
+                    role_update_success = True
+                    print(f"✅ Rate limiter method successful for {member.display_name}")
+
+                except Exception as rl_error:
+                    print(f"⚠️ Rate limiter method failed for {member.display_name}: {rl_error}")
+
+                # Method 2: Manual approach with EXTREME delays if rate limiter failed
+                if not role_update_success:
+                    try:
+                        print(f"🔄 Trying manual method with extreme delays...")
+
+                        # Remove old role manually
+                        if current_rank_role:
+                            await asyncio.sleep(8.0)  # 8 second pre-delay
+                            await member.remove_roles(current_rank_role, reason="MMR rank update")
+                            await asyncio.sleep(8.0)  # 8 second post-delay
+
+                        # Add new role manually
+                        await asyncio.sleep(5.0)  # 5 second between operations
+                        await member.add_roles(new_role, reason=f"MMR update: {new_mmr}")
+                        await asyncio.sleep(5.0)  # 5 second post-delay
+
+                        role_update_success = True
+                        print(f"✅ Manual method successful for {member.display_name}")
+
+                    except discord.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = max(getattr(e, 'retry_after', 20), 20)  # Minimum 20 second wait
+                            print(
+                                f"⚠️ Rate limited during manual method, waiting {retry_after}s for {member.display_name}")
+                            await asyncio.sleep(retry_after)
+
+                            # Single retry attempt with even longer delays
+                            try:
+                                if current_rank_role:
+                                    await asyncio.sleep(10.0)
+                                    await member.remove_roles(current_rank_role, reason="MMR rank update - retry")
+                                    await asyncio.sleep(10.0)
+
+                                await asyncio.sleep(10.0)
+                                await member.add_roles(new_role, reason=f"MMR update: {new_mmr} - retry")
+                                role_update_success = True
+                                print(f"✅ Manual retry successful for {member.display_name}")
+                            except Exception as retry_error:
+                                print(f"❌ Manual retry failed for {member.display_name}: {retry_error}")
+                        else:
+                            print(f"❌ Manual HTTP error for {member.display_name}: {e}")
+                    except Exception as e:
+                        print(f"❌ Manual unexpected error for {member.display_name}: {e}")
+
+                if role_update_success:
+                    print(f"✅ Successfully updated role for {member.display_name}")
+
+                    # Handle promotion announcement (with additional safety and delay)
+                    if not current_rank_role or (
+                            (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
+                            (current_rank_role == rank_b_role and new_role == rank_a_role)
+                    ):
+                        try:
+                            print(f"🎉 Sending promotion message for {member.display_name}")
+                            await asyncio.sleep(5.0)  # 5 second delay before promotion message
+                            await self.rate_limiter.send_message_with_limit(
+                                ctx.channel,
+                                f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!"
+                            )
+                        except Exception as msg_error:
+                            print(f"⚠️ Could not send promotion message: {msg_error}")
                 else:
-                    print(f"❌ HTTP error during role update: {role_error}")
-            except Exception as role_error:
-                print(f"❌ Unexpected error during role update: {role_error}")
+                    print(f"❌ Failed to update role for {member.display_name} - all methods failed")
 
-            # Final safety delay
-            await asyncio.sleep(2.0)
+            except Exception as role_error:
+                print(f"❌ Critical error during role update for {member.display_name}: {role_error}")
+
+            # Final safety delay (longer than before)
+            await asyncio.sleep(5.0)
 
         except Exception as e:
-            print(f"❌ Critical error in safe role update for {player_id}: {e}")
-            await asyncio.sleep(2.0)
+            print(f"❌ Critical error in ultra safe role update for {player_id}: {e}")
+            await asyncio.sleep(3.0)
 
     def update_player_mmr(self, winning_team, losing_team, match_id=None):
         """Update MMR for all players in the match with enhanced dynamic MMR changes"""

@@ -267,8 +267,8 @@ class CaptainsSystem:
                 f"❌ An error occurred during captain selection: {str(e)}. Falling back to random team selection.")
             await self.fallback_to_random(match_id)
 
-    async def test_dm_capability(self, user):
-        """Test if we can DM a user - ENHANCED WITH RATE LIMITING"""
+    async def test_dm_capability_enhanced(self, user):
+        """ENHANCED test if we can DM a user with better rate limiting protection"""
         try:
             test_embed = discord.Embed(
                 title="Captain Selection Test",
@@ -276,59 +276,66 @@ class CaptainsSystem:
                 color=0x3498db
             )
 
+            dm_success = False
+
+            # Method 1: Use rate limiter if available
             if self.rate_limiter:
-                # Use rate limiter for DM operations with enhanced error handling
                 try:
                     await self.rate_limiter.send_message_with_limit(user, embed=test_embed)
-                    await asyncio.sleep(0.5)  # Small delay between DMs
+                    await asyncio.sleep(1.0)  # 1 second delay
                     await self.rate_limiter.send_message_with_limit(user,
                                                                     "✅ DM test successful! Captain selection starting...")
-                    return True
+                    dm_success = True
                 except discord.HTTPException as e:
                     if e.status == 429:  # Rate limited
-                        retry_after = getattr(e, 'retry_after', 2)
-                        print(f"DM rate limited, waiting {retry_after}s")
+                        retry_after = max(getattr(e, 'retry_after', 5), 5)  # Minimum 5 second wait
+                        print(f"DM rate limited for {user.display_name}, waiting {retry_after}s")
                         await asyncio.sleep(retry_after)
                         try:
                             # Single retry
                             await self.rate_limiter.send_message_with_limit(user,
                                                                             "✅ DM test successful! Captain selection starting...")
-                            return True
-                        except:
-                            print(f"DM retry failed for {user.display_name}")
-                            return False
+                            dm_success = True
+                        except Exception as retry_error:
+                            print(f"DM retry failed for {user.display_name}: {retry_error}")
                     elif e.status == 403:  # Forbidden
+                        print(f"DMs disabled for {user.display_name}")
                         return False
                     else:
                         print(f"DM test HTTP error for {user.display_name}: {e}")
-                        return False
-            else:
-                # Fallback with manual delays and enhanced error handling
+                except Exception as e:
+                    print(f"DM test unexpected error for {user.display_name}: {e}")
+
+            # Method 2: Manual approach with longer delays if rate limiter failed
+            if not dm_success:
                 try:
+                    await asyncio.sleep(3.0)  # 3 second delay before manual attempt
                     await user.send(embed=test_embed)
-                    await asyncio.sleep(1.5)  # Longer manual delay to prevent rate limiting
+                    await asyncio.sleep(2.0)  # 2 second delay between messages
                     await user.send("✅ DM test successful! Captain selection starting...")
-                    return True
+                    dm_success = True
                 except discord.HTTPException as e:
                     if e.status == 429:  # Rate limited
-                        retry_after = getattr(e, 'retry_after', 3)
-                        print(f"DM rate limited (manual), waiting {retry_after}s")
+                        retry_after = max(getattr(e, 'retry_after', 10), 10)  # Minimum 10 second wait
+                        print(f"DM rate limited (manual) for {user.display_name}, waiting {retry_after}s")
                         await asyncio.sleep(retry_after)
                         try:
                             await user.send("✅ DM test successful! Captain selection starting...")
-                            return True
-                        except:
-                            print(f"DM manual retry failed for {user.display_name}")
-                            return False
+                            dm_success = True
+                        except Exception as retry_error:
+                            print(f"DM manual retry failed for {user.display_name}: {retry_error}")
                     elif e.status == 403:  # Forbidden
+                        print(f"DMs disabled for {user.display_name}")
                         return False
                     else:
                         print(f"DM test manual HTTP error for {user.display_name}: {e}")
-                        return False
-        except (discord.Forbidden, discord.HTTPException):
-            return False
+                except Exception as e:
+                    print(f"DM test manual unexpected error for {user.display_name}: {e}")
+
+            return dm_success
+
         except Exception as e:
-            print(f"Unexpected error in DM test for {user.display_name}: {e}")
+            print(f"Critical error in DM test for {user.display_name}: {e}")
             return False
 
     async def channel_based_captain_selection(self, channel, match_id):

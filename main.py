@@ -1283,7 +1283,7 @@ async def leaderboard_slash(interaction: discord.Interaction):
 
 @bot.tree.command(name="rank", description="Check your rank and stats (or another member's)")
 @app_commands.describe(member="The member whose rank you want to check (optional)")
-async def rank_slash(interaction: discord.Interaction, member: discord.Member = None):
+async def rank_slash_enhanced(interaction: discord.Interaction, member: discord.Member = None):
     if RESET_IN_PROGRESS:
         duration = ""
         if RESET_START_TIME:
@@ -1311,6 +1311,9 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
         )
         return
 
+    # ENHANCED: Defer response as this might involve fetching member data
+    await interaction.response.defer()
+
     if member is None:
         member = interaction.user
 
@@ -1327,10 +1330,18 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
         # Check if player has a rank verification or role
         rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
 
-        # Get rank roles
-        rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
-        rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
-        rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+        # ENHANCED: Get rank roles with rate limiting protection
+        try:
+            if rate_limiter:
+                # Use rate limiter to get member data if needed
+                await asyncio.sleep(0.1)  # Small delay to prevent rapid fetches
+
+            rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
+            rank_b_role = discord.utils.get(interaction.guild.roles, name="Rank B")
+            rank_c_role = discord.utils.get(interaction.guild.roles, name="Rank C")
+        except Exception as e:
+            print(f"Error getting rank roles for /rank command: {e}")
+            rank_a_role = rank_b_role = rank_c_role = None
 
         # Determine tier and MMR based on roles if no rank record exists
         if not rank_record:
@@ -1605,6 +1616,9 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
 
     await interaction.response.send_message(embed=embed)
+
+    # Add final delay to prevent rapid successive /rank commands
+    await asyncio.sleep(0.5)
 
 
 @bot.tree.command(name="addplayer", description="Add a player to the queue (Admin/Mod only)")
@@ -2849,7 +2863,7 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     app_commands.Choice(name="Ranked MMR", value="false"),
     app_commands.Choice(name="Global MMR", value="true")
 ])
-async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Member, amount: int,
+async def adjustmmr_slash_enhanced(interaction: discord.Interaction, player: discord.Member, amount: int,
                           global_mmr: str = "false"):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
@@ -2865,6 +2879,9 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
             "You need administrator permissions or the 6mod role to use this command.",
             ephemeral=True)
         return
+
+    # Defer response as this might include role updates
+    await interaction.response.defer()
 
     # Determine which MMR to adjust
     is_global = global_mmr.lower() == "true"
@@ -2896,11 +2913,17 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
                     "global_losses": 0,
                     "matches": 0,
                     "global_matches": 0,
+                    "current_streak": 0,
+                    "longest_win_streak": 0,
+                    "longest_loss_streak": 0,
+                    "global_current_streak": 0,
+                    "global_longest_win_streak": 0,
+                    "global_longest_loss_streak": 0,
                     "created_at": datetime.datetime.utcnow(),
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
                 )
                 return
@@ -2921,16 +2944,30 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
                     "global_losses": 0,
                     "matches": 0,
                     "global_matches": 0,
+                    "current_streak": 0,
+                    "longest_win_streak": 0,
+                    "longest_loss_streak": 0,
+                    "global_current_streak": 0,
+                    "global_longest_win_streak": 0,
+                    "global_longest_loss_streak": 0,
                     "created_at": datetime.datetime.utcnow(),
                     "last_updated": datetime.datetime.utcnow()
                 })
 
-                await interaction.response.send_message(
+                # ENHANCED: Try to update Discord role with rate limiting protection
+                try:
+                    await system_coordinator.match_system.update_discord_role_ultra_safe(
+                        interaction, player_id, new_mmr
+                    )
+                except Exception as role_error:
+                    print(f"Warning: Could not update Discord role for {player.display_name}: {role_error}")
+
+                await interaction.followup.send(
                     f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
                 )
                 return
         else:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"Player {player.mention} not found in the database and has no rank verification. They need to verify their rank first.",
                 ephemeral=True
             )
@@ -2959,6 +2996,14 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
                 "last_updated": datetime.datetime.utcnow()
             }}
         )
+
+        # ENHANCED: Try to update Discord role for ranked MMR changes with rate limiting protection
+        try:
+            await system_coordinator.match_system.update_discord_role_ultra_safe(
+                interaction, player_id, new_mmr
+            )
+        except Exception as role_error:
+            print(f"Warning: Could not update Discord role for {player.display_name}: {role_error}")
 
     # Create embed response
     embed = discord.Embed(
@@ -2995,18 +3040,18 @@ async def adjustmmr_slash(interaction: discord.Interaction, player: discord.Memb
             inline=False
         )
 
-        # Update Discord role if tier changed
+        # Update Discord role info
         if tier_changed:
             embed.add_field(
                 name="Discord Role",
-                value="Discord role will be updated on the player's next match.",
+                value="Discord role has been updated automatically (if possible).",
                 inline=False
             )
 
     embed.set_footer(
         text=f"Adjusted by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    await interaction.response.send_message(embed=embed)
+    await interaction.followup.send(embed=embed)
 
 
 async def set_reset_status(status: bool, interaction=None):
@@ -3106,16 +3151,16 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
     # IMMEDIATE response to prevent timeout
     await interaction.response.send_message(
-        f"🔄 Starting {reset_type} leaderboard reset... This will take a few minutes. Please wait.",
+        f"🔄 Starting {reset_type} leaderboard reset... This will take several minutes. Please wait.",
         ephemeral=True
     )
 
     # Run the actual reset in a background task to avoid interaction timeouts
-    asyncio.create_task(perform_reset_background(interaction, reset_type))
+    asyncio.create_task(perform_reset_background_enhanced(interaction, reset_type))
 
 
-async def perform_reset_background(interaction: discord.Interaction, reset_type: str):
-    """Perform the reset in background to avoid interaction timeouts"""
+async def perform_reset_background_enhanced(interaction: discord.Interaction, reset_type: str):
+    """ENHANCED reset with ULTRA-SAFE rate limiting for Discord roles"""
     try:
         channel = interaction.channel
         user = interaction.user
@@ -3203,8 +3248,8 @@ async def perform_reset_background(interaction: discord.Interaction, reset_type:
             if all_ranks:
                 backup_ranks_collection.insert_many(all_ranks)
 
-            # 2. SAFE DISCORD ROLE REMOVAL with rate limiting protection
-            await safe_send_message(channel, "🔄 (2/5) Removing Discord roles... This may take several minutes")
+            # 2. ULTRA-SAFE DISCORD ROLE REMOVAL with extensive rate limiting protection
+            await safe_send_message(channel, "🔄 (2/5) Removing Discord roles... This may take 10+ minutes")
 
             # Get rank roles
             rank_role_names = ["Rank A", "Rank B", "Rank C"]
@@ -3213,8 +3258,8 @@ async def perform_reset_background(interaction: discord.Interaction, reset_type:
 
             if rank_roles:
                 try:
-                    # FIXED: Use a much safer approach with longer delays
-                    removal_result = await safe_bulk_role_removal(guild, rank_roles, channel)
+                    # ENHANCED: Use the ULTRA-SAFE approach with extreme delays
+                    removal_result = await ultra_safe_bulk_role_removal(guild, rank_roles, channel)
                     roles_removed_count = removal_result['success_count']
                     role_removal_errors = removal_result['errors']
 
@@ -3320,7 +3365,8 @@ async def perform_reset_background(interaction: discord.Interaction, reset_type:
             )
 
             await safe_send_message(channel, embed=announcement)
-            await set_reset_status(False, interaction)
+
+        await set_reset_status(False, interaction)
 
     except Exception as e:
         print(f"Error in background reset: {e}")
@@ -3364,9 +3410,9 @@ async def safe_send_message(channel, content=None, embed=None, max_retries=3):
     return None
 
 
-async def safe_bulk_role_removal(guild, roles_to_remove, progress_channel=None):
-    """Ultra-safe role removal with strict rate limiting"""
-    print(f"Starting safe bulk role removal for {len(roles_to_remove)} roles")
+async def ultra_safe_bulk_role_removal(guild, roles_to_remove, progress_channel=None):
+    """ULTRA-SAFE role removal with EXTREME rate limiting protection"""
+    print(f"Starting ULTRA-SAFE bulk role removal for {len(roles_to_remove)} roles")
 
     # Find members with these roles
     members_with_roles = []
@@ -3385,52 +3431,76 @@ async def safe_bulk_role_removal(guild, roles_to_remove, progress_channel=None):
     success_count = 0
     errors = []
 
-    # Process ONE member at a time with long delays to avoid rate limiting
+    # ULTRA-SAFE: Process ONE member at a time with LONG delays (up to 10 second delays!)
     for i, (member, member_roles) in enumerate(members_with_roles):
         try:
-            # Remove roles from this member
-            await member.remove_roles(*member_roles, reason="Leaderboard reset")
-            success_count += 1
-            print(f"✅ Removed {len(member_roles)} role(s) from {member.display_name}")
+            # ENHANCED: Try multiple approaches for EACH member
+            removal_success = False
 
-        except discord.Forbidden:
-            error_msg = f"No permission to remove roles from {member.display_name}"
-            errors.append(error_msg)
-            print(f"❌ {error_msg}")
-
-        except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = getattr(e, 'retry_after', 10)
-                print(f"⏱️ Rate limited, waiting {retry_after}s")
-                await asyncio.sleep(retry_after)
-
-                # Retry once
+            # Method 1: Use rate limiter if available
+            if rate_limiter:
                 try:
-                    await member.remove_roles(*member_roles, reason="Leaderboard reset - retry")
-                    success_count += 1
-                    print(f"✅ Retry successful for {member.display_name}")
-                except Exception as retry_error:
-                    error_msg = f"Retry failed for {member.display_name}: {str(retry_error)}"
+                    await rate_limiter.remove_role_with_limit(member, *member_roles,
+                                                              reason="Complete leaderboard reset")
+                    removal_success = True
+                    print(f"✅ Rate limiter success for {member.display_name}")
+                except Exception as rl_error:
+                    print(f"⚠️ Rate limiter failed for {member.display_name}: {rl_error}")
+
+            # Method 2: Manual approach with ULTRA-LONG delays
+            if not removal_success:
+                try:
+                    await asyncio.sleep(5.0)  # 5 second pre-delay
+                    await member.remove_roles(*member_roles, reason="Complete leaderboard reset")
+                    removal_success = True
+                    print(f"✅ Manual success for {member.display_name}")
+                except discord.HTTPException as e:
+                    if e.status == 429:
+                        retry_after = max(getattr(e, 'retry_after', 15), 15)  # Minimum 15 second wait
+                        print(f"⚠️ Rate limited, waiting {retry_after}s for {member.display_name}")
+                        await asyncio.sleep(retry_after)
+
+                        # Single retry with even longer delay
+                        try:
+                            await asyncio.sleep(5.0)  # Additional 5 second delay
+                            await member.remove_roles(*member_roles, reason="Complete leaderboard reset - retry")
+                            removal_success = True
+                            print(f"✅ Retry success for {member.display_name}")
+                        except Exception as retry_error:
+                            error_msg = f"Retry failed for {member.display_name}: {str(retry_error)}"
+                            errors.append(error_msg)
+                            print(f"❌ {error_msg}")
+                    else:
+                        error_msg = f"HTTP error for {member.display_name}: {str(e)}"
+                        errors.append(error_msg)
+                        print(f"❌ {error_msg}")
+                except Exception as e:
+                    error_msg = f"Unexpected error for {member.display_name}: {str(e)}"
                     errors.append(error_msg)
                     print(f"❌ {error_msg}")
-            else:
-                error_msg = f"HTTP error for {member.display_name}: {str(e)}"
-                errors.append(error_msg)
-                print(f"❌ {error_msg}")
+
+            if removal_success:
+                success_count += 1
 
         except Exception as e:
-            error_msg = f"Unexpected error for {member.display_name}: {str(e)}"
+            error_msg = f"Critical error for {member.display_name}: {str(e)}"
             errors.append(error_msg)
             print(f"❌ {error_msg}")
 
-        # Progress update every 5 members
+        # Progress update every 5 members AND every 60 seconds
         if (i + 1) % 5 == 0 and progress_channel:
-            progress_msg = f"Role removal progress: {i + 1}/{len(members_with_roles)} members processed (✅ {success_count} ❌ {len(errors)})"
+            progress_msg = (f"Role removal progress: {i + 1}/{len(members_with_roles)} members processed "
+                            f"(✅ {success_count} ❌ {len(errors)})")
             await safe_send_message(progress_channel, progress_msg)
 
-        # CRITICAL: Wait between each member to respect rate limits
+        # CRITICAL: ULTRA-LONG delay between each member (10 seconds!)
         if i < len(members_with_roles) - 1:  # Don't wait after the last member
-            await asyncio.sleep(3.0)  # 3 second delay between each member
+            await asyncio.sleep(10.0)  # 10 second delay between each member!
+
+        # Additional safety: Every 10 members, take an extra long break
+        if (i + 1) % 10 == 0:
+            print(f"Taking extra safety break after {i + 1} members...")
+            await asyncio.sleep(30.0)  # 30 second break every 10 members
 
     return {
         "success_count": success_count,
@@ -3582,7 +3652,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
         except Exception as e:
             reset_summary["errors"].append(f"Failed to delete rank verification: {str(e)}")
 
-        # FIXED: Remove Discord rank roles with SAFE operations
+        # ENHANCED: Remove Discord rank roles with ULTRA-SAFE operations and better error handling
         try:
             # Get rank roles
             rank_a_role = discord.utils.get(interaction.guild.roles, name="Rank A")
@@ -3594,22 +3664,79 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
             member_rank_roles = [role for role in member.roles if role in rank_roles]
 
             if member_rank_roles:
-                # Use SAFE role operation function
-                success = await safe_role_operation(
-                    member, "remove", *member_rank_roles,
-                    reason=f"Player reset by {interaction.user.display_name}"
-                )
+                print(f"Attempting to remove {len(member_rank_roles)} rank roles from {player_name}")
 
-                if success:
+                # ENHANCED: Try multiple approaches with comprehensive error handling
+                role_removal_success = False
+
+                # Method 1: Use rate limiter if available
+                if rate_limiter:
+                    try:
+                        print(f"Using rate limiter for role removal...")
+                        await rate_limiter.remove_role_with_limit(
+                            member, *member_rank_roles,
+                            reason=f"Player reset by {interaction.user.display_name}"
+                        )
+                        role_removal_success = True
+                        print(f"✅ Rate limiter method successful for {player_name}")
+                    except discord.HTTPException as e:
+                        if e.status == 429:
+                            print(f"⚠️ Rate limited via rate limiter for {player_name}")
+                        else:
+                            print(f"⚠️ Rate limiter HTTP error for {player_name}: {e}")
+                    except Exception as e:
+                        print(f"⚠️ Rate limiter unexpected error for {player_name}: {e}")
+
+                # Method 2: Manual approach with extensive delays if rate limiter failed
+                if not role_removal_success:
+                    try:
+                        print(f"Using manual approach with delays...")
+                        await asyncio.sleep(3.0)  # 3 second pre-delay
+
+                        await member.remove_roles(
+                            *member_rank_roles,
+                            reason=f"Player reset by {interaction.user.display_name}"
+                        )
+                        role_removal_success = True
+                        print(f"✅ Manual method successful for {player_name}")
+
+                    except discord.HTTPException as e:
+                        if e.status == 429:
+                            retry_after = getattr(e, 'retry_after', 10)
+                            print(f"⚠️ Rate limited manually, waiting {retry_after}s for {player_name}")
+                            await asyncio.sleep(retry_after)
+
+                            # Single retry attempt
+                            try:
+                                await member.remove_roles(
+                                    *member_rank_roles,
+                                    reason=f"Player reset by {interaction.user.display_name} - retry"
+                                )
+                                role_removal_success = True
+                                print(f"✅ Manual retry successful for {player_name}")
+                            except Exception as retry_error:
+                                print(f"❌ Manual retry failed for {player_name}: {retry_error}")
+                        else:
+                            print(f"❌ Manual HTTP error for {player_name}: {e}")
+                    except Exception as e:
+                        print(f"❌ Manual unexpected error for {player_name}: {e}")
+
+                # Update summary based on success
+                if role_removal_success:
                     reset_summary["discord_roles"] = True
-                    print(f"Removed {len(member_rank_roles)} rank role(s) from {player_name}")
+                    print(f"✅ Successfully removed {len(member_rank_roles)} rank role(s) from {player_name}")
                 else:
-                    reset_summary["errors"].append("Failed to remove Discord roles (rate limited or permission error)")
+                    reset_summary["errors"].append(
+                        f"Failed to remove Discord roles - may be rate limited. Roles can be removed manually."
+                    )
+                    print(f"❌ Failed to remove roles from {player_name} - all methods failed")
+
             else:
-                print(f"No rank roles found for {player_name}")
+                print(f"ℹ️ No rank roles found for {player_name}")
 
         except Exception as e:
             reset_summary["errors"].append(f"Unexpected error removing roles: {str(e)}")
+            print(f"❌ Unexpected error in role removal for {player_name}: {e}")
 
         # Remove player from player_matches tracking (if somehow still there)
         if player_id in system_coordinator.queue_manager.player_matches:
@@ -3673,10 +3800,18 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
     if reset_summary["errors"]:
         error_text = "\n".join([f"❌ {error}" for error in reset_summary["errors"]])
         embed.add_field(
-            name="Errors Encountered",
+            name="Issues Encountered",
             value=error_text,
             inline=False
         )
+
+        # Add troubleshooting info if there were role errors
+        if any("Discord roles" in error for error in reset_summary["errors"]):
+            embed.add_field(
+                name="⚠️ Role Removal Note",
+                value="If Discord roles weren't removed due to rate limiting, you can manually remove them or try the command again in a few minutes.",
+                inline=False
+            )
 
     # Add instructions for the player
     embed.add_field(
@@ -3697,7 +3832,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
 
     await interaction.followup.send(embed=embed)
 
-    # FIXED: Send a DM to the player with SAFE messaging
+    # ENHANCED: Send a DM to the player with ULTRA-SAFE messaging and comprehensive error handling
     try:
         dm_embed = discord.Embed(
             title="Your 6 Mans Data Has Been Reset",
@@ -3710,7 +3845,7 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
             value=(
                 "• All your match history and MMR have been cleared\n"
                 "• Your rank verification has been removed\n"
-                "• Your Discord rank role has been removed"
+                "• Your Discord rank role may have been removed"
             ),
             inline=False
         )
@@ -3728,26 +3863,52 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
 
         dm_embed.set_footer(text="If you have questions, contact a server administrator")
 
-        # Use safe DM sending
+        # ENHANCED: Use multiple approaches for DM sending with comprehensive error handling
+        dm_success = False
+
+        # Method 1: Use rate limiter if available
         if rate_limiter:
-            await rate_limiter.send_message_with_limit(member, embed=dm_embed)
-        else:
-            await asyncio.sleep(1.0)  # Manual delay
-            await member.send(embed=dm_embed)
+            try:
+                await rate_limiter.send_message_with_limit(member, embed=dm_embed)
+                dm_success = True
+                print(f"✅ DM sent to {player_name} via rate limiter")
+            except discord.Forbidden:
+                print(f"⚠️ Cannot DM {player_name} - DMs disabled")
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    print(f"⚠️ Rate limited sending DM to {player_name} via rate limiter")
+                else:
+                    print(f"⚠️ Rate limiter DM HTTP error for {player_name}: {e}")
+            except Exception as e:
+                print(f"⚠️ Rate limiter DM unexpected error for {player_name}: {e}")
 
-        print(f"Sent reset notification DM to {player_name}")
+        # Method 2: Manual approach with delay if rate limiter failed
+        if not dm_success:
+            try:
+                await asyncio.sleep(2.0)  # 2 second delay before manual DM
+                await member.send(embed=dm_embed)
+                dm_success = True
+                print(f"✅ DM sent to {player_name} via manual method")
+            except discord.Forbidden:
+                print(f"⚠️ Cannot DM {player_name} - DMs disabled")
+            except discord.HTTPException as e:
+                if e.status == 429:
+                    print(f"⚠️ Rate limited sending DM to {player_name} manually")
+                else:
+                    print(f"⚠️ Manual DM HTTP error for {player_name}: {e}")
+            except Exception as e:
+                print(f"⚠️ Manual DM unexpected error for {player_name}: {e}")
 
-    except discord.Forbidden:
-        print(f"Could not send DM to {player_name} - DMs disabled")
-    except discord.HTTPException as e:
-        if e.status == 429:
-            print(f"Rate limited sending DM to {player_name}")
-        else:
-            print(f"Error sending DM to {player_name}: {str(e)}")
+        if not dm_success:
+            print(f"❌ Could not send DM to {player_name} via any method")
+
     except Exception as dm_error:
-        print(f"Unexpected error sending DM to {player_name}: {str(dm_error)}")
+        print(f"❌ Critical error in DM handling for {player_name}: {str(dm_error)}")
 
-    print(f"Player reset completed for {player_name} by {interaction.user.display_name}")
+    print(f"✅ Player reset completed for {player_name} by {interaction.user.display_name}")
+
+    # FINAL: Add a small delay at the end to prevent rapid successive commands
+    await asyncio.sleep(1.0)
 
 
 # 4. Sub Command
