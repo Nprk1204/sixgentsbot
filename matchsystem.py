@@ -40,6 +40,14 @@ class MatchSystem:
         """Set the queue manager reference"""
         self.queue_manager = queue_manager
 
+    def is_dummy_player(player_id):
+        """Check if a player ID belongs to a dummy/test player"""
+        return str(player_id).startswith('9000')
+
+    def is_real_player(player_id):
+        """Check if a player ID belongs to a real Discord user"""
+        return not str(player_id).startswith('9000')
+
     def create_match(self, match_id, team1, team2, channel_id, is_global=False):
         """Create a completed match entry in the database"""
         print(
@@ -844,72 +852,78 @@ class MatchSystem:
 
         # Update Discord roles for players if ctx is provided AND rate limiter is available
         if ctx and self.rate_limiter:
-            print("Updating Discord roles for match players using rate limiter...")
+            print("Updating Discord roles for REAL match players only...")
 
-            # Collect all role updates to batch them efficiently
-            role_updates = []
+            # Collect REAL player role updates only
+            real_player_updates = []
 
-            # Process winners
+            # Process winners - REAL PLAYERS ONLY
             for player in winning_team:
                 player_id = player.get("id")
-                if not player_id or player_id.startswith('9000'):  # Skip dummy players
+
+                # CRITICAL: Skip dummy players completely
+                if not player_id or self.is_dummy_player(player_id):
+                    print(f"Skipping dummy player role update: {player.get('name', 'Unknown')} (ID: {player_id})")
                     continue
 
-                # Only update roles for ranked MMR changes, not global
+                # Only process real players for ranked matches
                 if not is_global_match:
-                    try:
-                        player_data = self.players.find_one({"id": player_id})
-                        if player_data:
-                            mmr = player_data.get("mmr", 600)
-                            role_updates.append({
-                                'player_id': player_id,
-                                'player_name': player.get('name', 'Unknown'),
-                                'mmr': mmr
-                            })
-                    except Exception as e:
-                        print(f"Error preparing role update for winner {player.get('name', 'Unknown')}: {e}")
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data:
+                        mmr = player_data.get("mmr", 600)
+                        real_player_updates.append({
+                            'player_id': player_id,
+                            'player_name': player.get('name', 'Unknown'),
+                            'mmr': mmr
+                        })
 
-            # Process losers
+            # Process losers - REAL PLAYERS ONLY
             for player in losing_team:
                 player_id = player.get("id")
-                if not player_id or player_id.startswith('9000'):  # Skip dummy players
+
+                # CRITICAL: Skip dummy players completely
+                if not player_id or self.is_dummy_player(player_id):
+                    print(f"Skipping dummy player role update: {player.get('name', 'Unknown')} (ID: {player_id})")
                     continue
 
-                # Only update roles for ranked MMR changes, not global
+                # Only process real players for ranked matches
                 if not is_global_match:
+                    player_data = self.players.find_one({"id": player_id})
+                    if player_data:
+                        mmr = player_data.get("mmr", 600)
+                        real_player_updates.append({
+                            'player_id': player_id,
+                            'player_name': player.get('name', 'Unknown'),
+                            'mmr': mmr
+                        })
+
+            # Process role updates for REAL players only with LONG delays
+            if real_player_updates:
+                print(f"Processing {len(real_player_updates)} REAL player role updates...")
+                for i, update in enumerate(real_player_updates):
                     try:
-                        player_data = self.players.find_one({"id": player_id})
-                        if player_data:
-                            mmr = player_data.get("mmr", 600)
-                            role_updates.append({
-                                'player_id': player_id,
-                                'player_name': player.get('name', 'Unknown'),
-                                'mmr': mmr
-                            })
+                        print(f"Updating role for REAL player: {update['player_name']} (ID: {update['player_id']})")
+                        await self.update_discord_role_safe(ctx, update['player_id'], update['mmr'])
+                        print(f"✅ Processed role update {i + 1}/{len(real_player_updates)} for {update['player_name']}")
+
+                        # CRITICAL: Long delay between each player to prevent rate limiting
+                        if i < len(real_player_updates) - 1:  # Don't delay after the last update
+                            print(f"Waiting 5 seconds before next role update...")
+                            await asyncio.sleep(5.0)  # 5 second delay between each player
+
                     except Exception as e:
-                        print(f"Error preparing role update for loser {player.get('name', 'Unknown')}: {e}")
+                        print(f"❌ Error updating Discord role for {update['player_name']}: {e}")
+                        # Add delay even on error
+                        await asyncio.sleep(2.0)
 
-            # Process role updates sequentially with rate limiting
-            print(f"Processing {len(role_updates)} role updates...")
-            for i, update in enumerate(role_updates):
-                try:
-                    await self.update_discord_role(ctx, update['player_id'], update['mmr'])
-                    print(f"Processed role update {i + 1}/{len(role_updates)} for {update['player_name']}")
-
-                    # IMPORTANT: Add delay between each player's role update
-                    if i < len(role_updates) - 1:  # Don't delay after the last update
-                        await asyncio.sleep(2.0)  # 2 second delay between each player
-
-                except Exception as e:
-                    print(f"Error updating Discord role for {update['player_name']}: {e}")
-                    # Continue with other updates even if one fails
-                    # Add delay even on error
-                    await asyncio.sleep(1.0)
-
-            print("Discord role updates completed")
+                print("✅ Real player Discord role updates completed")
+            else:
+                print("ℹ️ No real players found for role updates (match had only dummy players)")
 
         elif ctx and not self.rate_limiter:
-            print("Warning: No rate limiter available - skipping Discord role updates to prevent rate limiting")
+            print("⚠️ Warning: No rate limiter available - skipping Discord role updates to prevent rate limiting")
+        else:
+            print("ℹ️ No context provided - skipping Discord role updates")
 
         if self.queue_manager:
             self.queue_manager.remove_match(match_id)
@@ -1069,6 +1083,153 @@ class MatchSystem:
             print(f"Critical error in update_discord_role: {str(e)}")
             # Add delay even on error to prevent rapid retries
             await asyncio.sleep(1.0)
+
+    async def update_discord_role_safe(self, ctx, player_id, new_mmr):
+        """ULTRA-SAFE Discord role update method with extensive rate limiting protection"""
+        try:
+            # CRITICAL: Double-check this is not a dummy player
+            if self.is_dummy_player(player_id):
+                print(f"🚨 SAFETY CHECK: Attempted to update role for dummy player {player_id} - BLOCKED")
+                return
+
+            # Skip if no rate limiter is available
+            if not self.rate_limiter:
+                print(f"⚠️ No rate limiter available - skipping role update for player {player_id}")
+                return
+
+            print(f"🔄 Starting SAFE role update for player {player_id} (MMR: {new_mmr})")
+
+            # Define MMR thresholds for ranks
+            RANK_A_THRESHOLD = 1600
+            RANK_B_THRESHOLD = 1100
+
+            # ULTRA-SAFE member fetching with extensive delays
+            member = None
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    print(f"🔍 Attempt {attempt + 1}/{max_retries}: Fetching member {player_id}")
+
+                    # Pre-fetch delay
+                    await asyncio.sleep(2.0)
+
+                    member = await self.rate_limiter.fetch_member_with_limit(ctx.guild, int(player_id))
+
+                    if member:
+                        print(f"✅ Successfully fetched member: {member.display_name}")
+                        break
+
+                except discord.HTTPException as e:
+                    if e.status == 429:
+                        wait_time = 10.0 * (attempt + 1)  # Exponential backoff
+                        print(f"⚠️ Rate limited on attempt {attempt + 1}, waiting {wait_time}s")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    elif e.status == 404:
+                        print(f"❌ Member {player_id} not found - user may have left server")
+                        return
+                    elif e.status == 403:
+                        print(f"❌ No permission to fetch member {player_id}")
+                        return
+                    else:
+                        print(f"❌ HTTP error fetching member {player_id}: {e}")
+                        if attempt == max_retries - 1:
+                            return
+                        await asyncio.sleep(5.0)
+                except Exception as e:
+                    print(f"❌ Unexpected error fetching member {player_id}: {e}")
+                    if attempt == max_retries - 1:
+                        return
+                    await asyncio.sleep(3.0)
+
+            if not member:
+                print(f"❌ Could not fetch member {player_id} after {max_retries} attempts")
+                return
+
+            # Get roles with error protection
+            try:
+                rank_a_role = discord.utils.get(ctx.guild.roles, name="Rank A")
+                rank_b_role = discord.utils.get(ctx.guild.roles, name="Rank B")
+                rank_c_role = discord.utils.get(ctx.guild.roles, name="Rank C")
+            except Exception as e:
+                print(f"❌ Error getting guild roles: {e}")
+                return
+
+            if not all([rank_a_role, rank_b_role, rank_c_role]):
+                print(f"❌ One or more rank roles not found")
+                return
+
+            # Determine new role
+            if new_mmr >= RANK_A_THRESHOLD:
+                new_role = rank_a_role
+            elif new_mmr >= RANK_B_THRESHOLD:
+                new_role = rank_b_role
+            else:
+                new_role = rank_c_role
+
+            # Check current role
+            current_rank_role = None
+            for role in member.roles:
+                if role in [rank_a_role, rank_b_role, rank_c_role]:
+                    current_rank_role = role
+                    break
+
+            # If no change needed, skip
+            if current_rank_role == new_role:
+                print(f"ℹ️ No role change needed for {member.display_name} (already has {new_role.name})")
+                return
+
+            print(
+                f"🔄 Updating role for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
+
+            # ULTRA-SAFE role updates with extensive delays
+            try:
+                # Remove old role with delay
+                if current_rank_role:
+                    print(f"🗑️ Removing old role: {current_rank_role.name}")
+                    await self.rate_limiter.remove_role_with_limit(
+                        member, current_rank_role, reason="MMR rank update"
+                    )
+                    await asyncio.sleep(3.0)  # 3 second delay after removal
+
+                # Add new role with delay
+                print(f"➕ Adding new role: {new_role.name}")
+                await self.rate_limiter.add_role_with_limit(
+                    member, new_role, reason=f"MMR update: {new_mmr}"
+                )
+                await asyncio.sleep(2.0)  # 2 second delay after addition
+
+                print(f"✅ Successfully updated role for {member.display_name}")
+
+                # Handle promotion announcement (with additional safety)
+                if not current_rank_role or (
+                        (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
+                        (current_rank_role == rank_b_role and new_role == rank_a_role)
+                ):
+                    try:
+                        print(f"🎉 Sending promotion message for {member.display_name}")
+                        await asyncio.sleep(2.0)  # Delay before promotion message
+                        await self.rate_limiter.send_message_with_limit(
+                            ctx.channel,
+                            f"🎉 Congratulations {member.mention}! You've been promoted to **{new_role.name}**!"
+                        )
+                    except Exception as msg_error:
+                        print(f"⚠️ Could not send promotion message: {msg_error}")
+
+            except discord.HTTPException as role_error:
+                if role_error.status == 429:
+                    print(f"❌ Rate limited during role update for {member.display_name} - update skipped")
+                else:
+                    print(f"❌ HTTP error during role update: {role_error}")
+            except Exception as role_error:
+                print(f"❌ Unexpected error during role update: {role_error}")
+
+            # Final safety delay
+            await asyncio.sleep(2.0)
+
+        except Exception as e:
+            print(f"❌ Critical error in safe role update for {player_id}: {e}")
+            await asyncio.sleep(2.0)
 
     def update_player_mmr(self, winning_team, losing_team, match_id=None):
         """Update MMR for all players in the match with enhanced dynamic MMR changes"""
