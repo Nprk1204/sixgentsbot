@@ -4,6 +4,7 @@ import datetime
 import uuid
 import asyncio
 import random
+from rate_limiter import DiscordRateLimiter, ultra_safe_role_operation
 
 
 class MatchSystem:
@@ -340,6 +341,149 @@ class MatchSystem:
 
         print(f"Match {match_id} successfully created/updated in database")
         return match_id
+
+    async def update_discord_role_ultra_safe_fixed(self, guild, player_id, new_mmr):
+        """FIXED version that takes guild directly instead of ctx"""
+        try:
+            # CRITICAL: Triple-check this is not a dummy player
+            if self.is_dummy_player(player_id):
+                print(f"🚨 SAFETY CHECK: Attempted to update role for dummy player {player_id} - BLOCKED")
+                return
+
+            # Skip if no rate limiter is available
+            if not self.rate_limiter:
+                print(f"⚠️ No rate limiter available - skipping role update for player {player_id}")
+                return
+
+            print(f"🔄 Starting ULTRA-SAFE role update for player {player_id} (MMR: {new_mmr})")
+
+            # Define MMR thresholds for ranks
+            RANK_A_THRESHOLD = 1600
+            RANK_B_THRESHOLD = 1100
+
+            # ULTRA-SAFE member fetching with extensive delays and retries
+            member = None
+            max_retries = 3  # Reduced retries to prevent hammering
+
+            for attempt in range(max_retries):
+                try:
+                    print(f"🔍 Attempt {attempt + 1}/{max_retries}: Fetching member {player_id}")
+
+                    # Pre-fetch delay that increases with each attempt
+                    delay = random.uniform(3.0, 5.0) * (attempt + 1)
+                    await asyncio.sleep(delay)
+
+                    # FIX: Use guild directly instead of ctx.guild
+                    member = await self.rate_limiter.fetch_member_with_limit(guild, int(player_id))
+
+                    if member:
+                        print(f"✅ Successfully fetched member: {member.display_name}")
+                        break
+
+                except discord.HTTPException as e:
+                    if e.status == 429:
+                        wait_time = random.uniform(20.0, 30.0) * (attempt + 1)  # 20-30s, escalating
+                        print(f"⚠️ Rate limited on attempt {attempt + 1}, waiting {wait_time:.1f}s")
+                        await asyncio.sleep(wait_time)
+                        continue
+                    elif e.status == 404:
+                        print(f"❌ Member {player_id} not found - user may have left server")
+                        return
+                    elif e.status == 403:
+                        print(f"❌ No permission to fetch member {player_id}")
+                        return
+                    else:
+                        print(f"❌ HTTP error fetching member {player_id}: {e}")
+                        if attempt == max_retries - 1:
+                            return
+                        await asyncio.sleep(random.uniform(5.0, 10.0))
+                except Exception as e:
+                    print(f"❌ Unexpected error fetching member {player_id}: {e}")
+                    if attempt == max_retries - 1:
+                        return
+                    await asyncio.sleep(random.uniform(5.0, 10.0))
+
+            if not member:
+                print(f"❌ Could not fetch member {player_id} after {max_retries} attempts")
+                return
+
+            # Get roles with error protection
+            try:
+                rank_a_role = discord.utils.get(guild.roles, name="Rank A")
+                rank_b_role = discord.utils.get(guild.roles, name="Rank B")
+                rank_c_role = discord.utils.get(guild.roles, name="Rank C")
+            except Exception as e:
+                print(f"❌ Error getting guild roles: {e}")
+                return
+
+            if not all([rank_a_role, rank_b_role, rank_c_role]):
+                print(f"❌ One or more rank roles not found")
+                return
+
+            # Determine new role
+            if new_mmr >= RANK_A_THRESHOLD:
+                new_role = rank_a_role
+            elif new_mmr >= RANK_B_THRESHOLD:
+                new_role = rank_b_role
+            else:
+                new_role = rank_c_role
+
+            # Check current role
+            current_rank_role = None
+            for role in member.roles:
+                if role in [rank_a_role, rank_b_role, rank_c_role]:
+                    current_rank_role = role
+                    break
+
+            # If no change needed, skip
+            if current_rank_role == new_role:
+                print(f"ℹ️ No role change needed for {member.display_name} (already has {new_role.name})")
+                return
+
+            print(
+                f"🔄 Updating role for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
+
+            # ULTRA-SAFE role updates with EXTREME delays
+            try:
+                # Import the enhanced safe operation function
+                from rate_limiter import ultra_safe_role_operation
+
+                # Remove old role if exists
+                if current_rank_role:
+                    print(f"🗑️ Removing old role: {current_rank_role.name}")
+                    success, error = await ultra_safe_role_operation(
+                        self.rate_limiter, member, 'remove', current_rank_role,
+                        reason="MMR rank update"
+                    )
+
+                    if not success:
+                        print(f"❌ Failed to remove old role: {error}")
+                        return
+
+                    # Long delay between operations
+                    await asyncio.sleep(random.uniform(8.0, 12.0))
+
+                # Add new role
+                print(f"➕ Adding new role: {new_role.name}")
+                success, error = await ultra_safe_role_operation(
+                    self.rate_limiter, member, 'add', new_role,
+                    reason=f"MMR update: {new_mmr}"
+                )
+
+                if success:
+                    print(f"✅ Successfully updated role for {member.display_name}")
+                else:
+                    print(f"❌ Failed to add new role: {error}")
+
+            except Exception as role_error:
+                print(f"❌ Critical error during role update for {member.display_name}: {role_error}")
+
+            # Final safety delay (longer than before)
+            await asyncio.sleep(random.uniform(8.0, 15.0))
+
+        except Exception as e:
+            print(f"❌ Critical error in ultra safe role update for {player_id}: {e}")
+            await asyncio.sleep(random.uniform(5.0, 10.0))
 
     def get_active_match_by_channel(self, channel_id):
         """Get active match by channel ID (delegates to queue_manager)"""
@@ -1149,7 +1293,11 @@ class MatchSystem:
                 for i, update in enumerate(real_player_updates):
                     try:
                         print(f"Updating role for REAL player: {update['player_name']} (ID: {update['player_id']})")
-                        await self.update_discord_role_safe(ctx, update['player_id'], update['mmr'])
+
+                        # FIX: Pass the interaction's guild directly instead of ctx
+                        guild = ctx.guild if hasattr(ctx, 'guild') else ctx.interaction.guild
+                        await self.update_discord_role_ultra_safe_fixed(guild, update['player_id'], update['mmr'])
+
                         print(f"✅ Processed role update {i + 1}/{len(real_player_updates)} for {update['player_name']}")
 
                         # CRITICAL: Long delay between each player to prevent rate limiting
