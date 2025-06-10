@@ -178,8 +178,8 @@ class CaptainsSystem:
                 return
 
             # Test DM capability first
-            captain1_dm_works = await self.test_dm_capability(captain1_user)
-            captain2_dm_works = await self.test_dm_capability(captain2_user)
+            captain1_dm_works = await self.test_dm_capability_enhanced(captain1_user)
+            captain2_dm_works = await self.test_dm_capability_enhanced(captain2_user)
 
             if not captain1_dm_works or not captain2_dm_works:
                 # List who can't receive DMs
