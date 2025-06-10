@@ -2,6 +2,7 @@ import math
 import discord
 import datetime
 import uuid
+import asyncio
 
 
 class MatchSystem:
@@ -894,9 +895,16 @@ class MatchSystem:
                 try:
                     await self.update_discord_role(ctx, update['player_id'], update['mmr'])
                     print(f"Processed role update {i + 1}/{len(role_updates)} for {update['player_name']}")
+
+                    # IMPORTANT: Add delay between each player's role update
+                    if i < len(role_updates) - 1:  # Don't delay after the last update
+                        await asyncio.sleep(2.0)  # 2 second delay between each player
+
                 except Exception as e:
                     print(f"Error updating Discord role for {update['player_name']}: {e}")
                     # Continue with other updates even if one fails
+                    # Add delay even on error
+                    await asyncio.sleep(1.0)
 
             print("Discord role updates completed")
 
@@ -925,7 +933,7 @@ class MatchSystem:
         return match_result, None
 
     async def update_discord_role(self, ctx, player_id, new_mmr):
-        """Update a player's Discord role based on their new MMR - COMPREHENSIVE ERROR HANDLING"""
+        """Update a player's Discord role based on their new MMR - ENHANCED RATE LIMITING"""
         try:
             # Skip if no rate limiter is available
             if not self.rate_limiter:
@@ -938,11 +946,18 @@ class MatchSystem:
 
             # ENHANCED: Get the player's Discord member object with comprehensive error handling
             try:
+                # Add a delay before fetching member to space out API calls
+                await asyncio.sleep(0.5)
                 member = await self.rate_limiter.fetch_member_with_limit(ctx.guild, int(player_id))
             except discord.HTTPException as e:
                 if e.status == 429:
-                    print(f"Rate limited fetching member {player_id} for role update")
-                    return
+                    print(f"Rate limited fetching member {player_id} for role update - waiting longer")
+                    await asyncio.sleep(5.0)  # Wait 5 seconds for rate limit
+                    try:
+                        member = await self.rate_limiter.fetch_member_with_limit(ctx.guild, int(player_id))
+                    except Exception as retry_error:
+                        print(f"Retry failed for member {player_id}: {retry_error}")
+                        return
                 elif e.status == 404:
                     print(f"Member {player_id} not found - user may have left the server")
                     return
@@ -996,15 +1011,15 @@ class MatchSystem:
             if current_rank_role == new_role:
                 return
 
-            # ENHANCED: Update roles using rate limiter with comprehensive error handling
+            # ENHANCED: Update roles using rate limiter with proper delays
             try:
                 # Remove current rank role if they have one
                 if current_rank_role:
                     await self.rate_limiter.remove_role_with_limit(
                         member, current_rank_role, reason="MMR rank update"
                     )
-                    # Small delay between role operations
-                    await asyncio.sleep(0.5)
+                    # IMPORTANT: Add delay between role operations
+                    await asyncio.sleep(1.0)  # 1 second delay
 
                 # Add the new role
                 await self.rate_limiter.add_role_with_limit(
@@ -1015,12 +1030,14 @@ class MatchSystem:
                 print(
                     f"✅ Updated roles for {member.display_name}: {current_rank_role.name if current_rank_role else 'None'} -> {new_role.name}")
 
-                # ENHANCED: Announce the rank change if it's a promotion with rate limiting
+                # ENHANCED: Announce the rank change if it's a promotion (with rate limiting and delay)
                 if not current_rank_role or (
                         (current_rank_role == rank_c_role and new_role in [rank_b_role, rank_a_role]) or
                         (current_rank_role == rank_b_role and new_role == rank_a_role)
                 ):
                     try:
+                        # Add delay before sending promotion message
+                        await asyncio.sleep(1.0)
                         # Use rate limiter for message sending too
                         await self.rate_limiter.send_message_with_limit(
                             ctx.channel,
@@ -1036,7 +1053,8 @@ class MatchSystem:
 
             except discord.HTTPException as role_error:
                 if role_error.status == 429:
-                    print(f"Rate limited updating roles for {member.display_name}")
+                    print(f"Rate limited updating roles for {member.display_name} - this operation will be skipped")
+                    # Don't retry immediately to avoid further rate limiting
                 elif role_error.status == 403:
                     print(f"No permission to update roles for {member.display_name}")
                 else:
@@ -1044,8 +1062,13 @@ class MatchSystem:
             except Exception as role_error:
                 print(f"Unexpected error updating roles for {member.display_name}: {role_error}")
 
+            # IMPORTANT: Add delay at the end of each role update to prevent rapid successive calls
+            await asyncio.sleep(1.0)
+
         except Exception as e:
             print(f"Critical error in update_discord_role: {str(e)}")
+            # Add delay even on error to prevent rapid retries
+            await asyncio.sleep(1.0)
 
     def update_player_mmr(self, winning_team, losing_team, match_id=None):
         """Update MMR for all players in the match with enhanced dynamic MMR changes"""
