@@ -969,7 +969,7 @@ async def status_slash(interaction: discord.Interaction):
     app_commands.Choice(name="Win", value="win"),
     app_commands.Choice(name="Loss", value="loss")
 ])
-async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id: str, result: str):
+async def report_slash_optimized(interaction: discord.Interaction, match_id: str, result: str):
     if RESET_IN_PROGRESS:
         duration = ""
         if RESET_START_TIME:
@@ -989,15 +989,16 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    # Create context for backward compatibility
-    ctx = SimpleContext(interaction)
+    # ================================
+    # OPTIMIZATION 1: Immediate validation (no await calls)
+    # ================================
 
-    # Normalize the match ID
+    # Normalize the match ID (no async needed)
     match_id = match_id.strip()
     if len(match_id) > 8:
         match_id = match_id[:6]
 
-    # Check if command is used in an allowed channel
+    # Check channel (no async needed)
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
             f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
@@ -1005,83 +1006,109 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         )
         return
 
-    reporter_id = str(interaction.user.id)
-
-    # Validate result argument
+    # Validate result (no async needed)
     if result.lower() not in ["win", "loss"]:
         await interaction.response.send_message("Invalid result. Please use 'win' or 'loss'.", ephemeral=True)
         return
 
-    # Check if the match was created in this specific channel
+    # Get basic info (no async needed)
+    reporter_id = str(interaction.user.id)
     current_channel_id = str(interaction.channel.id)
 
-    # Find the match first to check which channel it belongs to
-    match = None
+    # ================================
+    # OPTIMIZATION 2: Single database query with error handling
+    # ================================
 
-    # Check active matches first
-    if system_coordinator.queue_manager:
-        match = system_coordinator.queue_manager.get_match_by_id(match_id)
+    # IMMEDIATE defer - don't wait for database
+    try:
+        if is_cloud_platform():
+            # Reduced cloud delay from 1-3s to 0.5-1.5s
+            await asyncio.sleep(random.uniform(0.5, 1.5))
 
-    # If not in active matches, check completed matches in database
-    if not match:
-        match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
-
-    if not match:
-        await interaction.response.send_message(f"No match found with ID `{match_id}`.", ephemeral=True)
+        await interaction.response.defer()
+    except Exception as defer_error:
+        print(f"Defer error: {defer_error}")
         return
 
-    # Check if the match belongs to this channel
+    # Fast database lookup with timeout
+    try:
+        # OPTIMIZATION: Single query instead of multiple lookups
+        match = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: system_coordinator.queue_manager.get_match_by_id(match_id) or
+                        system_coordinator.match_system.matches.find_one({"match_id": match_id})
+            ),
+            timeout=3.0  # 3 second timeout for database
+        )
+    except asyncio.TimeoutError:
+        await interaction.followup.send("⚠️ Database timeout. Please try again.", ephemeral=True)
+        return
+    except Exception as db_error:
+        print(f"Database error: {db_error}")
+        await interaction.followup.send("❌ Database error occurred. Please try again.", ephemeral=True)
+        return
+
+    if not match:
+        await interaction.followup.send(f"No match found with ID `{match_id}`.", ephemeral=True)
+        return
+
+    # ================================
+    # OPTIMIZATION 3: Fast channel validation
+    # ================================
+
     match_channel_id = str(match.get('channel_id', ''))
     if match_channel_id != current_channel_id:
-        try:
-            correct_channel = bot.get_channel(int(match_channel_id))
-            if correct_channel:
-                await interaction.response.send_message(
-                    f"❌ This match was created in {correct_channel.mention}. Please report it there instead.",
-                    ephemeral=True
-                )
-            else:
-                await interaction.response.send_message(
-                    f"❌ This match was not created in this channel. Please report it in the correct channel.",
-                    ephemeral=True
-                )
-        except:
-            await interaction.response.send_message(
+        # Quick channel lookup (cached by Discord)
+        correct_channel = bot.get_channel(int(match_channel_id)) if match_channel_id.isdigit() else None
+
+        if correct_channel:
+            await interaction.followup.send(
+                f"❌ This match was created in {correct_channel.mention}. Please report it there instead.",
+                ephemeral=True
+            )
+        else:
+            await interaction.followup.send(
                 f"❌ This match was not created in this channel. Please report it in the correct channel.",
                 ephemeral=True
             )
         return
 
-    # CLOUD-SAFE defer with enhanced error handling
-    try:
-        defer_success = await cloud_safe_defer(interaction)
-        if not defer_success:
-            # If defer fails, try to send error message
-            await RenderErrorHandler.handle_rate_limit(interaction, "match report")
-            return
-    except Exception as defer_error:
-        print(f"Critical defer error: {defer_error}")
-        await RenderErrorHandler.handle_general_error(interaction, defer_error, "match report")
-        return
+    # ================================
+    # OPTIMIZATION 4: Parallel processing preparation
+    # ================================
 
-    # Add cloud platform delay before processing
+    # Create context for backward compatibility
+    ctx = SimpleContext(interaction)
+
+    # Reduced cloud delay for processing
     if is_cloud_platform():
-        await asyncio.sleep(random.uniform(1.0, 3.0))
+        await asyncio.sleep(random.uniform(0.5, 1.0))  # Reduced from 1-3s
 
     try:
-        # Get match result with enhanced error handling
-        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result,
-                                                                                       ctx)
+        # ================================
+        # OPTIMIZATION 5: Streamlined match processing
+        # ================================
+
+        # Process match with timeout protection
+        match_result, error = await asyncio.wait_for(
+            system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result, ctx),
+            timeout=10.0  # 10 second timeout for match processing
+        )
 
         if error:
-            await cloud_safe_followup(interaction, f"Error: {error}")
+            await interaction.followup.send(f"Error: {error}")
             return
 
         if not match_result:
-            await cloud_safe_followup(interaction, "Failed to process match report.")
+            await interaction.followup.send("Failed to process match report.")
             return
 
-        # Determine winning team
+        # ================================
+        # OPTIMIZATION 6: Fast embed creation (pre-computed data)
+        # ================================
+
+        # Quick data extraction
         winner = match_result["winner"]
         is_global = match_result.get("is_global", False)
         mmr_type = "Global" if is_global else "Ranked"
@@ -1093,129 +1120,94 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
             winning_team = match_result["team2"]
             losing_team = match_result["team1"]
 
-        print(f"Processing match report display for match {match_id}")
-        print(f"Match type: {mmr_type}")
-        print(f"MMR changes available: {len(match_result.get('mmr_changes', []))}")
+        # Pre-compute MMR changes for faster lookup
+        mmr_changes_by_player = {
+            change.get("player_id"): {
+                "mmr_change": change.get("mmr_change", 0),
+                "streak": change.get("streak", 0),
+                "is_win": change.get("is_win", False),
+                "is_global": change.get("is_global", False),
+                "old_mmr": change.get("old_mmr", 0),
+                "new_mmr": change.get("new_mmr", 0)
+            }
+            for change in match_result.get("mmr_changes", [])
+            if change.get("player_id")
+        }
 
         # ================================
-        # OPTIMIZATION: Create embed with stored names FIRST (no member fetching)
+        # OPTIMIZATION 7: Vectorized team processing
         # ================================
 
-        # Extract MMR changes and streaks from match result properly
-        mmr_changes_by_player = {}
-        for change in match_result.get("mmr_changes", []):
-            player_id = change.get("player_id")
-            if player_id:
-                mmr_changes_by_player[player_id] = {
-                    "mmr_change": change.get("mmr_change", 0),
-                    "streak": change.get("streak", 0),
-                    "is_win": change.get("is_win", False),
-                    "is_global": change.get("is_global", False),
-                    "old_mmr": change.get("old_mmr", 0),
-                    "new_mmr": change.get("new_mmr", 0)
-                }
+        def process_team_data(team, is_winning_team):
+            """Process team data in batch for speed"""
+            mmr_changes = []
+            streaks = []
 
-        # Initialize arrays for MMR changes and streaks
-        winning_team_mmr_changes = []
-        losing_team_mmr_changes = []
-        winning_team_streaks = []
-        losing_team_streaks = []
+            for player in team:
+                player_id = player.get("id")
 
-        # Extract MMR changes for winning team with proper global/ranked filtering
-        for player in winning_team:
-            player_id = player.get("id")
+                if player_id and player_id in mmr_changes_by_player:
+                    change_data = mmr_changes_by_player[player_id]
 
-            if player_id and player_id in mmr_changes_by_player:
-                change_data = mmr_changes_by_player[player_id]
+                    # Only show MMR changes that match the current match type
+                    if change_data.get("is_global", False) == is_global:
+                        mmr_change = change_data["mmr_change"]
+                        streak = change_data["streak"]
 
-                # Only show MMR changes that match the current match type
-                change_is_global = change_data.get("is_global", False)
-                if change_is_global == is_global:
-                    mmr_change = change_data["mmr_change"]
-                    streak = change_data["streak"]
+                        if is_winning_team:
+                            mmr_changes.append(f"+{mmr_change} MMR")
+                        else:
+                            mmr_changes.append(f"{mmr_change} MMR")  # Already negative
 
-                    winning_team_mmr_changes.append(f"+{mmr_change} MMR")
-
-                    # Format streak display with emojis
-                    if streak >= 3:
-                        winning_team_streaks.append(f"🔥 {streak}W")
-                    elif streak == 2:
-                        winning_team_streaks.append(f"↗️ {streak}W")
-                    elif streak == 1:
-                        winning_team_streaks.append(f"↗️ {streak}W")
+                        # Format streak display
+                        if streak >= 3:
+                            streaks.append(f"🔥 {streak}{'W' if is_winning_team else 'L'}")
+                        elif streak == 2 or streak == -2:
+                            icon = "↗️" if is_winning_team else "↘️"
+                            streaks.append(f"{icon} {abs(streak)}{'W' if is_winning_team else 'L'}")
+                        elif streak == 1 or streak == -1:
+                            icon = "↗️" if is_winning_team else "↘️"
+                            streaks.append(f"{icon} {abs(streak)}{'W' if is_winning_team else 'L'}")
+                        else:
+                            streaks.append("—")
                     else:
-                        winning_team_streaks.append("—")
+                        mmr_changes.append("—")
+                        streaks.append("—")
+                elif player_id and player_id.startswith('9000'):  # Dummy player
+                    mmr_changes.append(f"{'+' if is_winning_team else '-'}0 MMR")
+                    streaks.append("—")
                 else:
-                    winning_team_mmr_changes.append("—")
-                    winning_team_streaks.append("—")
-            elif player_id and player_id.startswith('9000'):  # Dummy player
-                winning_team_mmr_changes.append("+0 MMR")
-                winning_team_streaks.append("—")
-            else:
-                winning_team_mmr_changes.append("—")
-                winning_team_streaks.append("—")
+                    mmr_changes.append("—")
+                    streaks.append("—")
 
-        # Extract MMR changes for losing team with proper global/ranked filtering
-        for player in losing_team:
-            player_id = player.get("id")
+            return mmr_changes, streaks
 
-            if player_id and player_id in mmr_changes_by_player:
-                change_data = mmr_changes_by_player[player_id]
-
-                # Only show MMR changes that match the current match type
-                change_is_global = change_data.get("is_global", False)
-                if change_is_global == is_global:
-                    mmr_change = change_data["mmr_change"]
-                    streak = change_data["streak"]
-
-                    losing_team_mmr_changes.append(f"{mmr_change} MMR")  # Already negative
-
-                    # Format streak display for losses
-                    if streak <= -3:
-                        losing_team_streaks.append(f"❄️ {abs(streak)}L")
-                    elif streak == -2:
-                        losing_team_streaks.append(f"↘️ {abs(streak)}L")
-                    elif streak == -1:
-                        losing_team_streaks.append(f"↘️ {abs(streak)}L")
-                    else:
-                        losing_team_streaks.append("—")
-                else:
-                    losing_team_mmr_changes.append("—")
-                    losing_team_streaks.append("—")
-            elif player_id and player_id.startswith('9000'):  # Dummy player
-                losing_team_mmr_changes.append("-0 MMR")
-                losing_team_streaks.append("—")
-            else:
-                losing_team_mmr_changes.append("—")
-                losing_team_streaks.append("—")
+        # Process both teams quickly
+        winning_team_mmr_changes, winning_team_streaks = process_team_data(winning_team, True)
+        losing_team_mmr_changes, losing_team_streaks = process_team_data(losing_team, False)
 
         # ================================
-        # FAST EMBED CREATION - Use stored names only
+        # OPTIMIZATION 8: Streamlined embed creation
         # ================================
 
-        # Create the embed with enhanced formatting using STORED NAMES ONLY
         embed = discord.Embed(
             title=f"{mmr_type} Match Results",
             description=f"Match completed",
-            color=0x00ff00  # Green color
+            color=0x00ff00
         )
 
-        # Match ID and type field
+        # Batch add fields for speed
         embed.add_field(
             name="Match Info",
             value=f"**Match ID:** `{match_id}`\n**Type:** {mmr_type} Match",
             inline=False
         )
 
-        # Add Winners header
+        # Winners section
         embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
 
-        # Create individual fields for each winning player using STORED NAMES
         for i, player in enumerate(winning_team):
-            # Use stored name from match data - NO member fetching
             name = player.get('name', 'Unknown')
-
-            # Enhanced display with simplified MMR format
             mmr_display = winning_team_mmr_changes[i] if i < len(winning_team_mmr_changes) else "—"
             streak_display = winning_team_streaks[i] if i < len(winning_team_streaks) else "—"
 
@@ -1225,22 +1217,18 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
                 inline=True
             )
 
-        # Spacer field if needed for proper alignment (for 3-column layout)
+        # Alignment spacers
         if len(winning_team) % 3 == 1:
             embed.add_field(name="\u200b", value="\u200b", inline=True)
             embed.add_field(name="\u200b", value="\u200b", inline=True)
         elif len(winning_team) % 3 == 2:
             embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-        # Add Losers header
+        # Losers section
         embed.add_field(name="😔 Losers", value="\u200b", inline=False)
 
-        # Create individual fields for each losing player using STORED NAMES
         for i, player in enumerate(losing_team):
-            # Use stored name from match data - NO member fetching
             name = player.get('name', 'Unknown')
-
-            # Enhanced display with simplified MMR format
             mmr_display = losing_team_mmr_changes[i] if i < len(losing_team_mmr_changes) else "—"
             streak_display = losing_team_streaks[i] if i < len(losing_team_streaks) else "—"
 
@@ -1250,14 +1238,14 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
                 inline=True
             )
 
-        # Spacer field if needed for proper alignment (for 3-column layout)
+        # Alignment spacers
         if len(losing_team) % 3 == 1:
             embed.add_field(name="\u200b", value="\u200b", inline=True)
             embed.add_field(name="\u200b", value="\u200b", inline=True)
         elif len(losing_team) % 3 == 2:
             embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-        # Enhanced MMR System explanation with streak info
+        # System info
         embed.add_field(
             name="📊 MMR & Streak System",
             value=(
@@ -1268,32 +1256,88 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
             inline=False
         )
 
-        # Footer with reporter info and timestamp
         embed.set_footer(
             text=f"Reported by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
         # ================================
-        # SEND EMBED IMMEDIATELY - No member fetching delays!
-        # ================================
-        await cloud_safe_followup(interaction, embed=embed)
-
-        # ================================
-        # BACKGROUND TASKS: Update roles/names AFTER displaying results
+        # OPTIMIZATION 9: Immediate response + background processing
         # ================================
 
-        # Start background tasks for role updates if this is ranked mode
+        # Send results immediately
+        await interaction.followup.send(embed=embed)
+
+        # Start background role updates (non-blocking)
         if not is_global and not is_cloud_platform():
-            # Only do background updates for ranked matches on local/non-cloud platforms
-            asyncio.create_task(
-                background_role_updates(interaction.guild, winning_team + losing_team, mmr_changes_by_player))
+            asyncio.create_task(background_role_updates(
+                interaction.guild,
+                winning_team + losing_team,
+                mmr_changes_by_player
+            ))
 
-    except discord.HTTPException as e:
-        await RenderErrorHandler.handle_general_error(interaction, e, "match report")
     except asyncio.TimeoutError:
-        await RenderErrorHandler.handle_timeout(interaction, "match report")
+        await interaction.followup.send("⚠️ Match processing timed out. Please try again.")
+    except discord.HTTPException as e:
+        if e.status == 429:
+            await interaction.followup.send("⚠️ Rate limited. Please wait a moment and try again.")
+        else:
+            await interaction.followup.send("❌ Discord API error. Please try again.")
     except Exception as e:
-        await RenderErrorHandler.handle_general_error(interaction, e, "match report")
+        print(f"Error in optimized report command: {e}")
+        await interaction.followup.send("❌ An error occurred. Please try again.")
+
+
+# ================================
+# OPTIMIZATION 10: Batch team processing helper
+# ================================
+
+def batch_process_mmr_changes(teams_data, mmr_changes_by_player, is_global):
+    """Process MMR changes for multiple teams in batch for better performance"""
+    processed_teams = []
+
+    for team_data in teams_data:
+        team, is_winning = team_data
+        mmr_changes = []
+        streaks = []
+
+        for player in team:
+            player_id = player.get("id")
+
+            if player_id and player_id in mmr_changes_by_player:
+                change_data = mmr_changes_by_player[player_id]
+
+                if change_data.get("is_global", False) == is_global:
+                    mmr_change = change_data["mmr_change"]
+                    streak = change_data["streak"]
+
+                    # Format MMR change
+                    if is_winning:
+                        mmr_changes.append(f"+{mmr_change} MMR")
+                    else:
+                        mmr_changes.append(f"{mmr_change} MMR")
+
+                    # Format streak
+                    if abs(streak) >= 3:
+                        icon = "🔥" if streak > 0 else "❄️"
+                        streaks.append(f"{icon} {abs(streak)}{'W' if streak > 0 else 'L'}")
+                    elif abs(streak) >= 1:
+                        icon = "↗️" if streak > 0 else "↘️"
+                        streaks.append(f"{icon} {abs(streak)}{'W' if streak > 0 else 'L'}")
+                    else:
+                        streaks.append("—")
+                else:
+                    mmr_changes.append("—")
+                    streaks.append("—")
+            elif player_id and player_id.startswith('9000'):
+                mmr_changes.append(f"{'+' if is_winning else '-'}0 MMR")
+                streaks.append("—")
+            else:
+                mmr_changes.append("—")
+                streaks.append("—")
+
+        processed_teams.append((mmr_changes, streaks))
+
+    return processed_teams
 
 
 async def background_role_updates(guild, all_players, mmr_changes_by_player):
