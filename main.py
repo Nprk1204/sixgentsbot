@@ -1019,11 +1019,14 @@ async def report_slash_optimized(interaction: discord.Interaction, match_id: str
     # OPTIMIZATION 2: Single database query with error handling
     # ================================
 
-    # IMMEDIATE defer - don't wait for database
+    # Conservative defer with longer delays to prevent rate limiting
     try:
         if is_cloud_platform():
-            # Reduced cloud delay from 1-3s to 0.5-1.5s
-            await asyncio.sleep(random.uniform(0.5, 1.5))
+            # Increased cloud delay to be more conservative
+            await asyncio.sleep(random.uniform(1.5, 3.0))
+        else:
+            # Add delay for local too
+            await asyncio.sleep(random.uniform(0.8, 1.5))
 
         await interaction.response.defer()
     except Exception as defer_error:
@@ -1081,9 +1084,11 @@ async def report_slash_optimized(interaction: discord.Interaction, match_id: str
     # Create context for backward compatibility
     ctx = SimpleContext(interaction)
 
-    # Reduced cloud delay for processing
+    # Increased cloud delay for processing to prevent rate limiting
     if is_cloud_platform():
-        await asyncio.sleep(random.uniform(0.5, 1.0))  # Reduced from 1-3s
+        await asyncio.sleep(random.uniform(1.0, 2.5))  # Increased from 0.5-1.0s
+    else:
+        await asyncio.sleep(random.uniform(0.5, 1.0))  # Added delay for local too
 
     try:
         # ================================
@@ -1261,15 +1266,28 @@ async def report_slash_optimized(interaction: discord.Interaction, match_id: str
         )
 
         # ================================
-        # OPTIMIZATION 9: Immediate response + background processing
+        # OPTIMIZATION 9: Conservative response + background processing
         # ================================
 
-        # Send results immediately
-        await interaction.followup.send(embed=embed)
+        # Add small delay before sending response to prevent rate limiting
+        await asyncio.sleep(random.uniform(0.3, 0.8))
 
-        # Start background role updates (non-blocking)
+        # Send results with additional safety
+        try:
+            await interaction.followup.send(embed=embed)
+        except discord.HTTPException as send_error:
+            if send_error.status == 429:
+                # If rate limited, wait and retry once
+                retry_after = getattr(send_error, 'retry_after', 2)
+                await asyncio.sleep(retry_after + random.uniform(0.5, 1.0))
+                await interaction.followup.send(embed=embed)
+            else:
+                raise
+
+        # Start background role updates with additional delay (non-blocking)
         if not is_global and not is_cloud_platform():
-            asyncio.create_task(background_role_updates(
+            # Add extra delay before starting background tasks
+            asyncio.create_task(delayed_background_role_updates(
                 interaction.guild,
                 winning_team + losing_team,
                 mmr_changes_by_player
@@ -1279,12 +1297,27 @@ async def report_slash_optimized(interaction: discord.Interaction, match_id: str
         await interaction.followup.send("⚠️ Match processing timed out. Please try again.")
     except discord.HTTPException as e:
         if e.status == 429:
-            await interaction.followup.send("⚠️ Rate limited. Please wait a moment and try again.")
+            retry_after = getattr(e, 'retry_after', 3)
+            await asyncio.sleep(retry_after + random.uniform(1.0, 2.0))
+            await interaction.followup.send("⚠️ Rate limited. Retrying...")
         else:
             await interaction.followup.send("❌ Discord API error. Please try again.")
     except Exception as e:
         print(f"Error in optimized report command: {e}")
         await interaction.followup.send("❌ An error occurred. Please try again.")
+
+
+# ================================
+# ADDITIONAL SAFETY: Delayed background role updates
+# ================================
+
+async def delayed_background_role_updates(guild, all_players, mmr_changes_by_player):
+    """Wrapper to add extra delay before starting background role updates"""
+    # Wait longer before starting role updates to prevent rate limiting
+    await asyncio.sleep(random.uniform(3.0, 6.0))
+
+    # Then call the normal background role updates
+    await background_role_updates(guild, all_players, mmr_changes_by_player)
 
 
 # ================================
