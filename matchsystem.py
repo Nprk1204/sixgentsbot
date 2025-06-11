@@ -492,7 +492,7 @@ class MatchSystem:
         return None
 
     async def report_match_by_id(self, match_id, reporter_id, result, ctx=None):
-        """Report a match result by match ID and win/loss - NO ROLE UPDATES VERSION"""
+        """Report a match result by match ID and win/loss - FIXED VERSION"""
 
         # Clean the match ID first
         match_id = match_id.strip()
@@ -706,7 +706,8 @@ class MatchSystem:
         # Initialize MMR changes list to track all changes
         mmr_changes = []
 
-        # Update MMR for winners
+        # ✅ FIXED: Update MMR for WINNERS (this was processing losses before)
+        print(f"🏆 Processing WINNERS: {[p.get('name') for p in winning_team]}")
         for player in winning_team:
             player_id = player.get("id")
 
@@ -723,16 +724,274 @@ class MatchSystem:
             player_data = self.players.find_one({"id": player_id})
 
             if player_data:
-                # Existing player logic
+                # Existing player logic - WINNERS
                 if is_global_match:
-                    # Global match loss handling
+                    # Global match WIN handling
                     global_matches = player_data.get("global_matches", 0) + 1
-                    global_losses = player_data.get("global_losses", 0) + 1
+                    global_wins = player_data.get("global_wins", 0) + 1  # ✅ Adding wins for winners
+                    old_mmr = player_data.get("global_mmr", 300)
+
+                    # Get current global streak info and update for winner
+                    global_current_streak = player_data.get("global_current_streak", 0)
+                    new_global_streak = global_current_streak + 1 if global_current_streak >= 0 else 1  # ✅ Win streak
+                    global_longest_win_streak = max(player_data.get("global_longest_win_streak", 0), new_global_streak)
+
+                    # Calculate MMR gain with enhanced dynamic algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        old_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        global_matches,
+                        is_win=True,  # ✅ This is a win
+                        streak=new_global_streak,
+                        player_data=player_data
+                    )
+
+                    new_mmr = old_mmr + mmr_gain  # ✅ Adding MMR for winners
+                    print(f"Player {player.get('name', 'Unknown')} GLOBAL WIN: {old_mmr} + {mmr_gain} = {new_mmr}")
+
+                    # Update with ALL global streak fields
+                    self.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "global_mmr": new_mmr,
+                            "global_wins": global_wins,  # ✅ Increment wins
+                            "global_matches": global_matches,
+                            "global_current_streak": new_global_streak,
+                            "global_longest_win_streak": global_longest_win_streak,
+                            "global_longest_loss_streak": player_data.get("global_longest_loss_streak", 0),
+                            "last_updated": datetime.datetime.utcnow()
+                        }}
+                    )
+
+                    # Track MMR change for global win
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,  # ✅ Positive for winners
+                        "is_win": True,  # ✅ This is a win
+                        "is_global": True,
+                        "streak": new_global_streak
+                    })
+                    print(f"Added global MMR change for {player.get('name', 'Unknown')}: +{mmr_gain}")
+                else:
+                    # Regular ranked match WIN handling
+                    matches_played = player_data.get("matches", 0) + 1
+                    wins = player_data.get("wins", 0) + 1  # ✅ Adding wins for winners
+                    old_mmr = player_data.get("mmr", 600)
+
+                    # Get current streak info and update for winner
+                    current_streak = player_data.get("current_streak", 0)
+                    new_streak = current_streak + 1 if current_streak >= 0 else 1  # ✅ Win streak
+                    longest_win_streak = max(player_data.get("longest_win_streak", 0), new_streak)
+
+                    # Calculate MMR gain with enhanced dynamic algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        old_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        matches_played,
+                        is_win=True,  # ✅ This is a win
+                        streak=new_streak,
+                        player_data=player_data
+                    )
+
+                    new_mmr = old_mmr + mmr_gain  # ✅ Adding MMR for winners
+                    print(f"Player {player.get('name', 'Unknown')} RANKED WIN: {old_mmr} + {mmr_gain} = {new_mmr}")
+
+                    # Check for rank changes (promotions)
+                    old_rank_tier = self.get_rank_tier_from_mmr(old_mmr)
+                    new_rank_tier = self.get_rank_tier_from_mmr(new_mmr)
+
+                    update_data = {
+                        "mmr": new_mmr,
+                        "wins": wins,  # ✅ Increment wins
+                        "matches": matches_played,
+                        "current_streak": new_streak,
+                        "longest_win_streak": longest_win_streak,
+                        "longest_loss_streak": player_data.get("longest_loss_streak", 0),
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+
+                    # Track promotions for rank protection
+                    if new_rank_tier != old_rank_tier and new_rank_tier > old_rank_tier:
+                        update_data["last_promotion"] = {
+                            "matches_at_promotion": matches_played,
+                            "promoted_at": datetime.datetime.utcnow(),
+                            "from_rank": old_rank_tier,
+                            "to_rank": new_rank_tier,
+                            "mmr_at_promotion": new_mmr
+                        }
+                        print(
+                            f"🎉 Player {player.get('name', 'Unknown')} promoted from {old_rank_tier} to {new_rank_tier}!")
+
+                    # Update with ALL ranked streak fields
+                    self.players.update_one({"id": player_id}, {"$set": update_data})
+
+                    # Track MMR change for ranked win
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,  # ✅ Positive for winners
+                        "is_win": True,  # ✅ This is a win
+                        "is_global": False,
+                        "streak": new_streak
+                    })
+                    print(f"Added ranked MMR change for {player.get('name', 'Unknown')}: +{mmr_gain}")
+            else:
+                # New player logic for winners
+                if is_global_match:
+                    # New player's first global match - WIN
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                    starting_global_mmr = 300  # Default global MMR
+
+                    if rank_record and "global_mmr" in rank_record:
+                        starting_global_mmr = rank_record.get("global_mmr", 300)
+
+                    # Calculate first win MMR with the enhanced algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        starting_global_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        1,  # First match
+                        is_win=True,  # ✅ This is a win
+                        streak=1,
+                        player_data=None  # No existing data for new player
+                    )
+
+                    new_global_mmr = starting_global_mmr + mmr_gain  # ✅ Adding MMR for winners
+                    print(
+                        f"NEW PLAYER {player.get('name', 'Unknown')} FIRST GLOBAL WIN: {starting_global_mmr} + {mmr_gain} = {new_global_mmr}")
+
+                    # Get default ranked MMR from rank verification if available
+                    starting_ranked_mmr = 600  # Default ranked MMR
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_ranked_mmr = self.TIER_MMR.get(tier, 600)
+
+                    # Initialize new global player with ALL streak fields
+                    self.players.insert_one({
+                        "id": player_id,
+                        "name": player.get("name", "Unknown"),
+                        "mmr": starting_ranked_mmr,  # Default ranked MMR
+                        "global_mmr": new_global_mmr,  # Updated global MMR
+                        "wins": 0,
+                        "global_wins": 1,  # ✅ First global win
+                        "losses": 0,
+                        "global_losses": 0,
+                        "matches": 0,
+                        "global_matches": 1,
+                        "current_streak": 0,
+                        "longest_win_streak": 0,
+                        "longest_loss_streak": 0,
+                        "global_current_streak": 1,  # ✅ First win streak
+                        "global_longest_win_streak": 1,
+                        "global_longest_loss_streak": 0,
+                        "last_promotion": None,
+                        "created_at": datetime.datetime.utcnow(),
+                        "last_updated": datetime.datetime.utcnow()
+                    })
+
+                    # Track MMR change for global
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": starting_global_mmr,
+                        "new_mmr": new_global_mmr,
+                        "mmr_change": mmr_gain,  # ✅ Positive for winners
+                        "is_win": True,  # ✅ This is a win
+                        "is_global": True,
+                        "streak": 1
+                    })
+                    print(f"Added new player global MMR change for {player.get('name', 'Unknown')}: +{mmr_gain}")
+                else:
+                    # New player's first ranked match - WIN
+                    rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
+                    starting_mmr = 600  # Default MMR
+
+                    if rank_record:
+                        tier = rank_record.get("tier", "Rank C")
+                        starting_mmr = self.TIER_MMR.get(tier, 600)
+
+                    # Calculate first win MMR with enhanced algorithm
+                    mmr_gain = self.calculate_dynamic_mmr(
+                        starting_mmr,
+                        player_team_avg,
+                        opponent_avg,
+                        1,  # First match
+                        is_win=True,  # ✅ This is a win
+                        streak=1,
+                        player_data=None  # No existing data for new player
+                    )
+
+                    new_mmr = starting_mmr + mmr_gain  # ✅ Adding MMR for winners
+                    print(
+                        f"NEW PLAYER {player.get('name', 'Unknown')} FIRST RANKED WIN: {starting_mmr} + {mmr_gain} = {new_mmr}")
+
+                    # Initialize new ranked player with ALL streak fields
+                    self.players.insert_one({
+                        "id": player_id,
+                        "name": player.get("name", "Unknown"),
+                        "mmr": new_mmr,  # Updated ranked MMR
+                        "global_mmr": 300,  # Default global MMR
+                        "wins": 1,  # ✅ First win
+                        "global_wins": 0,
+                        "losses": 0,
+                        "global_losses": 0,
+                        "matches": 1,
+                        "global_matches": 0,
+                        "current_streak": 1,  # ✅ First win streak
+                        "longest_win_streak": 1,
+                        "longest_loss_streak": 0,
+                        "global_current_streak": 0,
+                        "global_longest_win_streak": 0,
+                        "global_longest_loss_streak": 0,
+                        "last_promotion": None,
+                        "created_at": datetime.datetime.utcnow(),
+                        "last_updated": datetime.datetime.utcnow()
+                    })
+
+                    # Track MMR change for ranked
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": starting_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,  # ✅ Positive for winners
+                        "is_win": True,  # ✅ This is a win
+                        "is_global": False,
+                        "streak": 1
+                    })
+                    print(f"Added new player ranked MMR change for {player.get('name', 'Unknown')}: +{mmr_gain}")
+
+        # ✅ FIXED: Update MMR for LOSERS (this was processing wins before)
+        print(f"😔 Processing LOSERS: {[p.get('name') for p in losing_team]}")
+        for player in losing_team:
+            player_id = player.get("id")
+
+            # Skip dummy players
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            # Determine which team this player is on for average MMR calculations
+            is_team1 = player in match.get("team1", [])
+            player_team_avg = team1_avg_mmr if is_team1 else team2_avg_mmr
+            opponent_avg = team2_avg_mmr if is_team1 else team1_avg_mmr
+
+            # Get player data or create new
+            player_data = self.players.find_one({"id": player_id})
+
+            if player_data:
+                # Existing player logic - LOSERS
+                if is_global_match:
+                    # Global match LOSS handling
+                    global_matches = player_data.get("global_matches", 0) + 1
+                    global_losses = player_data.get("global_losses", 0) + 1  # ✅ Adding losses for losers
                     old_mmr = player_data.get("global_mmr", 300)
 
                     # Get current global streak info and update for loser
                     global_current_streak = player_data.get("global_current_streak", 0)
-                    new_global_streak = global_current_streak - 1 if global_current_streak <= 0 else -1
+                    new_global_streak = global_current_streak - 1 if global_current_streak <= 0 else -1  # ✅ Loss streak
                     global_longest_loss_streak = min(player_data.get("global_longest_loss_streak", 0),
                                                      new_global_streak)
 
@@ -742,21 +1001,20 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         global_matches,
-                        is_win=False,
+                        is_win=False,  # ✅ This is a loss
                         streak=new_global_streak,
                         player_data=player_data
                     )
 
-                    new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                    print(
-                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                    new_mmr = max(0, old_mmr - mmr_loss)  # ✅ Subtracting MMR for losers
+                    print(f"Player {player.get('name', 'Unknown')} GLOBAL LOSS: {old_mmr} - {mmr_loss} = {new_mmr}")
 
                     # Update with ALL global streak fields
                     self.players.update_one(
                         {"id": player_id},
                         {"$set": {
                             "global_mmr": new_mmr,
-                            "global_losses": global_losses,
+                            "global_losses": global_losses,  # ✅ Increment losses
                             "global_matches": global_matches,
                             "global_current_streak": new_global_streak,
                             "global_longest_loss_streak": global_longest_loss_streak,
@@ -770,21 +1028,21 @@ class MatchSystem:
                         "player_id": player_id,
                         "old_mmr": old_mmr,
                         "new_mmr": new_mmr,
-                        "mmr_change": -mmr_loss,  # Negative for loss
-                        "is_win": False,
+                        "mmr_change": -mmr_loss,  # ✅ Negative for losers
+                        "is_win": False,  # ✅ This is a loss
                         "is_global": True,
                         "streak": new_global_streak
                     })
                     print(f"Added global MMR change for {player.get('name', 'Unknown')}: -{mmr_loss}")
                 else:
-                    # Regular ranked match loss handling
+                    # Regular ranked match LOSS handling
                     matches_played = player_data.get("matches", 0) + 1
-                    losses = player_data.get("losses", 0) + 1
+                    losses = player_data.get("losses", 0) + 1  # ✅ Adding losses for losers
                     old_mmr = player_data.get("mmr", 600)
 
                     # Get current streak info and update for loser
                     current_streak = player_data.get("current_streak", 0)
-                    new_streak = current_streak - 1 if current_streak <= 0 else -1
+                    new_streak = current_streak - 1 if current_streak <= 0 else -1  # ✅ Loss streak
                     longest_loss_streak = min(player_data.get("longest_loss_streak", 0), new_streak)
 
                     # Calculate MMR loss with enhanced dynamic algorithm
@@ -793,14 +1051,13 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         matches_played,
-                        is_win=False,
+                        is_win=False,  # ✅ This is a loss
                         streak=new_streak,
                         player_data=player_data
                     )
 
-                    new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
-                    print(
-                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                    new_mmr = max(0, old_mmr - mmr_loss)  # ✅ Subtracting MMR for losers
+                    print(f"Player {player.get('name', 'Unknown')} RANKED LOSS: {old_mmr} - {mmr_loss} = {new_mmr}")
 
                     # Check for rank changes (demotions)
                     old_rank_tier = self.get_rank_tier_from_mmr(old_mmr)
@@ -808,7 +1065,7 @@ class MatchSystem:
 
                     update_data = {
                         "mmr": new_mmr,
-                        "losses": losses,
+                        "losses": losses,  # ✅ Increment losses
                         "matches": matches_played,
                         "current_streak": new_streak,
                         "longest_loss_streak": longest_loss_streak,
@@ -816,7 +1073,7 @@ class MatchSystem:
                         "last_updated": datetime.datetime.utcnow()
                     }
 
-                    # Track demotions (though we don't give protection for demotions currently)
+                    # Track demotions
                     if new_rank_tier != old_rank_tier and new_rank_tier < old_rank_tier:
                         print(
                             f"📉 Player {player.get('name', 'Unknown')} demoted from {old_rank_tier} to {new_rank_tier}")
@@ -829,8 +1086,8 @@ class MatchSystem:
                         "player_id": player_id,
                         "old_mmr": old_mmr,
                         "new_mmr": new_mmr,
-                        "mmr_change": -mmr_loss,  # Negative for loss
-                        "is_win": False,
+                        "mmr_change": -mmr_loss,  # ✅ Negative for losers
+                        "is_win": False,  # ✅ This is a loss
                         "is_global": False,
                         "streak": new_streak
                     })
@@ -838,7 +1095,7 @@ class MatchSystem:
             else:
                 # New player logic for losers
                 if is_global_match:
-                    # New player's first global match - loss
+                    # New player's first global match - LOSS
                     rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                     starting_global_mmr = 300  # Default global MMR
 
@@ -851,12 +1108,12 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         1,  # First match
-                        is_win=False,
+                        is_win=False,  # ✅ This is a loss
                         streak=-1,
                         player_data=None  # No existing data for new player
                     )
 
-                    new_global_mmr = max(0, starting_global_mmr - mmr_loss)
+                    new_global_mmr = max(0, starting_global_mmr - mmr_loss)  # ✅ Subtracting MMR for losers
                     print(
                         f"NEW PLAYER {player.get('name', 'Unknown')} FIRST GLOBAL LOSS: {starting_global_mmr} - {mmr_loss} = {new_global_mmr}")
 
@@ -875,16 +1132,16 @@ class MatchSystem:
                         "wins": 0,
                         "global_wins": 0,
                         "losses": 0,
-                        "global_losses": 1,
+                        "global_losses": 1,  # ✅ First global loss
                         "matches": 0,
                         "global_matches": 1,
                         "current_streak": 0,
                         "longest_win_streak": 0,
                         "longest_loss_streak": 0,
-                        "global_current_streak": -1,
+                        "global_current_streak": -1,  # ✅ First loss streak
                         "global_longest_win_streak": 0,
                         "global_longest_loss_streak": -1,
-                        "last_promotion": None,  # Initialize promotion tracking
+                        "last_promotion": None,
                         "created_at": datetime.datetime.utcnow(),
                         "last_updated": datetime.datetime.utcnow()
                     })
@@ -894,14 +1151,14 @@ class MatchSystem:
                         "player_id": player_id,
                         "old_mmr": starting_global_mmr,
                         "new_mmr": new_global_mmr,
-                        "mmr_change": -mmr_loss,
-                        "is_win": False,
+                        "mmr_change": -mmr_loss,  # ✅ Negative for losers
+                        "is_win": False,  # ✅ This is a loss
                         "is_global": True,
                         "streak": -1
                     })
                     print(f"Added new player global MMR change for {player.get('name', 'Unknown')}: -{mmr_loss}")
                 else:
-                    # New player's first ranked match - loss
+                    # New player's first ranked match - LOSS
                     rank_record = self.db.get_collection('ranks').find_one({"discord_id": player_id})
                     starting_mmr = 600  # Default MMR
 
@@ -915,12 +1172,12 @@ class MatchSystem:
                         player_team_avg,
                         opponent_avg,
                         1,  # First match
-                        is_win=False,
+                        is_win=False,  # ✅ This is a loss
                         streak=-1,
                         player_data=None  # No existing data for new player
                     )
 
-                    new_mmr = max(0, starting_mmr - mmr_loss)
+                    new_mmr = max(0, starting_mmr - mmr_loss)  # ✅ Subtracting MMR for losers
                     print(
                         f"NEW PLAYER {player.get('name', 'Unknown')} FIRST RANKED LOSS: {starting_mmr} - {mmr_loss} = {new_mmr}")
 
@@ -932,17 +1189,17 @@ class MatchSystem:
                         "global_mmr": 300,  # Default global MMR
                         "wins": 0,
                         "global_wins": 0,
-                        "losses": 1,
+                        "losses": 1,  # ✅ First loss
                         "global_losses": 0,
                         "matches": 1,
                         "global_matches": 0,
-                        "current_streak": -1,
+                        "current_streak": -1,  # ✅ First loss streak
                         "longest_win_streak": 0,
                         "longest_loss_streak": -1,
                         "global_current_streak": 0,
                         "global_longest_win_streak": 0,
                         "global_longest_loss_streak": 0,
-                        "last_promotion": None,  # Initialize promotion tracking
+                        "last_promotion": None,
                         "created_at": datetime.datetime.utcnow(),
                         "last_updated": datetime.datetime.utcnow()
                     })
@@ -952,8 +1209,8 @@ class MatchSystem:
                         "player_id": player_id,
                         "old_mmr": starting_mmr,
                         "new_mmr": new_mmr,
-                        "mmr_change": -mmr_loss,
-                        "is_win": False,
+                        "mmr_change": -mmr_loss,  # ✅ Negative for losers
+                        "is_win": False,  # ✅ This is a loss
                         "is_global": False,
                         "streak": -1
                     })
@@ -972,8 +1229,7 @@ class MatchSystem:
 
         print(f"MMR changes stored successfully for match {match_id}")
 
-        # REMOVED: All Discord role update logic from here
-        # The role updates will happen during daily batch process instead
+        # Role updates will happen during daily batch process instead
         print("ℹ️ Skipping Discord role updates - will be processed overnight")
 
         if self.queue_manager:
