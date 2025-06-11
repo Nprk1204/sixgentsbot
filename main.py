@@ -1070,7 +1070,8 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
 
     try:
         # Get match result with enhanced error handling
-        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result, ctx)
+        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result,
+                                                                                       ctx)
 
         if error:
             await cloud_safe_followup(interaction, f"Error: {error}")
@@ -1095,6 +1096,10 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         print(f"Processing match report display for match {match_id}")
         print(f"Match type: {mmr_type}")
         print(f"MMR changes available: {len(match_result.get('mmr_changes', []))}")
+
+        # ================================
+        # OPTIMIZATION: Create embed with stored names FIRST (no member fetching)
+        # ================================
 
         # Extract MMR changes and streaks from match result properly
         mmr_changes_by_player = {}
@@ -1184,7 +1189,11 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
                 losing_team_mmr_changes.append("—")
                 losing_team_streaks.append("—")
 
-        # Create the embed with enhanced formatting
+        # ================================
+        # FAST EMBED CREATION - Use stored names only
+        # ================================
+
+        # Create the embed with enhanced formatting using STORED NAMES ONLY
         embed = discord.Embed(
             title=f"{mmr_type} Match Results",
             description=f"Match completed",
@@ -1201,19 +1210,10 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         # Add Winners header
         embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
 
-        # Create individual fields for each winning player with SAFE member fetching
+        # Create individual fields for each winning player using STORED NAMES
         for i, player in enumerate(winning_team):
-            try:
-                # CLOUD-SAFE member fetching with fallback to stored name
-                if is_cloud_platform():
-                    # On cloud platforms, skip member fetching to avoid rate limits
-                    name = player.get('name', 'Unknown')
-                else:
-                    # Only fetch members locally
-                    member = await safe_fetch_member(interaction.guild, player.get("id", 0))
-                    name = member.display_name if member else player.get('name', 'Unknown')
-            except:
-                name = player.get("name", "Unknown")
+            # Use stored name from match data - NO member fetching
+            name = player.get('name', 'Unknown')
 
             # Enhanced display with simplified MMR format
             mmr_display = winning_team_mmr_changes[i] if i < len(winning_team_mmr_changes) else "—"
@@ -1235,19 +1235,10 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         # Add Losers header
         embed.add_field(name="😔 Losers", value="\u200b", inline=False)
 
-        # Create individual fields for each losing player with SAFE member fetching
+        # Create individual fields for each losing player using STORED NAMES
         for i, player in enumerate(losing_team):
-            try:
-                # CLOUD-SAFE member fetching with fallback to stored name
-                if is_cloud_platform():
-                    # On cloud platforms, skip member fetching to avoid rate limits
-                    name = player.get('name', 'Unknown')
-                else:
-                    # Only fetch members locally
-                    member = await safe_fetch_member(interaction.guild, player.get("id", 0))
-                    name = member.display_name if member else player.get('name', 'Unknown')
-            except:
-                name = player.get("name", "Unknown")
+            # Use stored name from match data - NO member fetching
+            name = player.get('name', 'Unknown')
 
             # Enhanced display with simplified MMR format
             mmr_display = losing_team_mmr_changes[i] if i < len(losing_team_mmr_changes) else "—"
@@ -1282,8 +1273,20 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
             text=f"Reported by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        # Send the embed using cloud-safe followup
+        # ================================
+        # SEND EMBED IMMEDIATELY - No member fetching delays!
+        # ================================
         await cloud_safe_followup(interaction, embed=embed)
+
+        # ================================
+        # BACKGROUND TASKS: Update roles/names AFTER displaying results
+        # ================================
+
+        # Start background tasks for role updates if this is ranked mode
+        if not is_global and not is_cloud_platform():
+            # Only do background updates for ranked matches on local/non-cloud platforms
+            asyncio.create_task(
+                background_role_updates(interaction.guild, winning_team + losing_team, mmr_changes_by_player))
 
     except discord.HTTPException as e:
         await RenderErrorHandler.handle_general_error(interaction, e, "match report")
@@ -1291,6 +1294,139 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         await RenderErrorHandler.handle_timeout(interaction, "match report")
     except Exception as e:
         await RenderErrorHandler.handle_general_error(interaction, e, "match report")
+
+
+async def background_role_updates(guild, all_players, mmr_changes_by_player):
+    """
+    Background task to update Discord roles after match results are displayed
+    This runs separately so it doesn't delay the results display
+    PRIORITIZES rank changes for faster updates!
+    """
+    try:
+        print("🔄 Starting background role updates...")
+
+        # ================================
+        # STEP 1: IMMEDIATE rank change detection (no delay!)
+        # ================================
+
+        priority_updates = []  # Players who ranked up/down
+        normal_updates = []  # Players with same rank
+
+        for player in all_players:
+            player_id = player.get("id")
+
+            # Skip dummy players
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            # Skip if no MMR change
+            if player_id not in mmr_changes_by_player:
+                continue
+
+            change_data = mmr_changes_by_player[player_id]
+
+            # Only update for ranked changes
+            if change_data.get("is_global", False):
+                continue
+
+            old_mmr = change_data.get("old_mmr", 0)
+            new_mmr = change_data.get("new_mmr", 0)
+
+            # Determine old and new ranks
+            old_rank = get_rank_from_mmr(old_mmr)
+            new_rank = get_rank_from_mmr(new_mmr)
+
+            update_info = {
+                "player_id": player_id,
+                "player_name": player.get("name", "Unknown"),
+                "old_mmr": old_mmr,
+                "new_mmr": new_mmr,
+                "old_rank": old_rank,
+                "new_rank": new_rank,
+                "rank_changed": old_rank != new_rank
+            }
+
+            if update_info["rank_changed"]:
+                priority_updates.append(update_info)
+                print(f"🚨 PRIORITY: {update_info['player_name']} {old_rank} → {new_rank} (MMR: {old_mmr} → {new_mmr})")
+            else:
+                normal_updates.append(update_info)
+
+        # ================================
+        # STEP 2: IMMEDIATE priority updates (rank changes)
+        # ================================
+
+        priority_success = 0
+        if priority_updates:
+            print(f"⚡ Processing {len(priority_updates)} priority rank changes immediately...")
+
+            for update in priority_updates:
+                try:
+                    # NO DELAY for rank changes - update immediately!
+                    await system_coordinator.match_system.update_discord_role_ultra_safe(
+                        None, update["player_id"], update["new_mmr"]
+                    )
+                    priority_success += 1
+                    print(f"✅ FAST: Updated {update['player_name']} to {update['new_rank']}")
+
+                    # Minimal delay only between priority updates (0.5-1.5s)
+                    if update != priority_updates[-1]:  # Don't delay after last update
+                        await asyncio.sleep(random.uniform(0.5, 1.5))
+
+                except Exception as role_error:
+                    print(f"❌ Priority role update failed for {update['player_name']}: {role_error}")
+                    continue
+
+        # ================================
+        # STEP 3: DELAYED normal updates (same rank)
+        # ================================
+
+        normal_success = 0
+        if normal_updates:
+            print(f"⏳ Waiting before processing {len(normal_updates)} normal role updates...")
+
+            # Add delay before normal updates to prevent rate limiting
+            await asyncio.sleep(random.uniform(3.0, 6.0))
+
+            for update in normal_updates:
+                try:
+                    await system_coordinator.match_system.update_discord_role_ultra_safe(
+                        None, update["player_id"], update["new_mmr"]
+                    )
+                    normal_success += 1
+
+                    # Longer delay between normal updates
+                    if update != normal_updates[-1]:  # Don't delay after last update
+                        await asyncio.sleep(random.uniform(2.0, 4.0))
+
+                except Exception as role_error:
+                    print(f"❌ Normal role update failed for {update['player_name']}: {role_error}")
+                    continue
+
+        # ================================
+        # STEP 4: Summary
+        # ================================
+
+        total_success = priority_success + normal_success
+        total_attempted = len(priority_updates) + len(normal_updates)
+
+        print(f"✅ Background role updates completed:")
+        print(f"   🚨 Priority (rank changes): {priority_success}/{len(priority_updates)}")
+        print(f"   ⏳ Normal (same rank): {normal_success}/{len(normal_updates)}")
+        print(f"   📊 Total: {total_success}/{total_attempted}")
+
+    except Exception as e:
+        print(f"Error in background role updates: {e}")
+
+
+def get_rank_from_mmr(mmr):
+    """Helper function to determine rank from MMR"""
+    if mmr >= 1600:
+        return "Rank A"
+    elif mmr >= 1100:
+        return "Rank B"
+    else:
+        return "Rank C"
 
 
 @bot.tree.command(name="adminreport", description="Admin command to report match results")
@@ -3055,8 +3191,8 @@ async def on_app_command_error_cloud_enhanced(interaction: discord.Interaction, 
     app_commands.Choice(name="Ranked MMR", value="false"),
     app_commands.Choice(name="Global MMR", value="true")
 ])
-async def adjustmmr_slash_enhanced(interaction: discord.Interaction, player: discord.Member, amount: int,
-                          global_mmr: str = "false"):
+async def adjustmmr_slash_rate_limited(interaction: discord.Interaction, player: discord.Member, amount: int,
+                                       global_mmr: str = "false"):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
@@ -3072,103 +3208,212 @@ async def adjustmmr_slash_enhanced(interaction: discord.Interaction, player: dis
             ephemeral=True)
         return
 
-    # Defer response as this might include role updates
-    await interaction.response.defer()
+    # ENHANCED: Check for duplicate command prevention
+    if await is_duplicate_command_for_adjustmmr(interaction, player.id):
+        await interaction.response.send_message(
+            "⚠️ An MMR adjustment for this player is already in progress. Please wait.",
+            ephemeral=True
+        )
+        return
+
+    # CLOUD-SAFE defer with enhanced error handling
+    try:
+        defer_success = await cloud_safe_defer(interaction)
+        if not defer_success:
+            await RenderErrorHandler.handle_rate_limit(interaction, "MMR adjustment")
+            return
+    except Exception as defer_error:
+        print(f"Critical defer error in adjustmmr: {defer_error}")
+        await RenderErrorHandler.handle_general_error(interaction, defer_error, "MMR adjustment")
+        return
+
+    # Add cloud platform delay before processing
+    if is_cloud_platform():
+        await asyncio.sleep(random.uniform(2.0, 4.0))
+    else:
+        await asyncio.sleep(random.uniform(1.0, 2.0))
 
     # Determine which MMR to adjust
     is_global = global_mmr.lower() == "true"
     mmr_type = "Global" if is_global else "Ranked"
 
-    # Get player data
+    # Get player data with rate limiting protection
     player_id = str(player.id)
-    player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+
+    try:
+        # Add delay before database operation
+        await asyncio.sleep(random.uniform(0.5, 1.0))
+        player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+    except Exception as db_error:
+        print(f"Database error in adjustmmr: {db_error}")
+        await cloud_safe_followup(interaction, "❌ Database error occurred. Please try again.", ephemeral=True)
+        return
 
     # Handle player not found
     if not player_data:
-        # Check for rank record as fallback
-        rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+        # Check for rank record as fallback with rate limiting
+        try:
+            await asyncio.sleep(random.uniform(0.3, 0.7))
+            rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+        except Exception as rank_error:
+            print(f"Error checking rank record: {rank_error}")
+            await cloud_safe_followup(interaction, "❌ Error accessing player data. Please try again.", ephemeral=True)
+            return
 
         if rank_record:
             # Create player entry with initial values
-            if is_global:
-                starting_mmr = rank_record.get("global_mmr", 300)
-                new_mmr = starting_mmr + amount
-
-                system_coordinator.match_system.players.insert_one({
-                    "id": player_id,
-                    "name": player.display_name,
-                    "mmr": 600,  # Default ranked MMR
-                    "global_mmr": new_mmr,
-                    "wins": 0,
-                    "global_wins": 0,
-                    "losses": 0,
-                    "global_losses": 0,
-                    "matches": 0,
-                    "global_matches": 0,
-                    "current_streak": 0,
-                    "longest_win_streak": 0,
-                    "longest_loss_streak": 0,
-                    "global_current_streak": 0,
-                    "global_longest_win_streak": 0,
-                    "global_longest_loss_streak": 0,
-                    "created_at": datetime.datetime.utcnow(),
-                    "last_updated": datetime.datetime.utcnow()
-                })
-
-                await interaction.followup.send(
-                    f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
+            try:
+                await create_new_player_entry_rate_limited(
+                    interaction, player, player_id, rank_record, is_global, amount, mmr_type
                 )
                 return
-            else:
-                # For ranked MMR, use tier-based MMR
-                tier = rank_record.get("tier", "Rank C")
-                starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
-                new_mmr = starting_mmr + amount
-
-                system_coordinator.match_system.players.insert_one({
-                    "id": player_id,
-                    "name": player.display_name,
-                    "mmr": new_mmr,
-                    "global_mmr": 300,  # Default global MMR
-                    "wins": 0,
-                    "global_wins": 0,
-                    "losses": 0,
-                    "global_losses": 0,
-                    "matches": 0,
-                    "global_matches": 0,
-                    "current_streak": 0,
-                    "longest_win_streak": 0,
-                    "longest_loss_streak": 0,
-                    "global_current_streak": 0,
-                    "global_longest_win_streak": 0,
-                    "global_longest_loss_streak": 0,
-                    "created_at": datetime.datetime.utcnow(),
-                    "last_updated": datetime.datetime.utcnow()
-                })
-
-                # ENHANCED: Try to update Discord role with rate limiting protection
-                try:
-                    await system_coordinator.match_system.update_discord_role_ultra_safe(
-                        interaction, player_id, new_mmr
-                    )
-                except Exception as role_error:
-                    print(f"Warning: Could not update Discord role for {player.display_name}: {role_error}")
-
-                await interaction.followup.send(
-                    f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
-                )
+            except Exception as create_error:
+                print(f"Error creating new player entry: {create_error}")
+                await cloud_safe_followup(interaction, "❌ Error creating player entry. Please try again.",
+                                          ephemeral=True)
                 return
         else:
-            await interaction.followup.send(
-                f"Player {player.mention} not found in the database and has no rank verification. They need to verify their rank first.",
-                ephemeral=True
-            )
+            await cloud_safe_followup(interaction,
+                                      f"Player {player.mention} not found in the database and has no rank verification. They need to verify their rank first.",
+                                      ephemeral=True
+                                      )
             return
 
-    # Update existing player
+    # Update existing player with rate limiting protection
+    try:
+        await update_existing_player_mmr_rate_limited(
+            interaction, player, player_id, player_data, is_global, amount, mmr_type
+        )
+    except Exception as update_error:
+        print(f"Error updating existing player: {update_error}")
+        await cloud_safe_followup(interaction, "❌ Error updating player MMR. Please try again.", ephemeral=True)
+
+
+async def is_duplicate_command_for_adjustmmr(interaction, target_player_id):
+    """Enhanced duplicate prevention specifically for adjustmmr commands"""
+    admin_id = interaction.user.id
+    command_name = "adjustmmr"
+
+    # Create a unique key for this admin adjusting this specific player
+    key = f"{admin_id}:{command_name}:{target_player_id}"
+
+    async with command_lock:
+        now = datetime.datetime.now(datetime.UTC).timestamp()
+
+        # Check if this exact command combination was run very recently (within 5 seconds)
+        if key in recent_commands:
+            last_time = recent_commands[key]
+            if now - last_time < 5.0:  # 5 second cooldown for MMR adjustments
+                print(
+                    f"DUPLICATE ADJUSTMMR BLOCKED: {command_name} from {interaction.user.name} for player {target_player_id}")
+                return True
+
+        # Update the timestamp
+        recent_commands[key] = now
+
+        # Clean old entries
+        old_keys = [k for k, v in recent_commands.items() if now - v > 15.0]
+        for old_key in old_keys:
+            del recent_commands[old_key]
+
+    return False
+
+
+async def create_new_player_entry_rate_limited(interaction, player, player_id, rank_record, is_global, amount,
+                                               mmr_type):
+    """Create new player entry with rate limiting protection"""
+
+    if is_global:
+        starting_mmr = rank_record.get("global_mmr", 300)
+        new_mmr = starting_mmr + amount
+
+        # Add delay before database insert
+        await asyncio.sleep(random.uniform(0.5, 1.0))
+
+        system_coordinator.match_system.players.insert_one({
+            "id": player_id,
+            "name": player.display_name,
+            "mmr": 600,  # Default ranked MMR
+            "global_mmr": new_mmr,
+            "wins": 0,
+            "global_wins": 0,
+            "losses": 0,
+            "global_losses": 0,
+            "matches": 0,
+            "global_matches": 0,
+            "current_streak": 0,
+            "longest_win_streak": 0,
+            "longest_loss_streak": 0,
+            "global_current_streak": 0,
+            "global_longest_win_streak": 0,
+            "global_longest_loss_streak": 0,
+            "created_at": datetime.datetime.utcnow(),
+            "last_updated": datetime.datetime.utcnow()
+        })
+
+        await cloud_safe_followup(interaction,
+                                  f"Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount})."
+                                  )
+    else:
+        # For ranked MMR, use tier-based MMR
+        tier = rank_record.get("tier", "Rank C")
+        starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
+        new_mmr = starting_mmr + amount
+
+        # Add delay before database insert
+        await asyncio.sleep(random.uniform(0.5, 1.0))
+
+        system_coordinator.match_system.players.insert_one({
+            "id": player_id,
+            "name": player.display_name,
+            "mmr": new_mmr,
+            "global_mmr": 300,  # Default global MMR
+            "wins": 0,
+            "global_wins": 0,
+            "losses": 0,
+            "global_losses": 0,
+            "matches": 0,
+            "global_matches": 0,
+            "current_streak": 0,
+            "longest_win_streak": 0,
+            "longest_loss_streak": 0,
+            "global_current_streak": 0,
+            "global_longest_win_streak": 0,
+            "global_longest_loss_streak": 0,
+            "created_at": datetime.datetime.utcnow(),
+            "last_updated": datetime.datetime.utcnow()
+        })
+
+        # ENHANCED: Try to update Discord role with ULTRA-SAFE rate limiting protection
+        try:
+            # Add delay before role update
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+
+            await system_coordinator.match_system.update_discord_role_ultra_safe(
+                interaction, player_id, new_mmr
+            )
+
+            await cloud_safe_followup(interaction,
+                                      f"✅ Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount}). Discord role updated."
+                                      )
+        except Exception as role_error:
+            print(f"Warning: Could not update Discord role for {player.display_name}: {role_error}")
+            await cloud_safe_followup(interaction,
+                                      f"⚠️ Created new player entry for {player.mention}. Adjusted {mmr_type} MMR from {starting_mmr} to {new_mmr} ({'+' if amount >= 0 else ''}{amount}). Role update failed - may need manual update."
+                                      )
+
+
+async def update_existing_player_mmr_rate_limited(interaction, player, player_id, player_data, is_global, amount,
+                                                  mmr_type):
+    """Update existing player MMR with comprehensive rate limiting"""
+
+    # Determine old and new MMR values
     if is_global:
         old_mmr = player_data.get("global_mmr", 300)
         new_mmr = old_mmr + amount
+
+        # Add delay before database update
+        await asyncio.sleep(random.uniform(0.5, 1.0))
 
         system_coordinator.match_system.players.update_one(
             {"id": player_id},
@@ -3177,9 +3422,24 @@ async def adjustmmr_slash_enhanced(interaction: discord.Interaction, player: dis
                 "last_updated": datetime.datetime.utcnow()
             }}
         )
+
+        # Create response embed for global MMR (no role update needed)
+        await send_mmr_adjustment_embed_rate_limited(
+            interaction, player, mmr_type, old_mmr, new_mmr, amount,
+            tier_changed=False, role_updated=False
+        )
+
     else:
         old_mmr = player_data.get("mmr", 600)
         new_mmr = old_mmr + amount
+
+        # Determine rank changes
+        old_tier = get_rank_from_mmr(old_mmr)
+        new_tier = get_rank_from_mmr(new_mmr)
+        tier_changed = old_tier != new_tier
+
+        # Add delay before database update
+        await asyncio.sleep(random.uniform(0.5, 1.0))
 
         system_coordinator.match_system.players.update_one(
             {"id": player_id},
@@ -3189,61 +3449,115 @@ async def adjustmmr_slash_enhanced(interaction: discord.Interaction, player: dis
             }}
         )
 
-        # ENHANCED: Try to update Discord role for ranked MMR changes with rate limiting protection
-        try:
-            await system_coordinator.match_system.update_discord_role_ultra_safe(
-                interaction, player_id, new_mmr
-            )
-        except Exception as role_error:
-            print(f"Warning: Could not update Discord role for {player.display_name}: {role_error}")
+        # ENHANCED: Try to update Discord role for ranked MMR changes with ULTRA-SAFE rate limiting protection
+        role_updated = False
 
-    # Create embed response
-    embed = discord.Embed(
-        title=f"MMR Adjustment for {player.display_name}",
-        color=0x00ff00 if amount >= 0 else 0xff0000
-    )
+        if tier_changed:
+            print(f"🚨 RANK CHANGE DETECTED: {player.display_name} {old_tier} → {new_tier}")
 
-    embed.add_field(
-        name=f"{mmr_type} MMR Adjustment",
-        value=f"**Old MMR:** {old_mmr}\n**New MMR:** {new_mmr}\n**Change:** {'+' if amount >= 0 else ''}{amount}",
-        inline=False
-    )
+            try:
+                # PRIORITY: Immediate role update for rank changes
+                await asyncio.sleep(random.uniform(1.0, 2.0))  # Shorter delay for rank changes
 
-    # Add tier information if it's ranked MMR
-    if not is_global:
-        # Determine new tier based on MMR
-        old_tier = "Rank C"
-        if old_mmr >= 1600:
-            old_tier = "Rank A"
-        elif old_mmr >= 1100:
-            old_tier = "Rank B"
+                await system_coordinator.match_system.update_discord_role_ultra_safe(
+                    interaction, player_id, new_mmr
+                )
+                role_updated = True
+                print(f"✅ PRIORITY ROLE UPDATE: {player.display_name} role updated to {new_tier}")
 
-        new_tier = "Rank C"
-        if new_mmr >= 1600:
-            new_tier = "Rank A"
-        elif new_mmr >= 1100:
-            new_tier = "Rank B"
+            except Exception as role_error:
+                print(f"❌ Priority role update failed for {player.display_name}: {role_error}")
+        else:
+            # Same rank - try normal role update with longer delay
+            try:
+                await asyncio.sleep(random.uniform(3.0, 6.0))  # Longer delay for same rank
 
-        tier_changed = old_tier != new_tier
+                await system_coordinator.match_system.update_discord_role_ultra_safe(
+                    interaction, player_id, new_mmr
+                )
+                role_updated = True
+
+            except Exception as role_error:
+                print(f"Warning: Normal role update failed for {player.display_name}: {role_error}")
+
+        # Send response with comprehensive information
+        await send_mmr_adjustment_embed_rate_limited(
+            interaction, player, mmr_type, old_mmr, new_mmr, amount,
+            tier_changed, role_updated, old_tier, new_tier
+        )
+
+
+async def send_mmr_adjustment_embed_rate_limited(interaction, player, mmr_type, old_mmr, new_mmr, amount,
+                                                 tier_changed=False, role_updated=False, old_tier=None, new_tier=None):
+    """Send MMR adjustment embed with rate limiting protection"""
+
+    try:
+        # Add delay before sending embed
+        await asyncio.sleep(random.uniform(0.3, 0.7))
+
+        # Create embed response
+        embed = discord.Embed(
+            title=f"MMR Adjustment for {player.display_name}",
+            color=0x00ff00 if amount >= 0 else 0xff0000
+        )
 
         embed.add_field(
-            name="Rank Tier",
-            value=f"**Old Tier:** {old_tier}\n**New Tier:** {new_tier}\n**Changed:** {'Yes' if tier_changed else 'No'}",
+            name=f"{mmr_type} MMR Adjustment",
+            value=f"**Old MMR:** {old_mmr}\n**New MMR:** {new_mmr}\n**Change:** {'+' if amount >= 0 else ''}{amount}",
             inline=False
         )
 
-        # Update Discord role info
-        if tier_changed:
-            embed.add_field(
-                name="Discord Role",
-                value="Discord role has been updated automatically (if possible).",
-                inline=False
-            )
+        # Add tier information if it's ranked MMR
+        if not mmr_type.startswith("Global"):
+            if tier_changed and old_tier and new_tier:
+                embed.add_field(
+                    name="🎯 Rank Change",
+                    value=f"**Old Tier:** {old_tier}\n**New Tier:** {new_tier}\n**Promotion/Demotion:** {'✅ Yes' if tier_changed else 'No'}",
+                    inline=False
+                )
 
-    embed.set_footer(
-        text=f"Adjusted by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                if role_updated:
+                    embed.add_field(
+                        name="🔄 Discord Role",
+                        value="✅ Discord role updated successfully",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="⚠️ Discord Role",
+                        value="❌ Role update failed - may need manual update",
+                        inline=False
+                    )
+            else:
+                # Same tier
+                embed.add_field(
+                    name="Rank Tier",
+                    value=f"**Tier:** {new_tier or get_rank_from_mmr(new_mmr)} (unchanged)",
+                    inline=False
+                )
 
-    await interaction.followup.send(embed=embed)
+                if role_updated:
+                    embed.add_field(
+                        name="Discord Role",
+                        value="✅ Role information updated",
+                        inline=False
+                    )
+
+        embed.set_footer(
+            text=f"Adjusted by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Use cloud-safe followup with additional rate limiting
+        await cloud_safe_followup(interaction, embed=embed)
+
+    except Exception as embed_error:
+        print(f"Error sending MMR adjustment embed: {embed_error}")
+        # Fallback to simple text message
+        try:
+            await cloud_safe_followup(interaction,
+                                      f"✅ MMR adjustment completed for {player.mention}: {old_mmr} → {new_mmr} ({'+' if amount >= 0 else ''}{amount})"
+                                      )
+        except:
+            pass  # If even the fallback fails, we've already updated the database
 
 
 async def set_reset_status(status: bool, interaction=None):
