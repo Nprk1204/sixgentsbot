@@ -2085,7 +2085,7 @@ class MatchSystem:
 
         # NEW: Momentum system settings
         MOMENTUM_GAMES = 10  # Look at last 10 games for momentum
-        MOMENTUM_THRESHOLD = 0.5  # 70% win rate for momentum bonus
+        MOMENTUM_THRESHOLD = 0.5  # 50% win rate for momentum bonus
         MOMENTUM_MULTIPLIER = 1.2  # 20% bonus for good momentum
 
         # NEW: Rank boundary protection settings
