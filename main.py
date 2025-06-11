@@ -6,6 +6,7 @@ import logging
 import datetime
 import os
 import asyncio
+import schedule
 from threading import Thread
 from flask import Flask
 from dotenv import load_dotenv
@@ -30,6 +31,7 @@ from render_config import (
 
 # Rate limiting configuration
 EMERGENCY_MODE = False
+DAILY_RANK_UPDATE_IN_PROGRESS = False
 DISCORD_RATE_LIMIT_ENABLED = True
 MAX_CONCURRENT_ROLE_OPERATIONS = 1  # Reduced from 3 to 1 for maximum safety
 DELAY_BETWEEN_ROLE_OPERATIONS = 2.0  # Increased from 0.5 to 2.0 seconds
@@ -389,6 +391,272 @@ system_coordinator = SystemCoordinator(db)
 rate_limiter = DiscordRateLimiter()
 
 
+async def daily_rank_update_task():
+    """Scheduled task to update all player ranks at 3 AM"""
+    global DAILY_RANK_UPDATE_IN_PROGRESS
+
+    print("🌙 Starting daily rank update process...")
+    DAILY_RANK_UPDATE_IN_PROGRESS = True
+
+    try:
+        # Get all players who need rank updates
+        players_needing_updates = await get_players_needing_rank_updates()
+
+        if not players_needing_updates:
+            print("✅ No rank updates needed tonight")
+            return
+
+        print(f"📊 Processing rank updates for {len(players_needing_updates)} players")
+
+        # Group by rank changes
+        promotions = [p for p in players_needing_updates if p['promoted']]
+        demotions = [p for p in players_needing_updates if p['demoted']]
+
+        # Process promotions first
+        if promotions:
+            await process_promotions(promotions)
+
+        # Then process demotions
+        if demotions:
+            await process_demotions(demotions)
+
+        # Send daily summary
+        await send_daily_rank_summary(promotions, demotions)
+
+        print("✅ Daily rank update process completed")
+
+    except Exception as e:
+        print(f"❌ Error in daily rank update: {e}")
+        import traceback
+        traceback.print_exc()
+
+    finally:
+        DAILY_RANK_UPDATE_IN_PROGRESS = False
+
+
+async def get_players_needing_rank_updates():
+    """Get all players whose Discord rank doesn't match their MMR"""
+    updates_needed = []
+
+    # Get all guilds the bot is in
+    for guild in bot.guilds:
+        rank_roles = {
+            "Rank A": discord.utils.get(guild.roles, name="Rank A"),
+            "Rank B": discord.utils.get(guild.roles, name="Rank B"),
+            "Rank C": discord.utils.get(guild.roles, name="Rank C")
+        }
+
+        # Get all players with MMR data
+        all_players = list(system_coordinator.match_system.players.find({}))
+
+        for player_data in all_players:
+            player_id = player_data.get("id")
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            try:
+                member = await guild.fetch_member(int(player_id))
+                if not member:
+                    continue
+
+                # Get current MMR rank
+                current_mmr = player_data.get("mmr", 600)
+                mmr_rank = get_rank_from_mmr(current_mmr)
+
+                # Get current Discord role
+                current_discord_rank = None
+                for rank_name, role in rank_roles.items():
+                    if role and role in member.roles:
+                        current_discord_rank = rank_name
+                        break
+
+                # Check if update is needed
+                if current_discord_rank != mmr_rank:
+                    updates_needed.append({
+                        'player_id': player_id,
+                        'member': member,
+                        'current_rank': current_discord_rank,
+                        'new_rank': mmr_rank,
+                        'mmr': current_mmr,
+                        'promoted': get_rank_value(mmr_rank) > get_rank_value(current_discord_rank or "Rank C"),
+                        'demoted': get_rank_value(mmr_rank) < get_rank_value(current_discord_rank or "Rank C"),
+                        'guild': guild
+                    })
+
+            except discord.NotFound:
+                continue
+            except Exception as e:
+                print(f"Error checking player {player_id}: {e}")
+                continue
+
+    return updates_needed
+
+
+async def process_promotions(promotions):
+    """Process all promotions with celebration"""
+    print(f"🎉 Processing {len(promotions)} promotions...")
+
+    # Group by guild for announcements
+    guild_promotions = {}
+    for promo in promotions:
+        guild_id = promo['guild'].id
+        if guild_id not in guild_promotions:
+            guild_promotions[guild_id] = []
+        guild_promotions[guild_id].append(promo)
+
+    for guild_id, guild_promos in guild_promotions.items():
+        guild = guild_promos[0]['guild']
+
+        # Update roles with delays
+        for i, promo in enumerate(guild_promos):
+            try:
+                await update_player_rank_role(promo)
+
+                # Delay between updates
+                if i < len(guild_promos) - 1:
+                    await asyncio.sleep(random.uniform(3.0, 6.0))
+
+            except Exception as e:
+                print(f"Error promoting {promo['member'].display_name}: {e}")
+
+        # Send promotion announcements
+        await announce_promotions(guild, guild_promos)
+
+
+async def process_demotions(demotions):
+    """Process demotions quietly"""
+    print(f"📉 Processing {len(demotions)} demotions...")
+
+    for i, demo in enumerate(demotions):
+        try:
+            await update_player_rank_role(demo)
+
+            # Delay between updates
+            if i < len(demotions) - 1:
+                await asyncio.sleep(random.uniform(4.0, 8.0))
+
+        except Exception as e:
+            print(f"Error demoting {demo['member'].display_name}: {e}")
+
+
+async def update_player_rank_role(update_info):
+    """Update a single player's rank role"""
+    member = update_info['member']
+    guild = update_info['guild']
+    new_rank = update_info['new_rank']
+    current_rank = update_info['current_rank']
+
+    # Get all rank roles
+    rank_a_role = discord.utils.get(guild.roles, name="Rank A")
+    rank_b_role = discord.utils.get(guild.roles, name="Rank B")
+    rank_c_role = discord.utils.get(guild.roles, name="Rank C")
+
+    all_rank_roles = [rank_a_role, rank_b_role, rank_c_role]
+    new_role = discord.utils.get(guild.roles, name=new_rank)
+
+    if not new_role:
+        print(f"Could not find role {new_rank}")
+        return
+
+    # Remove old rank roles
+    old_roles = [role for role in member.roles if role in all_rank_roles]
+    if old_roles:
+        await member.remove_roles(*old_roles, reason="Daily rank update")
+        await asyncio.sleep(2.0)
+
+    # Add new role
+    await member.add_roles(new_role, reason=f"Daily rank update: {update_info['mmr']} MMR")
+
+    print(f"✅ Updated {member.display_name}: {current_rank} → {new_rank} ({update_info['mmr']} MMR)")
+
+
+async def announce_promotions(guild, promotions):
+    """Announce promotions in appropriate channels"""
+
+    # Find announcement channel (sixgents or general)
+    announcement_channel = None
+    for channel in guild.text_channels:
+        if channel.name.lower() in ['sixgents', 'general', 'announcements']:
+            announcement_channel = channel
+            break
+
+    if not announcement_channel:
+        return
+
+    if len(promotions) == 1:
+        promo = promotions[0]
+        embed = discord.Embed(
+            title="🎉 Daily Promotion! 🎉",
+            description=f"**{promo['member'].display_name}** has been promoted to **{promo['new_rank']}**!",
+            color=0x00ff00
+        )
+        embed.add_field(
+            name="New MMR",
+            value=f"{promo['mmr']} MMR",
+            inline=True
+        )
+        embed.add_field(
+            name="New Channel Access",
+            value=f"#{promo['new_rank'].lower().replace(' ', '-')}",
+            inline=True
+        )
+
+    else:
+        embed = discord.Embed(
+            title=f"🎉 Daily Promotions! ({len(promotions)} players) 🎉",
+            color=0x00ff00
+        )
+
+        # Group by rank
+        rank_groups = {}
+        for promo in promotions:
+            rank = promo['new_rank']
+            if rank not in rank_groups:
+                rank_groups[rank] = []
+            rank_groups[rank].append(promo['member'].display_name)
+
+        for rank, players in rank_groups.items():
+            embed.add_field(
+                name=f"Promoted to {rank}",
+                value=", ".join(players),
+                inline=False
+            )
+
+    embed.set_footer(text="Congratulations! 🎊")
+
+    try:
+        await announcement_channel.send(embed=embed)
+    except Exception as e:
+        print(f"Could not send promotion announcement: {e}")
+
+
+async def send_daily_rank_summary(promotions, demotions):
+    """Send summary to bot logs"""
+    total_changes = len(promotions) + len(demotions)
+
+    if total_changes > 0:
+        print(f"📊 Daily Rank Update Summary:")
+        print(f"   🎉 Promotions: {len(promotions)}")
+        print(f"   📉 Demotions: {len(demotions)}")
+        print(f"   📈 Total Changes: {total_changes}")
+
+
+def schedule_daily_rank_updates():
+    """Schedule the daily rank update task"""
+    # Schedule for 3 AM daily
+    schedule.every().day.at("03:00").do(
+        lambda: asyncio.create_task(daily_rank_update_task())
+    )
+
+    print("⏰ Daily rank updates scheduled for 3:00 AM")
+
+
+async def run_scheduler():
+    """Run the schedule checker"""
+    while True:
+        schedule.run_pending()
+        await asyncio.sleep(60)  # Check every minute
+
 @bot.event
 async def on_ready():
     print(f"{bot.user.name} is now online with ID: {bot.user.id}")
@@ -488,6 +756,14 @@ async def on_ready():
             print(f"  - /{cmd.name}")
 
         print("✅ Command synchronization complete.")
+
+        # Schedule daily rank updates
+        schedule_daily_rank_updates()
+
+        # Start scheduler
+        bot.loop.create_task(run_scheduler())
+
+        print("✅ Daily rank update system initialized")
 
         if not is_cloud:
             bot.loop.create_task(startup_health_check())
@@ -969,7 +1245,7 @@ async def status_slash(interaction: discord.Interaction):
     app_commands.Choice(name="Win", value="win"),
     app_commands.Choice(name="Loss", value="loss")
 ])
-async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id: str, result: str):
+async def report_slash_enhanced(interaction: discord.Interaction, match_id: str, result: str):
     if RESET_IN_PROGRESS:
         duration = ""
         if RESET_START_TIME:
@@ -1056,7 +1332,6 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
     try:
         defer_success = await cloud_safe_defer(interaction)
         if not defer_success:
-            # If defer fails, try to send error message
             await RenderErrorHandler.handle_rate_limit(interaction, "match report")
             return
     except Exception as defer_error:
@@ -1069,8 +1344,9 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         await asyncio.sleep(random.uniform(1.0, 3.0))
 
     try:
-        # Get match result with enhanced error handling
-        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result, ctx)
+        # Get match result (NO ROLE UPDATES)
+        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result,
+                                                                                       ctx)
 
         if error:
             await cloud_safe_followup(interaction, f"Error: {error}")
@@ -1096,8 +1372,10 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         print(f"Match type: {mmr_type}")
         print(f"MMR changes available: {len(match_result.get('mmr_changes', []))}")
 
-        # Extract MMR changes and streaks from match result properly
+        # Extract MMR changes and check for rank changes
         mmr_changes_by_player = {}
+        rank_changes = []
+
         for change in match_result.get("mmr_changes", []):
             player_id = change.get("player_id")
             if player_id:
@@ -1110,176 +1388,40 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
                     "new_mmr": change.get("new_mmr", 0)
                 }
 
-        # Initialize arrays for MMR changes and streaks
-        winning_team_mmr_changes = []
-        losing_team_mmr_changes = []
-        winning_team_streaks = []
-        losing_team_streaks = []
+                # Check for rank changes (only for ranked matches)
+                if not change.get("is_global", False):
+                    old_mmr = change.get("old_mmr", 0)
+                    new_mmr = change.get("new_mmr", 0)
+                    old_rank = get_rank_from_mmr(old_mmr)
+                    new_rank = get_rank_from_mmr(new_mmr)
 
-        # Extract MMR changes for winning team with proper global/ranked filtering
-        for player in winning_team:
-            player_id = player.get("id")
+                    if old_rank != new_rank:
+                        # Find player name
+                        player_name = "Unknown"
+                        for team in [match_result["team1"], match_result["team2"]]:
+                            for p in team:
+                                if p.get("id") == player_id:
+                                    player_name = p.get("name", "Unknown")
+                                    break
+                            if player_name != "Unknown":
+                                break
 
-            if player_id and player_id in mmr_changes_by_player:
-                change_data = mmr_changes_by_player[player_id]
+                        rank_changes.append({
+                            'player_id': player_id,
+                            'name': player_name,
+                            'old_rank': old_rank,
+                            'new_rank': new_rank,
+                            'new_mmr': new_mmr,
+                            'promoted': get_rank_value(new_rank) > get_rank_value(old_rank)
+                        })
 
-                # Only show MMR changes that match the current match type
-                change_is_global = change_data.get("is_global", False)
-                if change_is_global == is_global:
-                    mmr_change = change_data["mmr_change"]
-                    streak = change_data["streak"]
+        # Send immediate rank-up notifications
+        if rank_changes:
+            await send_immediate_rank_notifications(interaction, rank_changes)
 
-                    winning_team_mmr_changes.append(f"+{mmr_change} MMR")
-
-                    # Format streak display with emojis
-                    if streak >= 3:
-                        winning_team_streaks.append(f"🔥 {streak}W")
-                    elif streak == 2:
-                        winning_team_streaks.append(f"↗️ {streak}W")
-                    elif streak == 1:
-                        winning_team_streaks.append(f"↗️ {streak}W")
-                    else:
-                        winning_team_streaks.append("—")
-                else:
-                    winning_team_mmr_changes.append("—")
-                    winning_team_streaks.append("—")
-            elif player_id and player_id.startswith('9000'):  # Dummy player
-                winning_team_mmr_changes.append("+0 MMR")
-                winning_team_streaks.append("—")
-            else:
-                winning_team_mmr_changes.append("—")
-                winning_team_streaks.append("—")
-
-        # Extract MMR changes for losing team with proper global/ranked filtering
-        for player in losing_team:
-            player_id = player.get("id")
-
-            if player_id and player_id in mmr_changes_by_player:
-                change_data = mmr_changes_by_player[player_id]
-
-                # Only show MMR changes that match the current match type
-                change_is_global = change_data.get("is_global", False)
-                if change_is_global == is_global:
-                    mmr_change = change_data["mmr_change"]
-                    streak = change_data["streak"]
-
-                    losing_team_mmr_changes.append(f"{mmr_change} MMR")  # Already negative
-
-                    # Format streak display for losses
-                    if streak <= -3:
-                        losing_team_streaks.append(f"❄️ {abs(streak)}L")
-                    elif streak == -2:
-                        losing_team_streaks.append(f"↘️ {abs(streak)}L")
-                    elif streak == -1:
-                        losing_team_streaks.append(f"↘️ {abs(streak)}L")
-                    else:
-                        losing_team_streaks.append("—")
-                else:
-                    losing_team_mmr_changes.append("—")
-                    losing_team_streaks.append("—")
-            elif player_id and player_id.startswith('9000'):  # Dummy player
-                losing_team_mmr_changes.append("-0 MMR")
-                losing_team_streaks.append("—")
-            else:
-                losing_team_mmr_changes.append("—")
-                losing_team_streaks.append("—")
-
-        # Create the embed with enhanced formatting
-        embed = discord.Embed(
-            title=f"{mmr_type} Match Results",
-            description=f"Match completed",
-            color=0x00ff00  # Green color
-        )
-
-        # Match ID and type field
-        embed.add_field(
-            name="Match Info",
-            value=f"**Match ID:** `{match_id}`\n**Type:** {mmr_type} Match",
-            inline=False
-        )
-
-        # Add Winners header
-        embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
-
-        # Create individual fields for each winning player with SAFE member fetching
-        for i, player in enumerate(winning_team):
-            try:
-                # CLOUD-SAFE member fetching with fallback to stored name
-                if is_cloud_platform():
-                    # On cloud platforms, skip member fetching to avoid rate limits
-                    name = player.get('name', 'Unknown')
-                else:
-                    # Only fetch members locally
-                    member = await safe_fetch_member(interaction.guild, player.get("id", 0))
-                    name = member.display_name if member else player.get('name', 'Unknown')
-            except:
-                name = player.get("name", "Unknown")
-
-            # Enhanced display with simplified MMR format
-            mmr_display = winning_team_mmr_changes[i] if i < len(winning_team_mmr_changes) else "—"
-            streak_display = winning_team_streaks[i] if i < len(winning_team_streaks) else "—"
-
-            embed.add_field(
-                name=f"**{name}**",
-                value=f"{mmr_display}\n{streak_display}",
-                inline=True
-            )
-
-        # Spacer field if needed for proper alignment (for 3-column layout)
-        if len(winning_team) % 3 == 1:
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-        elif len(winning_team) % 3 == 2:
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        # Add Losers header
-        embed.add_field(name="😔 Losers", value="\u200b", inline=False)
-
-        # Create individual fields for each losing player with SAFE member fetching
-        for i, player in enumerate(losing_team):
-            try:
-                # CLOUD-SAFE member fetching with fallback to stored name
-                if is_cloud_platform():
-                    # On cloud platforms, skip member fetching to avoid rate limits
-                    name = player.get('name', 'Unknown')
-                else:
-                    # Only fetch members locally
-                    member = await safe_fetch_member(interaction.guild, player.get("id", 0))
-                    name = member.display_name if member else player.get('name', 'Unknown')
-            except:
-                name = player.get("name", "Unknown")
-
-            # Enhanced display with simplified MMR format
-            mmr_display = losing_team_mmr_changes[i] if i < len(losing_team_mmr_changes) else "—"
-            streak_display = losing_team_streaks[i] if i < len(losing_team_streaks) else "—"
-
-            embed.add_field(
-                name=f"**{name}**",
-                value=f"{mmr_display}\n{streak_display}",
-                inline=True
-            )
-
-        # Spacer field if needed for proper alignment (for 3-column layout)
-        if len(losing_team) % 3 == 1:
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-        elif len(losing_team) % 3 == 2:
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-
-        # Enhanced MMR System explanation with streak info
-        embed.add_field(
-            name="📊 MMR & Streak System",
-            value=(
-                f"**{mmr_type} MMR:** Dynamic changes based on team balance and streaks\n"
-                f"**Streaks:** 🔥 3+ wins = bonus MMR | ❄️ 3+ losses = extra penalty\n"
-                f"**Icons:** ↗️ Recent win | ↘️ Recent loss | — No streak"
-            ),
-            inline=False
-        )
-
-        # Footer with reporter info and timestamp
-        embed.set_footer(
-            text=f"Reported by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        # Create the main results embed
+        embed = await create_enhanced_match_results_embed(
+            interaction, match_result, mmr_changes_by_player, rank_changes, mmr_type
         )
 
         # Send the embed using cloud-safe followup
@@ -1292,6 +1434,257 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
     except Exception as e:
         await RenderErrorHandler.handle_general_error(interaction, e, "match report")
 
+
+def get_rank_from_mmr(mmr):
+    """Helper function to determine rank from MMR"""
+    if mmr >= 1600:
+        return "Rank A"
+    elif mmr >= 1100:
+        return "Rank B"
+    else:
+        return "Rank C"
+
+
+def get_rank_value(rank):
+    """Convert rank to numeric value for comparison"""
+    if rank == "Rank A":
+        return 3
+    elif rank == "Rank B":
+        return 2
+    elif rank == "Rank C":
+        return 1
+    else:
+        return 0
+
+
+async def send_immediate_rank_notifications(interaction, rank_changes):
+    """Send immediate notifications for rank changes"""
+    promotions = [rc for rc in rank_changes if rc['promoted']]
+    demotions = [rc for rc in rank_changes if not rc['promoted']]
+
+    # Send promotion notifications
+    for promo in promotions:
+        new_channel_name = promo['new_rank'].lower().replace(' ', '-')
+
+        # Send public celebration
+        await interaction.channel.send(
+            f"🎉 **PROMOTION!** 🎉\n"
+            f"**{promo['name']}** has been promoted to **{promo['new_rank']}**! "
+            f"({promo['new_mmr']} MMR)\n\n"
+            f"🕐 **Starting tomorrow**, you can queue in **#{new_channel_name}**!\n"
+            f"Discord roles will update overnight at 3 AM."
+        )
+
+        # Try to send a DM
+        try:
+            member = await interaction.guild.fetch_member(int(promo['player_id']))
+            if member:
+                await member.send(
+                    f"🎉 **Congratulations!** 🎉\n\n"
+                    f"You've been promoted to **{promo['new_rank']}**! ({promo['new_mmr']} MMR)\n\n"
+                    f"**What happens next:**\n"
+                    f"• Your MMR is updated immediately ✅\n"
+                    f"• Your Discord role will update overnight at 3 AM 🌙\n"
+                    f"• Starting tomorrow, queue in **#{new_channel_name}**!\n"
+                    f"• Until then, continue using your current channels\n\n"
+                    f"Great work! 🎊"
+                )
+        except Exception as e:
+            print(f"Could not DM promotion notice to {promo['name']}: {e}")
+
+    # Send demotion notifications (more quietly)
+    for demo in demotions:
+        new_channel_name = demo['new_rank'].lower().replace(' ', '-')
+
+        # Send a more private message
+        try:
+            member = await interaction.guild.fetch_member(int(demo['player_id']))
+            if member:
+                await member.send(
+                    f"📉 **Rank Update**\n\n"
+                    f"Your rank has been adjusted to **{demo['new_rank']}** ({demo['new_mmr']} MMR).\n\n"
+                    f"**What happens next:**\n"
+                    f"• Your MMR is updated immediately\n"
+                    f"• Your Discord role will update overnight at 3 AM\n"
+                    f"• Starting tomorrow, queue in **#{new_channel_name}**\n"
+                    f"• Until then, continue using your current channels\n\n"
+                    f"Keep playing and you'll rank back up! 💪"
+                )
+        except Exception as e:
+            print(f"Could not DM demotion notice to {demo['name']}: {e}")
+
+
+async def create_enhanced_match_results_embed(interaction, match_result, mmr_changes_by_player, rank_changes, mmr_type):
+    """Create enhanced match results embed with rank change preview"""
+
+    match_id = match_result["match_id"]
+    team1 = match_result["team1"]
+    team2 = match_result["team2"]
+    winner = match_result["winner"]
+
+    # Determine winning and losing teams
+    if winner == 1:
+        winning_team = team1
+        losing_team = team2
+    else:
+        winning_team = team2
+        losing_team = team1
+
+    # Create embed
+    embed = discord.Embed(
+        title=f"{mmr_type} Match Results",
+        description=f"Match completed",
+        color=0x00ff00  # Green color
+    )
+
+    # Match ID and type field
+    embed.add_field(
+        name="Match Info",
+        value=f"**Match ID:** `{match_id}`\n**Type:** {mmr_type} Match",
+        inline=False
+    )
+
+    # Add Winners header
+    embed.add_field(name="🏆 Winners", value="\u200b", inline=False)
+
+    # Create individual fields for each winning player
+    for i, player in enumerate(winning_team):
+        try:
+            # CLOUD-SAFE member fetching with fallback to stored name
+            if is_cloud_platform():
+                name = player.get('name', 'Unknown')
+            else:
+                member = await safe_fetch_member(interaction.guild, player.get("id", 0))
+                name = member.display_name if member else player.get('name', 'Unknown')
+        except:
+            name = player.get("name", "Unknown")
+
+        # Get MMR change info
+        player_id = player.get("id")
+        mmr_info = mmr_changes_by_player.get(player_id, {})
+
+        mmr_change = mmr_info.get("mmr_change", 0)
+        streak = mmr_info.get("streak", 0)
+
+        mmr_display = f"+{mmr_change} MMR" if mmr_change > 0 else f"{mmr_change} MMR"
+
+        # Format streak display
+        if streak >= 3:
+            streak_display = f"🔥 {streak}W"
+        elif streak == 2:
+            streak_display = f"↗️ {streak}W"
+        elif streak == 1:
+            streak_display = f"↗️ {streak}W"
+        else:
+            streak_display = "—"
+
+        embed.add_field(
+            name=f"**{name}**",
+            value=f"{mmr_display}\n{streak_display}",
+            inline=True
+        )
+
+    # Spacer field if needed for proper alignment
+    if len(winning_team) % 3 == 1:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+    elif len(winning_team) % 3 == 2:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    # Add Losers header
+    embed.add_field(name="😔 Losers", value="\u200b", inline=False)
+
+    # Create individual fields for each losing player
+    for i, player in enumerate(losing_team):
+        try:
+            # CLOUD-SAFE member fetching with fallback to stored name
+            if is_cloud_platform():
+                name = player.get('name', 'Unknown')
+            else:
+                member = await safe_fetch_member(interaction.guild, player.get("id", 0))
+                name = member.display_name if member else player.get('name', 'Unknown')
+        except:
+            name = player.get("name", "Unknown")
+
+        # Get MMR change info
+        player_id = player.get("id")
+        mmr_info = mmr_changes_by_player.get(player_id, {})
+
+        mmr_change = mmr_info.get("mmr_change", 0)
+        streak = mmr_info.get("streak", 0)
+
+        mmr_display = f"{mmr_change} MMR"  # Already negative
+
+        # Format streak display for losses
+        if streak <= -3:
+            streak_display = f"❄️ {abs(streak)}L"
+        elif streak == -2:
+            streak_display = f"↘️ {abs(streak)}L"
+        elif streak == -1:
+            streak_display = f"↘️ {abs(streak)}L"
+        else:
+            streak_display = "—"
+
+        embed.add_field(
+            name=f"**{name}**",
+            value=f"{mmr_display}\n{streak_display}",
+            inline=True
+        )
+
+    # Spacer field if needed
+    if len(losing_team) % 3 == 1:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+    elif len(losing_team) % 3 == 2:
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
+
+    # Add rank changes if any
+    if rank_changes:
+        promotions = [rc for rc in rank_changes if rc['promoted']]
+        demotions = [rc for rc in rank_changes if not rc['promoted']]
+
+        rank_change_text = []
+        if promotions:
+            for promo in promotions:
+                rank_change_text.append(f"🎉 **{promo['name']}**: {promo['old_rank']} → **{promo['new_rank']}**")
+
+        if demotions:
+            for demo in demotions:
+                rank_change_text.append(f"📉 **{demo['name']}**: {demo['old_rank']} → {demo['new_rank']}")
+
+        embed.add_field(
+            name="🔄 Rank Changes",
+            value="\n".join(rank_change_text),
+            inline=False
+        )
+
+        embed.add_field(
+            name="⏰ When Changes Take Effect",
+            value=(
+                "• **MMR**: Updated immediately ✅\n"
+                "• **Discord Roles**: Updated overnight at 3 AM 🌙\n"
+                "• **New Channel Access**: Starting tomorrow morning"
+            ),
+            inline=False
+        )
+
+    # MMR System explanation
+    embed.add_field(
+        name="📊 MMR & Streak System",
+        value=(
+            f"**{mmr_type} MMR:** Dynamic changes based on team balance and streaks\n"
+            f"**Streaks:** 🔥 3+ wins = bonus MMR | ❄️ 3+ losses = extra penalty\n"
+            f"**Icons:** ↗️ Recent win | ↘️ Recent loss | — No streak"
+        ),
+        inline=False
+    )
+
+    # Footer with reporter info and timestamp
+    embed.set_footer(
+        text=f"Reported by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+
+    return embed
 
 @bot.tree.command(name="adminreport", description="Admin command to report match results")
 @app_commands.describe(
