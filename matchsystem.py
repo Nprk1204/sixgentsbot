@@ -2076,16 +2076,16 @@ class MatchSystem:
 
         # ENHANCED: Extended placement period to 15 games
         PLACEMENT_GAMES = 15
-        DECAY_RATE = 0.08  # Reduced decay rate for longer placement period
+        DECAY_RATE = 0.1  # Reduced decay rate for longer placement period
 
         # ENHANCED: 2x Streak multiplier settings
         MAX_STREAK_MULTIPLIER = 2.0  # Maximum multiplier for long streaks (100% bonus)
         STREAK_THRESHOLD = 2  # Reduced threshold - kicks in after 2 wins/losses
-        STREAK_SCALING = 0.2  # Increased scaling (20% per win/loss after threshold)
+        STREAK_SCALING = 0.1  # Increased scaling (10% per win/loss after threshold)
 
         # NEW: Momentum system settings
         MOMENTUM_GAMES = 10  # Look at last 10 games for momentum
-        MOMENTUM_THRESHOLD = 0.7  # 70% win rate for momentum bonus
+        MOMENTUM_THRESHOLD = 0.5  # 70% win rate for momentum bonus
         MOMENTUM_MULTIPLIER = 1.2  # 20% bonus for good momentum
 
         # NEW: Rank boundary protection settings
