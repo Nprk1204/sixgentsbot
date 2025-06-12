@@ -300,8 +300,8 @@ def discord_callback_enhanced():
                 'access_token': access_token
             }
 
-            flash(f'Successfully logged in as {user_info["username"]}!', 'success')
-            return redirect(url_for('profile'))
+        flash(f'Successfully logged in as {user_info["username"]}!', 'success')
+        return redirect(url_for('profile'))
 
     except Exception as e:
         print(f"💥 Critical callback error: {e}")
