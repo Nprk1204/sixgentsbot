@@ -3,3 +3,20 @@ __pycache__/
 .idea/
 discord.log
 *.pyc
+
+# Cloudflare tunnel binary
+cloudflared.exe
+cloudflared
+cloudflared-*.exe
+
+# Cloudflare config files
+*.yml
+*.yaml
+tunnel-*.yml
+cloudflare-*.yml
+
+# Cloudflare credentials
+.cloudflared/
+
+# Migration folders (if you use them later)
+migration_to_spare_pc/
