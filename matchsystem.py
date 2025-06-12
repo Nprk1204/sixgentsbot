@@ -15,6 +15,7 @@ class MatchSystem:
         self.queue_manager = queue_manager
         self.bot = None
         self.rate_limiter = None
+        self.bulk_role_manager = None
 
         # Tier-based MMR values
         self.TIER_MMR = {
@@ -38,6 +39,10 @@ class MatchSystem:
         """Set the rate limiter instance"""
         self.rate_limiter = rate_limiter
 
+    def set_bulk_role_manager(self, bulk_role_manager):
+        """Set the bulk role manager instance"""
+        self.bulk_role_manager = bulk_role_manager
+
     def set_queue_manager(self, queue_manager):
         """Set the queue manager reference"""
         self.queue_manager = queue_manager
@@ -49,6 +54,105 @@ class MatchSystem:
     def is_real_player(self, player_id):
         """Check if a player ID belongs to a real Discord user"""
         return not str(player_id).startswith('9000')
+
+    async def update_discord_role_with_queue(self, ctx, player_id, new_mmr, immediate_announcement=True):
+        """
+        Queue a role update for 3am processing while optionally sending immediate feedback
+
+        Args:
+            ctx: Discord context (can be interaction or regular context)
+            player_id: Player's Discord ID
+            new_mmr: New MMR value
+            immediate_announcement: Whether to send rank change message immediately
+        """
+        try:
+            # Skip dummy players
+            if self.is_dummy_player(player_id):
+                print(f"Skipping role update queue for dummy player {player_id}")
+                return
+
+            # Get guild from context
+            guild = ctx.guild if hasattr(ctx, 'guild') else ctx.interaction.guild
+            channel = ctx.channel if hasattr(ctx, 'channel') else ctx.interaction.channel
+
+            # Calculate rank change - get OLD MMR from database BEFORE the update
+            old_mmr = 0
+            old_rank = None
+            promotion = False
+
+            # Get CURRENT player data (before this match's MMR change)
+            player_data = self.players.find_one({"id": player_id})
+            if player_data:
+                # This should be the UPDATED MMR since we call this after MMR calculation
+                # So we need to look at the change that just happened
+                old_mmr = player_data.get("mmr", 600) - (new_mmr - player_data.get("mmr", 600))
+                old_rank = self.get_rank_tier_from_mmr(old_mmr)
+
+            new_rank = self.get_rank_tier_from_mmr(new_mmr)
+
+            # Check if this is a promotion
+            if old_rank and new_rank != old_rank:
+                old_rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}.get(old_rank, 1)
+                new_rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}.get(new_rank, 1)
+                promotion = new_rank_value > old_rank_value
+
+            # Queue the role update for 3am
+            if self.bulk_role_manager:
+                success = self.bulk_role_manager.queue_role_update(
+                    player_id=player_id,
+                    guild_id=str(guild.id),
+                    new_mmr=new_mmr,
+                    old_rank=old_rank,
+                    new_rank=new_rank,
+                    promotion=promotion
+                )
+
+                if success:
+                    print(f"✅ Queued role update for {player_id}: {old_rank} → {new_rank} (MMR: {new_mmr})")
+                else:
+                    print(f"❌ Failed to queue role update for {player_id}")
+
+            # Send immediate announcement if it's a promotion and immediate_announcement is True
+            if immediate_announcement and promotion and old_rank and new_rank:
+                try:
+                    # Fetch member for mention
+                    member = None
+                    if self.rate_limiter:
+                        await asyncio.sleep(random.uniform(1.0, 2.0))
+                        member = await self.rate_limiter.fetch_member_with_limit(guild, int(player_id))
+                    else:
+                        await asyncio.sleep(random.uniform(2.0, 4.0))
+                        member = await guild.fetch_member(int(player_id))
+
+                    if member:
+                        embed = discord.Embed(
+                            title="🎉 Rank Promotion!",
+                            description=f"Congratulations {member.mention}! You've been promoted to **{new_rank}**!",
+                            color=0x00ff00
+                        )
+                        embed.add_field(
+                            name="MMR Change",
+                            value=f"{old_mmr} → {new_mmr}",
+                            inline=True
+                        )
+                        embed.add_field(
+                            name="Discord Role Update",
+                            value="Your Discord role will be updated at 3:00 AM",
+                            inline=True
+                        )
+                        embed.set_footer(text="Keep up the great work!")
+
+                        if self.rate_limiter:
+                            await self.rate_limiter.send_message_with_limit(channel, embed=embed)
+                        else:
+                            await asyncio.sleep(random.uniform(1.0, 2.0))
+                            await channel.send(embed=embed)
+
+                except Exception as e:
+                    print(f"⚠️ Could not send immediate promotion announcement: {e}")
+
+        except Exception as e:
+            print(f"❌ Error in update_discord_role_with_queue: {e}")
 
     async def update_discord_role_ultra_safe(self, ctx, player_id, new_mmr):
         """ULTRA-SAFE Discord role update method with extreme rate limiting protection"""
@@ -1240,84 +1344,35 @@ class MatchSystem:
 
         print(f"MMR changes stored successfully for match {match_id}")
 
-        # Update Discord roles for players if ctx is provided AND rate limiter is available
-        if ctx and self.rate_limiter:
-            print("Updating Discord roles for REAL match players only...")
+        # Queue Discord role updates for 3am processing (immediate announcements, delayed role changes)
+        if ctx:
+            print("Queueing Discord role updates for 3am processing...")
 
-            # Collect REAL player role updates only
-            real_player_updates = []
+            # Process all players - both winners and losers
+            all_players = winning_team + losing_team
 
-            # Process winners - REAL PLAYERS ONLY
-            for player in winning_team:
+            for player in all_players:
                 player_id = player.get("id")
 
-                # CRITICAL: Skip dummy players completely
+                # Skip dummy players completely
                 if not player_id or self.is_dummy_player(player_id):
-                    print(f"Skipping dummy player role update: {player.get('name', 'Unknown')} (ID: {player_id})")
+                    print(f"Skipping dummy player role queue: {player.get('name', 'Unknown')} (ID: {player_id})")
                     continue
 
-                # Only process real players for ranked matches
+                # Only process real players for ranked matches (global matches don't affect Discord roles)
                 if not is_global_match:
                     player_data = self.players.find_one({"id": player_id})
                     if player_data:
-                        mmr = player_data.get("mmr", 600)
-                        real_player_updates.append({
-                            'player_id': player_id,
-                            'player_name': player.get('name', 'Unknown'),
-                            'mmr': mmr
-                        })
+                        new_mmr = player_data.get("mmr", 600)
 
-            # Process losers - REAL PLAYERS ONLY
-            for player in losing_team:
-                player_id = player.get("id")
+                        # Queue the role update with immediate promotion announcement
+                        await self.update_discord_role_with_queue(ctx, player_id, new_mmr, immediate_announcement=True)
 
-                # CRITICAL: Skip dummy players completely
-                if not player_id or self.is_dummy_player(player_id):
-                    print(f"Skipping dummy player role update: {player.get('name', 'Unknown')} (ID: {player_id})")
-                    continue
+                        print(f"✅ Queued role update for {player.get('name', 'Unknown')} (MMR: {new_mmr})")
 
-                # Only process real players for ranked matches
-                if not is_global_match:
-                    player_data = self.players.find_one({"id": player_id})
-                    if player_data:
-                        mmr = player_data.get("mmr", 600)
-                        real_player_updates.append({
-                            'player_id': player_id,
-                            'player_name': player.get('name', 'Unknown'),
-                            'mmr': mmr
-                        })
-
-            # Process role updates for REAL players only with LONG delays
-            if real_player_updates:
-                print(f"Processing {len(real_player_updates)} REAL player role updates...")
-                for i, update in enumerate(real_player_updates):
-                    try:
-                        print(f"Updating role for REAL player: {update['player_name']} (ID: {update['player_id']})")
-
-                        # FIX: Pass the interaction's guild directly instead of ctx
-                        guild = ctx.guild if hasattr(ctx, 'guild') else ctx.interaction.guild
-                        await self.update_discord_role_ultra_safe_fixed(guild, update['player_id'], update['mmr'])
-
-                        print(f"✅ Processed role update {i + 1}/{len(real_player_updates)} for {update['player_name']}")
-
-                        # CRITICAL: Long delay between each player to prevent rate limiting
-                        if i < len(real_player_updates) - 1:  # Don't delay after the last update
-                            print(f"Waiting 5 seconds before next role update...")
-                            await asyncio.sleep(5.0)  # 5 second delay between each player
-
-                    except Exception as e:
-                        print(f"❌ Error updating Discord role for {update['player_name']}: {e}")
-                        # Add delay even on error
-                        await asyncio.sleep(2.0)
-
-                print("✅ Real player Discord role updates completed")
-            else:
-                print("ℹ️ No real players found for role updates (match had only dummy players)")
-
-        elif ctx and not self.rate_limiter:
-            print("⚠️ Warning: No rate limiter available - skipping Discord role updates to prevent rate limiting")
+            print("✅ All role updates queued for 3am processing")
         else:
-            print("ℹ️ No context provided - skipping Discord role updates")
+            print("ℹ️ No context provided - skipping role update queueing")
 
         if self.queue_manager:
             self.queue_manager.remove_match(match_id)
