@@ -1083,16 +1083,24 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         await asyncio.sleep(random.uniform(1.0, 3.0))
 
     try:
+        # CRITICAL: Process match result with error handling
+        print(f"🔄 Processing match report for {match_id} by {interaction.user.display_name}")
+
         # Get match result with enhanced error handling
-        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result, ctx)
+        match_result, error = await system_coordinator.match_system.report_match_by_id(match_id, reporter_id, result,
+                                                                                       ctx)
 
         if error:
+            print(f"❌ Match report error: {error}")
             await cloud_safe_followup(interaction, f"Error: {error}")
             return
 
         if not match_result:
+            print(f"❌ Match report failed: No result returned")
             await cloud_safe_followup(interaction, "Failed to process match report.")
             return
+
+        print(f"✅ Match report processed successfully for {match_id}")
 
         # Determine winning team
         winner = match_result["winner"]
@@ -1297,13 +1305,20 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         )
 
         # Send the embed using cloud-safe followup
+        print(f"📤 Sending match results embed for {match_id}")
         await cloud_safe_followup(interaction, embed=embed)
+        print(f"✅ Match report completed successfully for {match_id}")
 
     except discord.HTTPException as e:
+        print(f"❌ Discord HTTP error in match report: {e}")
         await RenderErrorHandler.handle_general_error(interaction, e, "match report")
     except asyncio.TimeoutError:
+        print(f"❌ Timeout error in match report")
         await RenderErrorHandler.handle_timeout(interaction, "match report")
     except Exception as e:
+        print(f"❌ Unexpected error in match report: {e}")
+        import traceback
+        traceback.print_exc()
         await RenderErrorHandler.handle_general_error(interaction, e, "match report")
 
 

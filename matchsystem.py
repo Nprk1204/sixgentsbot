@@ -71,9 +71,33 @@ class MatchSystem:
                 print(f"Skipping role update queue for dummy player {player_id}")
                 return
 
-            # Get guild from context
-            guild = ctx.guild if hasattr(ctx, 'guild') else ctx.interaction.guild
-            channel = ctx.channel if hasattr(ctx, 'channel') else ctx.interaction.channel
+            # SAFETY: Check if bulk_role_manager is available
+            if not self.bulk_role_manager:
+                print(f"⚠️ No bulk role manager available - skipping role queue for {player_id}")
+                return
+
+            # Get guild from context with enhanced safety
+            guild = None
+            channel = None
+
+            try:
+                if hasattr(ctx, 'guild'):
+                    guild = ctx.guild
+                    channel = ctx.channel
+                elif hasattr(ctx, 'interaction'):
+                    guild = ctx.interaction.guild
+                    channel = ctx.interaction.channel
+                else:
+                    print(f"⚠️ Could not determine guild from context type: {type(ctx)}")
+                    return
+
+                if not guild:
+                    print(f"⚠️ Guild is None in context")
+                    return
+
+            except Exception as ctx_error:
+                print(f"❌ Error extracting guild from context: {ctx_error}")
+                return
 
             # Calculate rank change - get OLD MMR from database BEFORE the update
             old_mmr = 0
@@ -97,25 +121,24 @@ class MatchSystem:
                 promotion = new_rank_value > old_rank_value
 
             # Queue the role update for 3am
-            if self.bulk_role_manager:
-                success = self.bulk_role_manager.queue_role_update(
-                    player_id=player_id,
-                    guild_id=str(guild.id),
-                    new_mmr=new_mmr,
-                    old_rank=old_rank,
-                    new_rank=new_rank,
-                    promotion=promotion
-                )
+            success = self.bulk_role_manager.queue_role_update(
+                player_id=player_id,
+                guild_id=str(guild.id),
+                new_mmr=new_mmr,
+                old_rank=old_rank,
+                new_rank=new_rank,
+                promotion=promotion
+            )
 
-                if success:
-                    print(f"✅ Queued role update for {player_id}: {old_rank} → {new_rank} (MMR: {new_mmr})")
-                else:
-                    print(f"❌ Failed to queue role update for {player_id}")
+            if success:
+                print(f"✅ Queued role update for {player_id}: {old_rank} → {new_rank} (MMR: {new_mmr})")
+            else:
+                print(f"❌ Failed to queue role update for {player_id}")
 
             # Send immediate announcement if it's a promotion and immediate_announcement is True
-            if immediate_announcement and promotion and old_rank and new_rank:
+            if immediate_announcement and promotion and old_rank and new_rank and channel:
                 try:
-                    # Fetch member for mention
+                    # Fetch member for mention with safety checks
                     member = None
                     if self.rate_limiter:
                         await asyncio.sleep(random.uniform(1.0, 2.0))
@@ -153,6 +176,7 @@ class MatchSystem:
 
         except Exception as e:
             print(f"❌ Error in update_discord_role_with_queue: {e}")
+            # Don't let role update errors break the match reporting process
 
     async def update_discord_role_ultra_safe(self, ctx, player_id, new_mmr):
         """ULTRA-SAFE Discord role update method with extreme rate limiting protection"""
