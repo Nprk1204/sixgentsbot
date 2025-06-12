@@ -38,15 +38,27 @@ class DiscordOAuth:
         }
 
         headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Mozilla/5.0 (compatible; SixGentsBot/1.0; +https://sixgentsbot-1.onrender.com)',
+            'Accept': 'application/json',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
         }
 
         try:
+
+            import time
+            time.sleep(2)
+
             response = requests.post(
                 f"{self.api_endpoint}/oauth2/token",
                 data=data,
                 headers=headers,
-                timeout=10
+                timeout=30,
+                verify=True
             )
 
             print(f"OAuth token exchange status: {response.status_code}")
