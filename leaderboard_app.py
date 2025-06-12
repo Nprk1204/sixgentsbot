@@ -280,6 +280,16 @@ def discord_logout():
     flash('Successfully logged out!', 'info')
     return redirect(url_for('home'))
 
+@app.route('/debug/oauth-test')
+def oauth_test():
+    """Test OAuth configuration without full flow"""
+    return {
+        'client_id_length': len(DISCORD_CLIENT_ID) if DISCORD_CLIENT_ID else 0,
+        'client_secret_length': len(DISCORD_CLIENT_SECRET) if DISCORD_CLIENT_SECRET else 0,
+        'redirect_uri': DISCORD_REDIRECT_URI,
+        'api_endpoint': 'https://discord.com/api/v10',
+        'oauth_url_test': discord_oauth.get_oauth_url() if discord_oauth else 'No OAuth instance'
+    }
 
 # Main Routes
 @app.route('/')
