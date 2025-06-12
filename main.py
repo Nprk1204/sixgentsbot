@@ -1,5 +1,4 @@
 import discord
-import requests
 from discord import app_commands
 from discord.ext import commands
 import logging
@@ -13,9 +12,9 @@ from database import Database
 from system_coordinator import SystemCoordinator
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
-import uuid
 import random
 from rate_limiter import DiscordRateLimiter
+from bulk_role_manager import BulkRoleManager
 from render_config import (
     configure_for_render,
     render_startup_sequence,
@@ -27,6 +26,7 @@ from render_config import (
     is_cloud_platform,
     get_platform_info
 )
+
 
 # Rate limiting configuration
 EMERGENCY_MODE = False
@@ -431,6 +431,16 @@ async def on_ready():
             print("✅ System coordinator initialized")
         except Exception as sc_error:
             print(f"⚠️ Error initializing system coordinator: {sc_error}")
+
+        global bulk_role_manager
+        bulk_role_manager = BulkRoleManager(db, bot, rate_limiter)
+
+        # Connect it to match system
+        system_coordinator.match_system.set_bulk_role_manager(bulk_role_manager)
+
+        # Start the daily 3am task
+        bulk_role_manager.start_daily_role_update_task()
+        print("✅ Bulk role update system initialized - will process at 3:00 AM daily")
 
         # Start background tasks with error handling
         try:
@@ -1302,6 +1312,93 @@ def get_rank_from_mmr(mmr):
     else:
         return "Rank C"
 
+
+@bot.tree.command(name="checkpending", description="Check pending role updates (Admin only)")
+async def checkpending_slash(interaction: discord.Interaction):
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message("Admin only", ephemeral=True)
+        return
+
+    pending_count = bulk_role_manager.get_pending_updates_count()
+
+    embed = discord.Embed(
+        title="📋 Pending Role Updates",
+        description=f"There are **{pending_count}** pending role updates",
+        color=0x3498db
+    )
+
+    if pending_count > 0:
+        embed.add_field(
+            name="Next Processing",
+            value="3:00 AM (daily automatic processing)",
+            inline=False
+        )
+        embed.add_field(
+            name="Manual Processing",
+            value="Use `/forceprocess @member` to process a specific player immediately",
+            inline=False
+        )
+    else:
+        embed.add_field(
+            name="Status",
+            value="✅ No pending updates",
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="forceprocess", description="Force process a player's role update (Admin only)")
+@app_commands.describe(member="Member to process role update for")
+async def forceprocess_slash(interaction: discord.Interaction, member: discord.Member):
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message("Admin only", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    player_id = str(member.id)
+    guild_id = str(interaction.guild.id)
+
+    # Check if there's a pending update
+    pending = bulk_role_manager.get_player_pending_update(player_id, guild_id)
+
+    if not pending:
+        await interaction.followup.send(f"{member.mention} has no pending role updates.")
+        return
+
+    # Process the update
+    success = await bulk_role_manager.force_process_player_update(player_id, guild_id)
+
+    if success:
+        embed = discord.Embed(
+            title="✅ Role Update Processed",
+            description=f"Successfully processed role update for {member.mention}",
+            color=0x00ff00
+        )
+        embed.add_field(
+            name="New MMR",
+            value=str(pending.get("new_mmr", "Unknown")),
+            inline=True
+        )
+        embed.add_field(
+            name="New Rank",
+            value=pending.get("new_rank", "Unknown"),
+            inline=True
+        )
+    else:
+        embed = discord.Embed(
+            title="❌ Processing Failed",
+            description=f"Failed to process role update for {member.mention}",
+            color=0xff0000
+        )
+        embed.add_field(
+            name="Note",
+            value="Check logs for details. Update will still be processed at 3 AM.",
+            inline=False
+        )
+
+    await interaction.followup.send(embed=embed)
 
 @bot.tree.command(name="adminreport", description="Admin command to report match results")
 @app_commands.describe(
