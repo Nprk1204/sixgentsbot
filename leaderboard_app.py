@@ -221,55 +221,93 @@ def discord_login():
 
 
 @app.route('/auth/discord/callback')
-def discord_callback():
-    """Handle Discord OAuth callback"""
+def discord_callback_enhanced():
+    """Enhanced Discord OAuth callback with rate limit handling"""
+
     code = request.args.get('code')
+    error = request.args.get('error')
+    error_description = request.args.get('error_description')
+
+    print(f"📥 OAuth callback received:")
+    print(f"   Code: {code[:10] + '...' if code else 'None'}")
+    print(f"   Error: {error}")
+    print(f"   Error Description: {error_description}")
+
+    if error:
+        error_msg = f"Discord OAuth error: {error}"
+        if error_description:
+            error_msg += f" - {error_description}"
+        flash(error_msg, 'error')
+        return redirect(url_for('home'))
+
     if not code:
         flash('Authentication failed: No authorization code received', 'error')
         return redirect(url_for('home'))
 
     try:
-        # Exchange code for access token
-        token_data = discord_oauth.exchange_code(code)
+        # ENHANCED: Multiple attempts with exponential backoff for rate limits
+        max_attempts = 3
+        base_delay = 5
 
-        if 'access_token' not in token_data:
-            flash('Authentication failed: Could not get access token', 'error')
-            return redirect(url_for('home'))
+        for attempt in range(max_attempts):
+            print(f"🔄 Token exchange attempt {attempt + 1}/{max_attempts}")
 
-        access_token = token_data['access_token']
+            token_data = discord_oauth.exchange_code(code)
 
-        # Get user information
-        user_info = discord_oauth.get_user_info(access_token)
-        if not user_info:
-            flash('Authentication failed: Could not get user information', 'error')
-            return redirect(url_for('home'))
+            # Handle rate limiting specifically
+            if 'error' in token_data:
+                error_msg = token_data['error']
 
-        # Get guild member information if guild ID is available
-        guild_member = None
-        if DISCORD_GUILD_ID:
-            guild_member = discord_oauth.get_guild_member(
-                access_token,
-                DISCORD_GUILD_ID,
-                user_info['id']
-            )
+                if 'rate limit' in error_msg.lower() or 'try again' in error_msg.lower():
+                    if attempt < max_attempts - 1:  # Not the last attempt
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        print(f"⏳ Rate limited - waiting {delay} seconds before retry")
+                        import time
+                        time.sleep(delay)
+                        continue
+                    else:
+                        # Last attempt failed
+                        flash('Discord is temporarily limiting access. Please wait 5-10 minutes and try again.',
+                              'warning')
+                        return redirect(url_for('home'))
+                else:
+                    # Non-rate-limit error
+                    flash(f'Authentication failed: {error_msg}', 'error')
+                    return redirect(url_for('home'))
 
-        # Store user in session
-        session['discord_user'] = {
-            'id': user_info['id'],
-            'username': user_info['username'],
-            'global_name': user_info.get('global_name'),
-            'discriminator': user_info.get('discriminator'),
-            'avatar': user_info.get('avatar'),
-            'access_token': access_token,
-            'guild_member': guild_member
-        }
+            # Check for access token
+            if 'access_token' not in token_data:
+                flash('Authentication failed: No access token received', 'error')
+                return redirect(url_for('home'))
 
-        flash(f'Successfully logged in as {user_info["username"]}!', 'success')
-        return redirect(url_for('profile'))
+            # SUCCESS - continue with normal flow
+            access_token = token_data['access_token']
+            print(f"✅ Access token received")
+
+            # Get user information
+            user_info = discord_oauth.get_user_info(access_token)
+            if not user_info:
+                flash('Authentication failed: Could not get user information', 'error')
+                return redirect(url_for('home'))
+
+            # Store user in session
+            session['discord_user'] = {
+                'id': user_info['id'],
+                'username': user_info['username'],
+                'global_name': user_info.get('global_name'),
+                'discriminator': user_info.get('discriminator'),
+                'avatar': user_info.get('avatar'),
+                'access_token': access_token
+            }
+
+            flash(f'Successfully logged in as {user_info["username"]}!', 'success')
+            return redirect(url_for('profile'))
 
     except Exception as e:
-        print(f"Discord OAuth error: {e}")
-        flash('Authentication failed: An error occurred during login', 'error')
+        print(f"💥 Critical callback error: {e}")
+        import traceback
+        traceback.print_exc()
+        flash('Authentication failed: Internal error', 'error')
         return redirect(url_for('home'))
 
 

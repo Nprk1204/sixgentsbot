@@ -28,7 +28,8 @@ class DiscordOAuth:
         return f"https://discord.com/api/oauth2/authorize?{query_string}"
 
     def exchange_code(self, code):
-        """Exchange authorization code for access token"""
+        """Exchange authorization code for access token with anti-rate-limiting headers"""
+
         data = {
             'client_id': self.client_id,
             'client_secret': self.client_secret,
@@ -37,42 +38,70 @@ class DiscordOAuth:
             'redirect_uri': self.redirect_uri
         }
 
+        # ENHANCED headers to bypass Cloudflare bot detection
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (compatible; SixGentsBot/1.0; +https://sixgentsbot-1.onrender.com)',
-            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'en-US,en;q=0.9',
             'Accept-Encoding': 'gzip, deflate, br',
             'DNT': '1',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin',
+            'Cache-Control': 'no-cache',
+            'Pragma': 'no-cache'
         }
 
         try:
+            print(f"🔄 OAuth token exchange attempt with enhanced headers...")
+            print(f"   Client ID: {self.client_id[:8]}...")
+            print(f"   Redirect URI: {self.redirect_uri}")
+            print(f"   Code length: {len(code) if code else 0}")
 
+            # Add delay to space out requests
             import time
-            time.sleep(2)
+            time.sleep(3)  # 3 second delay before request
 
             response = requests.post(
                 f"{self.api_endpoint}/oauth2/token",
                 data=data,
                 headers=headers,
-                timeout=30,
+                timeout=45,  # Longer timeout
                 verify=True
             )
 
-            print(f"OAuth token exchange status: {response.status_code}")
-            print(f"OAuth response: {response.text}")
+            print(f"📊 OAuth token exchange status: {response.status_code}")
 
             if response.status_code == 200:
-                return response.json()
+                token_data = response.json()
+                print(f"✅ Token exchange successful")
+                return token_data
+            elif response.status_code == 429:
+                print(f"🚫 Still rate limited - implementing backoff")
+                # Try to get retry-after header
+                retry_after = response.headers.get('Retry-After', '60')
+                print(f"   Retry after: {retry_after} seconds")
+                return {"error": f"Rate limited - try again in {retry_after} seconds"}
             else:
-                print(f"Failed to exchange code: {response.status_code} - {response.text}")
-                return {"error": f"Failed to exchange code: {response.status_code}"}
+                error_text = response.text[:500]  # Limit error text
+                print(f"❌ OAuth failed: {response.status_code} - {error_text}")
+                return {"error": f"OAuth failed: {response.status_code}"}
 
+        except requests.exceptions.Timeout:
+            print(f"⏰ OAuth request timed out")
+            return {"error": "Request timed out - try again"}
+        except requests.exceptions.ConnectionError:
+            print(f"🌐 Connection error to Discord API")
+            return {"error": "Cannot connect to Discord - try again later"}
         except requests.exceptions.RequestException as e:
-            print(f"Request exception during OAuth: {e}")
+            print(f"🚫 Request exception: {e}")
             return {"error": f"Network error: {str(e)}"}
+        except Exception as e:
+            print(f"💥 Unexpected error: {e}")
+            return {"error": f"Unexpected error: {str(e)}"}
 
     def get_user_info(self, access_token):
         """Get user information from Discord API"""
