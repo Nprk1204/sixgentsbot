@@ -1795,6 +1795,163 @@ def internal_server_error(e):
     return render_template('500.html'), 500
 
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Test database connection
+        client.admin.command('ping')
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    # Check environment variables
+    env_check = {
+        "discord_token": "✓" if DISCORD_TOKEN else "✗",
+        "discord_guild_id": "✓" if DISCORD_GUILD_ID else "✗",
+        "mongo_uri": "✓" if MONGO_URI else "✗",
+        "rltracker_api_key": "✓" if RLTRACKER_API_KEY else "✗"
+    }
+
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "database": db_status,
+        "environment": env_check,
+        "version": "1.0.0"
+    })
+
+
+@app.route('/test')
+def test_route():
+    """Simple test route to verify Flask is working"""
+    return jsonify({
+        "message": "Flask app is working!",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "routes_working": True,
+        "database_collections": {
+            "players": players_collection.count_documents({}),
+            "matches": matches_collection.count_documents({}),
+            "ranks": ranks_collection.count_documents({})
+        }
+    })
+
+
+@app.route('/status')
+def status():
+    """Detailed status information"""
+    try:
+        # Get collection counts
+        player_count = players_collection.count_documents({})
+        match_count = matches_collection.count_documents({})
+        rank_count = ranks_collection.count_documents({})
+
+        # Get recent activity
+        recent_matches = matches_collection.count_documents({
+            "completed_at": {
+                "$gte": datetime.datetime.utcnow() - datetime.timedelta(hours=24)
+            }
+        })
+
+        return jsonify({
+            "app_status": "running",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "statistics": {
+                "total_players": player_count,
+                "total_matches": match_count,
+                "verified_ranks": rank_count,
+                "matches_last_24h": recent_matches
+            },
+            "services": {
+                "database": "connected",
+                "discord_oauth": "configured" if DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET else "not configured",
+                "bot_integration": "configured" if DISCORD_TOKEN else "not configured"
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            "app_status": "error",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "error": str(e)
+        }), 500
+
+
+@app.route('/debug/environment')
+def debug_environment():
+    """Debug route to check environment variables (remove in production)"""
+    return jsonify({
+        "environment_variables": {
+            "MONGO_URI": "Set" if MONGO_URI else "Not set",
+            "DISCORD_TOKEN": f"Set ({len(DISCORD_TOKEN)} chars)" if DISCORD_TOKEN else "Not set",
+            "DISCORD_GUILD_ID": DISCORD_GUILD_ID if DISCORD_GUILD_ID else "Not set",
+            "DISCORD_CLIENT_ID": f"Set ({len(DISCORD_CLIENT_ID)} chars)" if DISCORD_CLIENT_ID else "Not set",
+            "DISCORD_CLIENT_SECRET": "Set" if DISCORD_CLIENT_SECRET else "Not set",
+            "DISCORD_REDIRECT_URI": DISCORD_REDIRECT_URI if DISCORD_REDIRECT_URI else "Not set",
+            "RLTRACKER_API_KEY": "Set" if RLTRACKER_API_KEY else "Not set"
+        },
+        "warning": "This endpoint should be removed in production!"
+    })
+
+
+@app.route('/debug/routes')
+def debug_routes():
+    """Debug route to list all available routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "rule": str(rule)
+        })
+
+    return jsonify({
+        "total_routes": len(routes),
+        "routes": sorted(routes, key=lambda x: x["rule"])
+    })
+
+
+@app.route('/api/debug/database')
+def debug_database():
+    """Debug route to check database collections"""
+    try:
+        # Test database connection
+        client.admin.command('ping')
+
+        # Get collection info
+        collections_info = {}
+
+        for collection_name, collection in [
+            ("players", players_collection),
+            ("matches", matches_collection),
+            ("ranks", ranks_collection),
+            ("resets", resets_collection)
+        ]:
+            try:
+                count = collection.count_documents({})
+                # Get a sample document if available
+                sample = collection.find_one({}, {"_id": 0}) if count > 0 else None
+
+                collections_info[collection_name] = {
+                    "count": count,
+                    "sample_fields": list(sample.keys()) if sample else []
+                }
+            except Exception as e:
+                collections_info[collection_name] = {
+                    "error": str(e)
+                }
+
+        return jsonify({
+            "database_status": "connected",
+            "collections": collections_info
+        })
+
+    except Exception as e:
+        return jsonify({
+            "database_status": "error",
+            "error": str(e)
+        }), 500
+
 if __name__ == '__main__':
     import platform
 
