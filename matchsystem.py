@@ -1365,17 +1365,36 @@ class MatchSystem:
                     if player_data:
                         new_mmr = player_data.get("mmr", 600)
 
-                        # Queue the role update with immediate promotion announcement
-                        await self.update_discord_role_with_queue(ctx, player_id, new_mmr, immediate_announcement=True)
+                        # FIXED: Safely get guild from context
+                        try:
+                            guild = None
+                            if hasattr(ctx, 'guild'):
+                                guild = ctx.guild
+                            elif hasattr(ctx, 'interaction') and hasattr(ctx.interaction, 'guild'):
+                                guild = ctx.interaction.guild
 
-                        print(f"✅ Queued role update for {player.get('name', 'Unknown')} (MMR: {new_mmr})")
+                            if guild:
+                                # Queue the role update with immediate promotion announcement
+                                await self.update_discord_role_with_queue(ctx, player_id, new_mmr,
+                                                                          immediate_announcement=True)
+                                print(f"✅ Queued role update for {player.get('name', 'Unknown')} (MMR: {new_mmr})")
+                            else:
+                                print(
+                                    f"⚠️ Could not get guild from context - skipping role queue for {player.get('name', 'Unknown')}")
+
+                        except Exception as role_queue_error:
+                            print(
+                                f"❌ Error queueing role update for {player.get('name', 'Unknown')}: {role_queue_error}")
+                            # Continue processing other players even if one fails
 
             print("✅ All role updates queued for 3am processing")
         else:
             print("ℹ️ No context provided - skipping role update queueing")
 
+        # CRITICAL: Ensure match is removed from queue manager AFTER all processing
         if self.queue_manager:
             self.queue_manager.remove_match(match_id)
+            print(f"✅ Match {match_id} removed from active matches")
 
         # Return a match result object that includes the MMR changes
         match_result = {

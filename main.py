@@ -97,6 +97,10 @@ class SimpleContext:
         self.command = SimpleCommand(interaction.command)
         self.responded = False
 
+        # ADDED: Additional attributes that the role system might expect
+        self.bot = interaction.client if hasattr(interaction, 'client') else None
+        self.user = interaction.user  # Alias for author
+
     async def send(self, content=None, embed=None, view=None, ephemeral=False):
         if self.responded:
             return await self.interaction.followup.send(content=content, embed=embed, view=view, ephemeral=ephemeral)
@@ -1538,7 +1542,7 @@ async def leaderboard_slash(interaction: discord.Interaction):
         return
 
     # Replace this URL with your actual leaderboard website URL from Render
-    leaderboard_url = "https://sixgentsbot-1.onrender.com"
+    leaderboard_url = os.environ.get('PUBLIC_URL', 'http://localhost:5000')
 
     embed = discord.Embed(
         title="🏆 Rocket League 6 Mans Leaderboard 🏆",
