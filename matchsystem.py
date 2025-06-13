@@ -2287,31 +2287,31 @@ class MatchSystem:
         MAX_MMR_CHANGE = 200  # Maximum for extreme cases with multipliers
         MIN_MMR_CHANGE = 15  # Minimum MMR change even after many games
 
-        # ENHANCED: Extended placement period to 15 games
+        # Extended placement period to 15 games
         PLACEMENT_GAMES = 15
         DECAY_RATE = 0.1  # Reduced decay rate for longer placement period
 
-        # ENHANCED: 2x Streak multiplier settings
+        # 2x Streak multiplier settings
         MAX_STREAK_MULTIPLIER = 2.0  # Maximum multiplier for long streaks (100% bonus)
-        STREAK_THRESHOLD = 2  # Reduced threshold - kicks in after 2 wins/losses
-        STREAK_SCALING = 0.1  # Increased scaling (10% per win/loss after threshold)
+        STREAK_THRESHOLD = 3  # Kicks in after 2 wins/losses
+        STREAK_SCALING = 0.1  # 10% per win/loss after threshold
 
-        # NEW: Momentum system settings
+        # Momentum system settings
         MOMENTUM_GAMES = 10  # Look at last 10 games for momentum
         MOMENTUM_THRESHOLD = 0.5  # 50% win rate for momentum bonus
         MOMENTUM_MULTIPLIER = 1.2  # 20% bonus for good momentum
 
-        # NEW: Rank boundary protection settings
+        # Rank boundary protection settings - NOW PROPERLY USED
         RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
         PROMOTION_PROTECTION_GAMES = 3  # 3 games of protection after ranking up
-        DEMOTION_PROTECTION_RANGE = 50  # 50 MMR buffer before demotion penalties kick in
+        DEMOTION_PROTECTION_RANGE = 100  # 50 MMR buffer before demotion penalties kick in
 
         # Calculate the MMR difference between teams
         mmr_difference = opponent_avg_mmr - team_avg_mmr
         difference_factor = 1 + (mmr_difference / 400)  # More dramatic for underdog victories
-        difference_factor = max(0.5, min(1.5, difference_factor))  # Wider range
+        difference_factor = max(0.5, min(1.5, difference_factor))  # Constrain to reasonable range
 
-        # ENHANCED: Extended placement period (first 15 games)
+        # Extended placement period (first 15 games)
         if matches_played <= PLACEMENT_GAMES:
             # Linearly interpolate between first game value and regular base value
             progress = (matches_played - 1) / (PLACEMENT_GAMES - 1)  # 0 for first match, 1 for 15th match
@@ -2327,7 +2327,7 @@ class MatchSystem:
             else:
                 base_change = base_value * (2 - difference_factor)
         else:
-            # After placement, use the regular base value with decay
+            # After placement, use the regular base value
             if is_win:
                 base_change = BASE_MMR_CHANGE * difference_factor
             else:
@@ -2337,13 +2337,14 @@ class MatchSystem:
         if matches_played <= PLACEMENT_GAMES:
             decay_multiplier = 1.0
         else:
+            import math
             decay_multiplier = 1.0 * math.exp(-DECAY_RATE * (matches_played - PLACEMENT_GAMES))
             decay_multiplier = max(0.6, decay_multiplier)  # Don't decay below 60%
 
         # Calculate initial MMR change
         mmr_change = base_change * decay_multiplier
 
-        # ENHANCED: 2x Streak multiplier system
+        # 2x Streak multiplier system
         streak_abs = abs(streak)
         if streak_abs >= STREAK_THRESHOLD:
             streak_bonus = min(
@@ -2357,21 +2358,23 @@ class MatchSystem:
                 mmr_change *= streak_multiplier
                 print(f"Streak multiplier applied: {streak_multiplier:.2f}x (Streak: {streak})")
 
-        # NEW: Momentum system bonus
+        # Momentum system bonus - NOW PROPERLY IMPLEMENTED
         if player_data and matches_played > MOMENTUM_GAMES:
-            momentum_bonus = self.calculate_momentum_bonus(player_data, is_win)
+            momentum_bonus = self.calculate_momentum_bonus_enhanced(player_data, is_win, MOMENTUM_THRESHOLD,
+                                                                    MOMENTUM_MULTIPLIER)
             if momentum_bonus > 1.0:
                 mmr_change *= momentum_bonus
                 print(f"Momentum bonus applied: {momentum_bonus:.2f}x")
 
-        # NEW: Rank boundary protection
+        # Rank boundary protection - NOW PROPERLY IMPLEMENTED WITH ALL VARIABLES
         if player_data:
-            protection_modifier = self.calculate_rank_protection(
-                player_data, player_mmr, is_win, matches_played
+            protection_modifier = self.calculate_rank_protection_enhanced(
+                player_data, player_mmr, is_win, matches_played,
+                RANK_BOUNDARIES, PROMOTION_PROTECTION_GAMES, DEMOTION_PROTECTION_RANGE
             )
             mmr_change *= protection_modifier
             if protection_modifier != 1.0:
-                protection_type = "promotion protection" if protection_modifier < 1.0 else "demotion assistance"
+                protection_type = "promotion protection" if protection_modifier < 1.0 else "promotion assistance"
                 print(f"Rank boundary {protection_type}: {protection_modifier:.2f}x modifier")
 
         # Ensure the change is within bounds
@@ -2379,9 +2382,9 @@ class MatchSystem:
 
         return round(mmr_change)
 
-    def calculate_momentum_bonus(self, player_data, is_win):
+    def calculate_momentum_bonus_enhanced(self, player_data, is_win, momentum_threshold, momentum_multiplier):
         """
-        Calculate momentum bonus based on recent performance
+        Enhanced momentum calculation using the defined constants
         """
         try:
             # Get recent matches for this player
@@ -2409,62 +2412,59 @@ class MatchSystem:
 
             win_rate = wins / len(recent_matches)
 
-            # Apply momentum bonus for good recent performance
-            if win_rate >= 0.7 and is_win:  # 70%+ win rate and currently winning
-                return 1.2  # 20% bonus
-            elif win_rate <= 0.3 and not is_win:  # 30% or lower win rate and currently losing
+            # Apply momentum bonus using the defined constants
+            if win_rate >= (momentum_threshold + 0.2) and is_win:  # 70%+ win rate and currently winning
+                return momentum_multiplier  # 20% bonus
+            elif win_rate <= (momentum_threshold - 0.2) and not is_win:  # 30% or lower win rate and currently losing
                 return 1.1  # 10% penalty reduction (mercy)
 
             return 1.0
 
         except Exception as e:
-            print(f"Error calculating momentum bonus: {e}")
+            print(f"Error calculating enhanced momentum bonus: {e}")
             return 1.0
 
-    def calculate_rank_protection(self, player_data, current_mmr, is_win, matches_played):
+    def calculate_rank_protection_enhanced(self, player_data, current_mmr, is_win, matches_played,
+                                           rank_boundaries, promotion_protection_games, demotion_protection_range):
         """
-        Calculate rank boundary protection modifiers
+        Enhanced rank protection calculation using all the defined constants
         """
         try:
-            RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
-            PROMOTION_PROTECTION_GAMES = 3
-            DEMOTION_PROTECTION_RANGE = 50
-
             # Check if player recently got promoted
-            recent_promotion = self.check_recent_promotion(player_data)
+            recent_promotion = self.check_recent_promotion_enhanced(player_data, promotion_protection_games)
             if recent_promotion and not is_win:
                 games_since_promotion = recent_promotion.get('games_since', 0)
-                if games_since_promotion < PROMOTION_PROTECTION_GAMES:
+                if games_since_promotion < promotion_protection_games:
                     return 0.5  # 50% loss reduction for recently promoted players
 
             # Check for demotion protection (close to rank boundary)
-            for boundary in RANK_BOUNDARIES:
+            for boundary in rank_boundaries:
                 if current_mmr >= boundary:  # Player is above this boundary
                     distance_from_boundary = current_mmr - boundary
-                    if distance_from_boundary <= DEMOTION_PROTECTION_RANGE and not is_win:
+                    if distance_from_boundary <= demotion_protection_range and not is_win:
                         # Reduce loss when close to demotion
-                        protection_factor = distance_from_boundary / DEMOTION_PROTECTION_RANGE
+                        protection_factor = distance_from_boundary / demotion_protection_range
                         return 0.7 + (0.3 * protection_factor)  # 70-100% of normal loss
 
             # Check for promotion assistance (close to ranking up)
-            for boundary in RANK_BOUNDARIES:
+            for boundary in rank_boundaries:
                 if current_mmr < boundary:  # Player is below this boundary
                     distance_to_boundary = boundary - current_mmr
-                    if distance_to_boundary <= DEMOTION_PROTECTION_RANGE and is_win:
+                    if distance_to_boundary <= demotion_protection_range and is_win:
                         # Boost gains when close to promotion
                         assistance_factor = (
-                                                        DEMOTION_PROTECTION_RANGE - distance_to_boundary) / DEMOTION_PROTECTION_RANGE
+                                                        demotion_protection_range - distance_to_boundary) / demotion_protection_range
                         return 1.0 + (0.2 * assistance_factor)  # 100-120% of normal gain
 
             return 1.0
 
         except Exception as e:
-            print(f"Error calculating rank protection: {e}")
+            print(f"Error calculating enhanced rank protection: {e}")
             return 1.0
 
-    def check_recent_promotion(self, player_data):
+    def check_recent_promotion_enhanced(self, player_data, promotion_protection_games):
         """
-        Check if player was recently promoted and track games since promotion
+        Enhanced promotion check using the defined constants
         """
         try:
             # Check if player has promotion data
@@ -2474,13 +2474,13 @@ class MatchSystem:
                 matches_at_promotion = promotion_data.get('matches_at_promotion', 0)
                 games_since = current_matches - matches_at_promotion
 
-                if games_since <= 3:  # Within last 3 games
+                if games_since <= promotion_protection_games:  # Use the constant
                     return {'games_since': games_since}
 
             return None
 
         except Exception as e:
-            print(f"Error checking recent promotion: {e}")
+            print(f"Error checking enhanced recent promotion: {e}")
             return None
 
     def did_player_win_match(self, match, player_id):

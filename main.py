@@ -4718,11 +4718,12 @@ async def handle_substitute(interaction, match_id, match, player_out, player_in)
         "mention": player_in_mention
     }
 
-    # Update the match in the database
+    # Update the match in the database AND memory
     if team_num == 1:
         # Replace in team1
         team1[team_index] = new_player_data
 
+        # CRITICAL FIX: Update in the MAIN database (matches collection)
         system_coordinator.match_system.matches.update_one(
             {"match_id": match_id},
             {"$set": {"team1": team1}}
@@ -4732,13 +4733,20 @@ async def handle_substitute(interaction, match_id, match, player_out, player_in)
         if match_id in system_coordinator.queue_manager.active_matches:
             system_coordinator.queue_manager.active_matches[match_id]["team1"] = team1
 
-            # Update player-match mapping
-            system_coordinator.queue_manager.player_matches.pop(player_out_id, None)
-            system_coordinator.queue_manager.player_matches[player_in_id] = match_id
+        # Update in active_matches collection (for consistency)
+        system_coordinator.queue_manager.active_matches_collection.update_one(
+            {"match_id": match_id},
+            {"$set": {"team1": team1}}
+        )
+
+        # Update player-match mapping
+        system_coordinator.queue_manager.player_matches.pop(player_out_id, None)
+        system_coordinator.queue_manager.player_matches[player_in_id] = match_id
     else:
         # Replace in team2
         team2[team_index] = new_player_data
 
+        # CRITICAL FIX: Update in the MAIN database (matches collection)
         system_coordinator.match_system.matches.update_one(
             {"match_id": match_id},
             {"$set": {"team2": team2}}
@@ -4748,9 +4756,15 @@ async def handle_substitute(interaction, match_id, match, player_out, player_in)
         if match_id in system_coordinator.queue_manager.active_matches:
             system_coordinator.queue_manager.active_matches[match_id]["team2"] = team2
 
-            # Update player-match mapping
-            system_coordinator.queue_manager.player_matches.pop(player_out_id, None)
-            system_coordinator.queue_manager.player_matches[player_in_id] = match_id
+        # Update in active_matches collection (for consistency)
+        system_coordinator.queue_manager.active_matches_collection.update_one(
+            {"match_id": match_id},
+            {"$set": {"team2": team2}}
+        )
+
+        # Update player-match mapping
+        system_coordinator.queue_manager.player_matches.pop(player_out_id, None)
+        system_coordinator.queue_manager.player_matches[player_in_id] = match_id
 
     # Create embed response
     embed = discord.Embed(
@@ -4855,16 +4869,22 @@ async def handle_swap(interaction, match_id, match, player1, player2):
 
         swap_description = f"{player1_mention} (Team 2 → Team 1) ↔ {player2_mention} (Team 1 → Team 2)"
 
-    # Update database
+    # CRITICAL FIX: Update MAIN database (matches collection)
     system_coordinator.match_system.matches.update_one(
         {"match_id": match_id},
         {"$set": {"team1": team1, "team2": team2}}
     )
 
-    # Update in memory
+    # Update in memory (queue manager)
     if match_id in system_coordinator.queue_manager.active_matches:
         system_coordinator.queue_manager.active_matches[match_id]["team1"] = team1
         system_coordinator.queue_manager.active_matches[match_id]["team2"] = team2
+
+    # Update in active_matches collection (for consistency)
+    system_coordinator.queue_manager.active_matches_collection.update_one(
+        {"match_id": match_id},
+        {"$set": {"team1": team1, "team2": team2}}
+    )
 
     # Create response embed
     embed = discord.Embed(
