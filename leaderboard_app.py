@@ -199,7 +199,7 @@ def discord_callback_enhanced():
     error = request.args.get('error')
     error_description = request.args.get('error_description')
 
-    print(f"📥 OAuth callback received:")
+    print(f" OAuth callback received:")
     print(f"   Code: {code[:10] + '...' if code else 'None'}")
     print(f"   Error: {error}")
     print(f"   Error Description: {error_description}")
@@ -216,33 +216,30 @@ def discord_callback_enhanced():
         return redirect(url_for('home'))
 
     try:
-        # ENHANCED: Multiple attempts with exponential backoff for rate limits
+        # FIXED: Only retry on rate limits, not all failures
         max_attempts = 3
         base_delay = 5
 
         for attempt in range(max_attempts):
-            print(f"🔄 Token exchange attempt {attempt + 1}/{max_attempts}")
+            print(f" Token exchange attempt {attempt + 1}/{max_attempts}")
 
             token_data = discord_oauth.exchange_code(code)
 
-            # Handle rate limiting specifically
+            # FIXED: Only retry on specific rate limit errors
             if 'error' in token_data:
                 error_msg = token_data['error']
 
+                # Only retry for rate limits
                 if 'rate limit' in error_msg.lower() or 'try again' in error_msg.lower():
                     if attempt < max_attempts - 1:  # Not the last attempt
                         delay = base_delay * (2 ** attempt)  # Exponential backoff
-                        print(f"⏳ Rate limited - waiting {delay} seconds before retry")
+                        print(f" Rate limited - waiting {delay} seconds before retry")
                         import time
                         time.sleep(delay)
                         continue
-                    else:
-                        # Last attempt failed
-                        flash('Discord is temporarily limiting access. Please wait 5-10 minutes and try again.',
-                              'warning')
-                        return redirect(url_for('home'))
                 else:
-                    # Non-rate-limit error
+                    # For non-rate-limit errors, don't retry - fail immediately
+                    print(f" OAuth error (no retry): {error_msg}")
                     flash(f'Authentication failed: {error_msg}', 'error')
                     return redirect(url_for('home'))
 
@@ -253,7 +250,7 @@ def discord_callback_enhanced():
 
             # SUCCESS - continue with normal flow
             access_token = token_data['access_token']
-            print(f"✅ Access token received")
+            print(f" Access token received")
 
             # Get user information
             user_info = discord_oauth.get_user_info(access_token)
@@ -271,11 +268,15 @@ def discord_callback_enhanced():
                 'access_token': access_token
             }
 
-        flash(f'Successfully logged in as {user_info["username"]}!', 'success')
-        return redirect(url_for('profile'))
+            flash(f'Successfully logged in as {user_info["username"]}!', 'success')
+            return redirect(url_for('profile'))
+
+        # If we get here, all attempts failed due to rate limiting
+        flash('Discord is temporarily limiting access. Please wait 5-10 minutes and try again.', 'warning')
+        return redirect(url_for('home'))
 
     except Exception as e:
-        print(f"💥 Critical callback error: {e}")
+        print(f" Critical callback error: {e}")
         import traceback
         traceback.print_exc()
         flash('Authentication failed: Internal error', 'error')
@@ -698,16 +699,16 @@ def get_leaderboard_by_type(board_type):
         # FIXED: Format streak for display with proper logic
         if current_streak > 0:
             if current_streak >= 3:
-                player["streak_display"] = f"🔥 {current_streak}"
+                player["streak_display"] = f" {current_streak}"
             else:
                 player["streak_display"] = f"{current_streak}"
         elif current_streak < 0:
             if current_streak <= -3:
-                player["streak_display"] = f"❄️ {abs(current_streak)}"
+                player["streak_display"] = f" {abs(current_streak)}"
             else:
                 player["streak_display"] = f"{abs(current_streak)}"
         else:
-            player["streak_display"] = "—"
+            player["streak_display"] = ""
 
         # FIXED: Add longest streak info for tooltips/details
         player["longest_win_streak_display"] = f"{longest_win_streak} Wins" if longest_win_streak > 0 else "None"
@@ -755,9 +756,9 @@ def get_recent_mmr_change(player_id, is_global=False):
         if not recent_match or "mmr_changes" not in recent_match:
             return {
                 "change": 0,
-                "display": "—",
+                "display": "",
                 "class": "text-muted",
-                "streak": "—"  # FIXED: Add streak info
+                "streak": ""  # FIXED: Add streak info
             }
 
         for mmr_change in recent_match.get("mmr_changes", []):
@@ -775,16 +776,16 @@ def get_recent_mmr_change(player_id, is_global=False):
                 streak = mmr_change.get("streak", 0)
                 if streak > 0:
                     if streak >= 3:
-                        streak_display = f"🔥 {streak}W"
+                        streak_display = f" {streak}W"
                     else:
                         streak_display = f"{streak}W"
                 elif streak < 0:
                     if streak <= -3:
-                        streak_display = f"❄️ {abs(streak)}L"
+                        streak_display = f" {abs(streak)}L"
                     else:
                         streak_display = f"{abs(streak)}L"
                 else:
-                    streak_display = "—"
+                    streak_display = ""
 
                 if change > 0:
                     return {
@@ -810,18 +811,18 @@ def get_recent_mmr_change(player_id, is_global=False):
 
         return {
             "change": 0,
-            "display": "—",
+            "display": "",
             "class": "text-muted",
-            "streak": "—"
+            "streak": ""
         }
 
     except Exception as e:
         print(f"Error getting recent MMR change for player {player_id}: {str(e)}")
         return {
             "change": 0,
-            "display": "—",
+            "display": "",
             "class": "text-muted",
-            "streak": "—"
+            "streak": ""
         }
 
 
@@ -876,12 +877,12 @@ def get_player(player_id):
         # Add ranked streak display info with emoji
         if current_streak > 0:
             if current_streak >= 3:
-                player["streak_display"] = f"🔥 {current_streak} Win Streak"
+                player["streak_display"] = f" {current_streak} Win Streak"
             else:
                 player["streak_display"] = f"{current_streak} Win Streak"
         elif current_streak < 0:
             if current_streak <= -3:
-                player["streak_display"] = f"❄️ {abs(current_streak)} Loss Streak"
+                player["streak_display"] = f" {abs(current_streak)} Loss Streak"
             else:
                 player["streak_display"] = f"{abs(current_streak)} Loss Streak"
         else:
@@ -900,12 +901,12 @@ def get_player(player_id):
         # Add global streak display info with emoji
         if global_current_streak > 0:
             if global_current_streak >= 3:
-                player["global_streak_display"] = f"🔥 {global_current_streak} Win Streak"
+                player["global_streak_display"] = f" {global_current_streak} Win Streak"
             else:
                 player["global_streak_display"] = f"{global_current_streak} Win Streak"
         elif global_current_streak < 0:
             if global_current_streak <= -3:
-                player["global_streak_display"] = f"❄️ {abs(global_current_streak)} Loss Streak"
+                player["global_streak_display"] = f" {abs(global_current_streak)} Loss Streak"
             else:
                 player["global_streak_display"] = f"{abs(global_current_streak)} Loss Streak"
         else:
@@ -995,12 +996,12 @@ def get_player(player_id):
                         streak = change.get("streak", 0)
                         if streak > 0:
                             if streak >= 3:
-                                match["streak_display"] = f"🔥 {streak}"
+                                match["streak_display"] = f" {streak}"
                             else:
                                 match["streak_display"] = f"{streak}"
                         elif streak < 0:
                             if streak <= -3:
-                                match["streak_display"] = f"❄️ {abs(streak)}"
+                                match["streak_display"] = f" {abs(streak)}"
                             else:
                                 match["streak_display"] = f"{abs(streak)}"
                         else:
@@ -1205,17 +1206,17 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         try:
             auth_response = requests.get(auth_url, headers=headers, timeout=10)
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network error during authentication: {e}")
+            print(f" Network error during authentication: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
         if auth_response.status_code != 200:
-            print(f"❌ Authentication failed: {auth_response.status_code}")
+            print(f" Authentication failed: {auth_response.status_code}")
             return {"success": False, "message": f"Bot authentication failed: {auth_response.status_code}"}
 
         bot_user = auth_response.json()
         bot_id = bot_user.get('id')
         bot_name = bot_user.get('username')
-        print(f"✅ Bot authenticated as: {bot_name} (ID: {bot_id})")
+        print(f" Bot authenticated as: {bot_name} (ID: {bot_id})")
 
         # STEP 2: Get server information
         print("\n2. Getting server information...")
@@ -1224,15 +1225,15 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         try:
             guild_response = requests.get(guild_url, headers=headers, timeout=10)
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network error getting guild info: {e}")
+            print(f" Network error getting guild info: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
         if guild_response.status_code != 200:
-            print(f"❌ Failed to get server info: {guild_response.status_code}")
+            print(f" Failed to get server info: {guild_response.status_code}")
             return {"success": False, "message": f"Failed to get server info: {guild_response.status_code}"}
 
         guild_data = guild_response.json()
-        print(f"✅ Connected to server: {guild_data.get('name')}")
+        print(f" Connected to server: {guild_data.get('name')}")
 
         # STEP 3: Find user - prioritize Discord ID if provided
         print(f"\n3. Finding user...")
@@ -1251,12 +1252,12 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
                     user_id = discord_id
                     member_user = member_data.get('user', {})
                     matched_name = member_user.get('global_name') or member_user.get('username', '')
-                    print(f"✅ Found user by ID: {matched_name} (ID: {user_id})")
+                    print(f" Found user by ID: {matched_name} (ID: {user_id})")
                 else:
-                    print(f"❌ Failed to find user by ID: {member_response.status_code}")
+                    print(f" Failed to find user by ID: {member_response.status_code}")
 
             except requests.exceptions.RequestException as e:
-                print(f"❌ Network error finding user by ID: {e}")
+                print(f" Network error finding user by ID: {e}")
 
         # If Discord ID didn't work or wasn't provided, try username search
         if not user_id:
@@ -1284,17 +1285,17 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
                                 username.lower() == member_nickname.lower()):
                             user_id = member_id
                             matched_name = member_global_name or member_username
-                            print(f"✅ Found exact match: {matched_name} (ID: {user_id})")
+                            print(f" Found exact match: {matched_name} (ID: {user_id})")
                             break
                 else:
-                    print(f"❌ Failed to search for users: {search_response.status_code}")
+                    print(f" Failed to search for users: {search_response.status_code}")
 
             except requests.exceptions.RequestException as e:
-                print(f"❌ Network error searching for users: {e}")
+                print(f" Network error searching for users: {e}")
 
         # If we still couldn't find the user
         if not user_id:
-            print(f"❌ No matching user found for '{username}'")
+            print(f" No matching user found for '{username}'")
             return {"success": False, "message": f"Could not find user '{username}' in Discord server"}
 
         # STEP 4: Get all server roles
@@ -1304,15 +1305,15 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         try:
             roles_response = requests.get(roles_url, headers=headers, timeout=10)
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network error getting roles: {e}")
+            print(f" Network error getting roles: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
         if roles_response.status_code != 200:
-            print(f"❌ Failed to get roles: {roles_response.status_code}")
+            print(f" Failed to get roles: {roles_response.status_code}")
             return {"success": False, "message": f"Failed to retrieve roles: {roles_response.status_code}"}
 
         roles = roles_response.json()
-        print(f"✅ Found {len(roles)} roles in the server")
+        print(f" Found {len(roles)} roles in the server")
 
         # Find the bot member to get its roles
         bot_member_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{bot_id}"
@@ -1320,11 +1321,11 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         try:
             bot_member_response = requests.get(bot_member_url, headers=headers, timeout=10)
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network error getting bot member: {e}")
+            print(f" Network error getting bot member: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
         if bot_member_response.status_code != 200:
-            print(f"❌ Failed to get bot member: {bot_member_response.status_code}")
+            print(f" Failed to get bot member: {bot_member_response.status_code}")
             return {"success": False, "message": "Failed to retrieve bot member information"}
 
         bot_member = bot_member_response.json()
@@ -1352,21 +1353,21 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
                     target_role_position = role.get('position')
                     target_role_name = role.get('name')
                     print(
-                        f"✅ Found role by name: '{target_role_name}' (ID: {target_role_id}, Position: {target_role_position})")
+                        f" Found role by name: '{target_role_name}' (ID: {target_role_id}, Position: {target_role_position})")
                     break
 
             if not target_role_id:
-                print(f"❌ No role found with name: '{role_name}'")
+                print(f" No role found with name: '{role_name}'")
                 return {"success": False, "message": f"Role '{role_name}' not found in server"}
 
         # STEP 6: Check role hierarchy
         print("\n6. Checking role hierarchy...")
         if target_role_position >= bot_highest_role_position:
             print(
-                f"❌ Role hierarchy issue: Bot's highest role ({bot_highest_role_position}) must be higher than the role to assign ({target_role_position})")
+                f" Role hierarchy issue: Bot's highest role ({bot_highest_role_position}) must be higher than the role to assign ({target_role_position})")
             return {"success": False, "message": "Bot's role is not high enough to assign this role"}
 
-        print("✅ Bot's role position is higher than target role - hierarchy check passed")
+        print(" Bot's role position is higher than target role - hierarchy check passed")
 
         # STEP 7: Check if user already has the role
         print("\n7. Checking if user already has the role...")
@@ -1375,11 +1376,11 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         try:
             member_response = requests.get(member_url, headers=headers, timeout=10)
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network error getting member info: {e}")
+            print(f" Network error getting member info: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
         if member_response.status_code != 200:
-            print(f"❌ Failed to get member info: {member_response.status_code}")
+            print(f" Failed to get member info: {member_response.status_code}")
             return {"success": False, "message": "Failed to retrieve member information"}
 
         member_data = member_response.json()
@@ -1396,21 +1397,21 @@ def assign_discord_role(username, role_name=None, role_id=None, discord_id=None)
         try:
             assign_response = requests.put(assign_url, headers=headers, timeout=10)
         except requests.exceptions.RequestException as e:
-            print(f"❌ Network error during role assignment: {e}")
+            print(f" Network error during role assignment: {e}")
             return {"success": False, "message": f"Network error: {str(e)}"}
 
         if assign_response.status_code in [204, 200]:
-            print(f"✅ Role assignment successful! Status code: {assign_response.status_code}")
+            print(f" Role assignment successful! Status code: {assign_response.status_code}")
             return {"success": True, "message": f"Role '{target_role_name}' assigned successfully to {matched_name}"}
         else:
-            print(f"❌ Role assignment failed: {assign_response.status_code}")
+            print(f" Role assignment failed: {assign_response.status_code}")
             error_text = assign_response.text[:500] if assign_response.text else "No error details"
             print(f"Response: {error_text}")
             return {"success": False, "message": f"Failed to assign role (HTTP {assign_response.status_code})"}
 
     except Exception as e:
         import traceback
-        print(f"❌ Exception occurred: {str(e)}")
+        print(f" Exception occurred: {str(e)}")
         traceback.print_exc()
         return {"success": False, "message": f"Unexpected error: {str(e)}"}
     finally:
@@ -1795,15 +1796,172 @@ def internal_server_error(e):
     return render_template('500.html'), 500
 
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Test database connection
+        client.admin.command('ping')
+        db_status = "connected"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+
+    # Check environment variables
+    env_check = {
+        "discord_token": "✓" if DISCORD_TOKEN else "✗",
+        "discord_guild_id": "✓" if DISCORD_GUILD_ID else "✗",
+        "mongo_uri": "✓" if MONGO_URI else "✗",
+        "rltracker_api_key": "✓" if RLTRACKER_API_KEY else "✗"
+    }
+
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "database": db_status,
+        "environment": env_check,
+        "version": "1.0.0"
+    })
+
+
+@app.route('/test')
+def test_route():
+    """Simple test route to verify Flask is working"""
+    return jsonify({
+        "message": "Flask app is working!",
+        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "routes_working": True,
+        "database_collections": {
+            "players": players_collection.count_documents({}),
+            "matches": matches_collection.count_documents({}),
+            "ranks": ranks_collection.count_documents({})
+        }
+    })
+
+
+@app.route('/status')
+def status():
+    """Detailed status information"""
+    try:
+        # Get collection counts
+        player_count = players_collection.count_documents({})
+        match_count = matches_collection.count_documents({})
+        rank_count = ranks_collection.count_documents({})
+
+        # Get recent activity
+        recent_matches = matches_collection.count_documents({
+            "completed_at": {
+                "$gte": datetime.datetime.utcnow() - datetime.timedelta(hours=24)
+            }
+        })
+
+        return jsonify({
+            "app_status": "running",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "statistics": {
+                "total_players": player_count,
+                "total_matches": match_count,
+                "verified_ranks": rank_count,
+                "matches_last_24h": recent_matches
+            },
+            "services": {
+                "database": "connected",
+                "discord_oauth": "configured" if DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET else "not configured",
+                "bot_integration": "configured" if DISCORD_TOKEN else "not configured"
+            }
+        })
+
+    except Exception as e:
+        return jsonify({
+            "app_status": "error",
+            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "error": str(e)
+        }), 500
+
+
+@app.route('/debug/environment')
+def debug_environment():
+    """Debug route to check environment variables (remove in production)"""
+    return jsonify({
+        "environment_variables": {
+            "MONGO_URI": "Set" if MONGO_URI else "Not set",
+            "DISCORD_TOKEN": f"Set ({len(DISCORD_TOKEN)} chars)" if DISCORD_TOKEN else "Not set",
+            "DISCORD_GUILD_ID": DISCORD_GUILD_ID if DISCORD_GUILD_ID else "Not set",
+            "DISCORD_CLIENT_ID": f"Set ({len(DISCORD_CLIENT_ID)} chars)" if DISCORD_CLIENT_ID else "Not set",
+            "DISCORD_CLIENT_SECRET": "Set" if DISCORD_CLIENT_SECRET else "Not set",
+            "DISCORD_REDIRECT_URI": DISCORD_REDIRECT_URI if DISCORD_REDIRECT_URI else "Not set",
+            "RLTRACKER_API_KEY": "Set" if RLTRACKER_API_KEY else "Not set"
+        },
+        "warning": "This endpoint should be removed in production!"
+    })
+
+
+@app.route('/debug/routes')
+def debug_routes():
+    """Debug route to list all available routes"""
+    routes = []
+    for rule in app.url_map.iter_rules():
+        routes.append({
+            "endpoint": rule.endpoint,
+            "methods": list(rule.methods),
+            "rule": str(rule)
+        })
+
+    return jsonify({
+        "total_routes": len(routes),
+        "routes": sorted(routes, key=lambda x: x["rule"])
+    })
+
+
+@app.route('/api/debug/database')
+def debug_database():
+    """Debug route to check database collections"""
+    try:
+        # Test database connection
+        client.admin.command('ping')
+
+        # Get collection info
+        collections_info = {}
+
+        for collection_name, collection in [
+            ("players", players_collection),
+            ("matches", matches_collection),
+            ("ranks", ranks_collection),
+            ("resets", resets_collection)
+        ]:
+            try:
+                count = collection.count_documents({})
+                # Get a sample document if available
+                sample = collection.find_one({}, {"_id": 0}) if count > 0 else None
+
+                collections_info[collection_name] = {
+                    "count": count,
+                    "sample_fields": list(sample.keys()) if sample else []
+                }
+            except Exception as e:
+                collections_info[collection_name] = {
+                    "error": str(e)
+                }
+
+        return jsonify({
+            "database_status": "connected",
+            "collections": collections_info
+        })
+
+    except Exception as e:
+        return jsonify({
+            "database_status": "error",
+            "error": str(e)
+        }), 500
+
 if __name__ == '__main__':
     import platform
 
     is_local = platform.system() in ['Windows', 'Darwin']
 
-    print("🌐 Starting Flask leaderboard app...")
+    print(" Starting Flask leaderboard app...")
     if is_local:
-        print("🏠 Local development mode")
-        print("💡 Use Cloudflare tunnel for public access")
+        print(" Local development mode")
+        print(" Use Cloudflare tunnel for public access")
 
     port = int(os.environ.get('PORT', 5000))  # Changed from 10000 to 5000
     app.run(host='0.0.0.0', port=port, debug=is_local)
