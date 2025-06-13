@@ -55,7 +55,7 @@ class MatchSystem:
         """Check if a player ID belongs to a real Discord user"""
         return not str(player_id).startswith('9000')
 
-    async def update_discord_role_with_queue(self, ctx, player_id, new_mmr, immediate_announcement=True):
+    async def update_discord_role_with_queue(self, ctx, player_id, new_mmr, old_mmr=None, immediate_announcement=True):
         """
         Queue a role update for 3am processing while optionally sending immediate feedback
 
@@ -63,6 +63,7 @@ class MatchSystem:
             ctx: Discord context (can be interaction or regular context)
             player_id: Player's Discord ID
             new_mmr: New MMR value
+            old_mmr: Previous MMR value (for promotion detection)
             immediate_announcement: Whether to send rank change message immediately
         """
         try:
@@ -76,14 +77,15 @@ class MatchSystem:
                 print(f"⚠️ No bulk role manager available - skipping role queue for {player_id}")
                 return
 
-            # Get guild from context with enhanced safety
+            # Get guild and channel from context with enhanced safety
             guild = None
             channel = None
 
             try:
-                if hasattr(ctx, 'guild'):
+                # Handle different context types
+                if hasattr(ctx, 'guild') and ctx.guild:
                     guild = ctx.guild
-                    channel = ctx.channel
+                    channel = getattr(ctx, 'channel', None)
                 elif hasattr(ctx, 'interaction'):
                     guild = ctx.interaction.guild
                     channel = ctx.interaction.channel
@@ -95,30 +97,36 @@ class MatchSystem:
                     print(f"⚠️ Guild is None in context")
                     return
 
+                if not channel:
+                    print(f"⚠️ Channel is None in context")
+                    return
+
             except Exception as ctx_error:
                 print(f"❌ Error extracting guild from context: {ctx_error}")
                 return
 
-            # Calculate rank change - get OLD MMR from database BEFORE the update
-            old_mmr = 0
-            old_rank = None
-            promotion = False
+            # Calculate rank change
+            if old_mmr is None:
+                print(f"⚠️ No old_mmr provided for player {player_id}, trying to get from database")
+                # Try to get old MMR from player data
+                player_data = self.players.find_one({"id": player_id})
+                if player_data:
+                    old_mmr = player_data.get("mmr", 600)
+                else:
+                    old_mmr = 600  # Default fallback
 
-            # Get CURRENT player data (before this match's MMR change)
-            player_data = self.players.find_one({"id": player_id})
-            if player_data:
-                # This should be the UPDATED MMR since we call this after MMR calculation
-                # So we need to look at the change that just happened
-                old_mmr = player_data.get("mmr", 600) - (new_mmr - player_data.get("mmr", 600))
-                old_rank = self.get_rank_tier_from_mmr(old_mmr)
-
+            old_rank = self.get_rank_tier_from_mmr(old_mmr)
             new_rank = self.get_rank_tier_from_mmr(new_mmr)
 
+            print(f"🔍 Player {player_id}: {old_mmr} MMR ({old_rank}) → {new_mmr} MMR ({new_rank})")
+
             # Check if this is a promotion
+            promotion = False
             if old_rank and new_rank != old_rank:
                 old_rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}.get(old_rank, 1)
                 new_rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}.get(new_rank, 1)
                 promotion = new_rank_value > old_rank_value
+                print(f"🎉 Promotion detected for player {player_id}: {old_rank} → {new_rank}")
 
             # Queue the role update for 3am
             success = self.bulk_role_manager.queue_role_update(
@@ -138,14 +146,20 @@ class MatchSystem:
             # Send immediate announcement if it's a promotion and immediate_announcement is True
             if immediate_announcement and promotion and old_rank and new_rank and channel:
                 try:
+                    print(f"📢 Sending immediate promotion message for player {player_id}")
+
                     # Fetch member for mention with safety checks
                     member = None
-                    if self.rate_limiter:
-                        await asyncio.sleep(random.uniform(1.0, 2.0))
-                        member = await self.rate_limiter.fetch_member_with_limit(guild, int(player_id))
-                    else:
-                        await asyncio.sleep(random.uniform(2.0, 4.0))
-                        member = await guild.fetch_member(int(player_id))
+                    try:
+                        if self.rate_limiter:
+                            await asyncio.sleep(random.uniform(1.0, 2.0))
+                            member = await self.rate_limiter.fetch_member_with_limit(guild, int(player_id))
+                        else:
+                            await asyncio.sleep(random.uniform(2.0, 4.0))
+                            member = await guild.fetch_member(int(player_id))
+                    except Exception as member_error:
+                        print(f"⚠️ Could not fetch member {player_id}: {member_error}")
+                        return
 
                     if member:
                         embed = discord.Embed(
@@ -159,23 +173,38 @@ class MatchSystem:
                             inline=True
                         )
                         embed.add_field(
+                            name="Previous Rank",
+                            value=old_rank,
+                            inline=True
+                        )
+                        embed.add_field(
                             name="Discord Role Update",
                             value="Your Discord role will be updated at 3:00 AM",
-                            inline=True
+                            inline=False
                         )
                         embed.set_footer(text="Keep up the great work!")
 
-                        if self.rate_limiter:
-                            await self.rate_limiter.send_message_with_limit(channel, embed=embed)
-                        else:
-                            await asyncio.sleep(random.uniform(1.0, 2.0))
-                            await channel.send(embed=embed)
+                        # Send the promotion message
+                        try:
+                            if self.rate_limiter:
+                                await self.rate_limiter.send_message_with_limit(channel, embed=embed)
+                            else:
+                                await asyncio.sleep(random.uniform(1.0, 2.0))
+                                await channel.send(embed=embed)
+
+                            print(f"✅ Sent promotion message for {member.display_name}: {old_rank} → {new_rank}")
+                        except Exception as send_error:
+                            print(f"❌ Failed to send promotion message: {send_error}")
+                    else:
+                        print(f"⚠️ Could not find member {player_id} to send promotion message")
 
                 except Exception as e:
                     print(f"⚠️ Could not send immediate promotion announcement: {e}")
 
         except Exception as e:
             print(f"❌ Error in update_discord_role_with_queue: {e}")
+            import traceback
+            traceback.print_exc()
             # Don't let role update errors break the match reporting process
 
     async def update_discord_role_ultra_safe(self, ctx, player_id, new_mmr):
@@ -1385,12 +1414,19 @@ class MatchSystem:
 
                 # Only process real players for ranked matches (global matches don't affect Discord roles)
                 if not is_global_match:
-                    player_data = self.players.find_one({"id": player_id})
-                    if player_data:
-                        new_mmr = player_data.get("mmr", 600)
+                    # Find the MMR change for this player from our tracked changes
+                    old_mmr = None
+                    new_mmr = None
 
-                        # FIXED: Safely get guild from context
+                    for mmr_change in mmr_changes:
+                        if mmr_change.get("player_id") == player_id:
+                            old_mmr = mmr_change.get("old_mmr")
+                            new_mmr = mmr_change.get("new_mmr")
+                            break
+
+                    if old_mmr is not None and new_mmr is not None:
                         try:
+                            # FIXED: Safely get guild from context
                             guild = None
                             if hasattr(ctx, 'guild'):
                                 guild = ctx.guild
@@ -1398,10 +1434,12 @@ class MatchSystem:
                                 guild = ctx.interaction.guild
 
                             if guild:
-                                # Queue the role update with immediate promotion announcement
-                                await self.update_discord_role_with_queue(ctx, player_id, new_mmr,
-                                                                          immediate_announcement=True)
-                                print(f"✅ Queued role update for {player.get('name', 'Unknown')} (MMR: {new_mmr})")
+                                # Queue the role update with old and new MMR for proper promotion detection
+                                await self.update_discord_role_with_queue(
+                                    ctx, player_id, new_mmr, old_mmr, immediate_announcement=True
+                                )
+                                print(
+                                    f"✅ Queued role update for {player.get('name', 'Unknown')} (MMR: {old_mmr} → {new_mmr})")
                             else:
                                 print(
                                     f"⚠️ Could not get guild from context - skipping role queue for {player.get('name', 'Unknown')}")
@@ -1409,7 +1447,14 @@ class MatchSystem:
                         except Exception as role_queue_error:
                             print(
                                 f"❌ Error queueing role update for {player.get('name', 'Unknown')}: {role_queue_error}")
+                            import traceback
+                            traceback.print_exc()
                             # Continue processing other players even if one fails
+                    else:
+                        print(
+                            f"⚠️ Could not find MMR change data for {player.get('name', 'Unknown')} (player_id: {player_id})")
+                        # Debug: Print available MMR changes
+                        print(f"Available MMR changes: {[change.get('player_id') for change in mmr_changes]}")
 
             print("✅ All role updates queued for 3am processing")
         else:

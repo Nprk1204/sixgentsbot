@@ -31,7 +31,7 @@ class BulkRoleManager:
             try:
                 # Calculate time until next 3am
                 now = datetime.datetime.now()
-                target_time = now.replace(hour=3, minute=0, second=0, microsecond=0)
+                target_time = now.replace(hour=14, minute=35, second=0, microsecond=0)
 
                 # If it's already past 3am today, target tomorrow's 3am
                 if now >= target_time:
