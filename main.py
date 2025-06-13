@@ -1870,7 +1870,7 @@ async def rank_slash_enhanced(interaction: discord.Interaction, member: discord.
 
         # Streak bonuses
         if abs(current_streak) >= 2 or abs(global_current_streak) >= 2:
-            system_info.append("🔥 **Active Streak Bonuses**: 2x multiplier at 2+ streak")
+            system_info.append("🔥 **Active Streak Bonuses**: 2x multiplier at 3+ streak")
 
         # Momentum system
         if matches >= 10:
@@ -1893,7 +1893,7 @@ async def rank_slash_enhanced(interaction: discord.Interaction, member: discord.
             embed.add_field(name="Active Bonuses", value="\n".join(system_info), inline=False)
         else:
             embed.add_field(name="Available Features",
-                            value="• 2x streak multipliers (2+ wins/losses)\n• Momentum bonuses (10+ games)\n• Rank boundary protection",
+                            value="• 2x streak multipliers (3+ wins/losses)\n• Momentum bonuses (10+ games)\n• Rank boundary protection",
                             inline=False)
 
     # Add note for new players
@@ -3371,8 +3371,8 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         name="🔥 Advanced Streak System:",
         value=(
             "**Enhanced Streak Tracking**\n"
-            "• **Win Streaks (2+)**: Bonus MMR with 🔥 indicator\n"
-            "• **Loss Streaks (2+)**: MMR penalties with ❄️ indicator\n"
+            "• **Win Streaks (3+)**: Bonus MMR with 🔥 indicator\n"
+            "• **Loss Streaks (3+)**: MMR penalties with ❄️ indicator\n"
             "• **Streak Multipliers**: Up to 2x MMR impact (100% bonus at long streaks)\n"
             "• **Dual Tracking**: Separate streaks for ranked and global matches\n"
             "• **Live Monitoring**: Use `/streak` to check current status\n"
