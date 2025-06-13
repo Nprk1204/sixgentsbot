@@ -4269,39 +4269,6 @@ async def resetplayer_slash(interaction: discord.Interaction, member: discord.Me
         import traceback
         traceback.print_exc()
 
-
-@bot.tree.command(name="checkqueue", description="Check pending role updates for a player (Admin only)")
-@app_commands.describe(member="Member to check pending updates for")
-async def checkqueue_slash(interaction: discord.Interaction, member: discord.Member = None):
-    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
-        await interaction.response.send_message("Admin only", ephemeral=True)
-        return
-
-    if member is None:
-        # Show all pending updates
-        pending_count = bulk_role_manager.get_pending_updates_count()
-        await interaction.response.send_message(f"📋 Total pending role updates: {pending_count}")
-    else:
-        # Show specific player's pending update
-        player_id = str(member.id)
-        guild_id = str(interaction.guild.id)
-        pending = bulk_role_manager.get_player_pending_update(player_id, guild_id)
-
-        if pending:
-            embed = discord.Embed(
-                title=f"Pending Role Update for {member.display_name}",
-                color=0x3498db
-            )
-            embed.add_field(name="New MMR", value=str(pending.get("new_mmr", "Unknown")), inline=True)
-            embed.add_field(name="Old Rank", value=pending.get("old_rank", "Unknown"), inline=True)
-            embed.add_field(name="New Rank", value=pending.get("new_rank", "Unknown"), inline=True)
-            embed.add_field(name="Promotion", value="Yes" if pending.get("promotion") else "No", inline=True)
-            embed.add_field(name="Queued At", value=pending.get("queued_at", "Unknown"), inline=False)
-
-            await interaction.response.send_message(embed=embed)
-        else:
-            await interaction.response.send_message(f"No pending role updates for {member.mention}")
-
 # 4. Sub Command
 @bot.tree.command(name="sub", description="Substitute or swap players in an active match")
 @app_commands.describe(
