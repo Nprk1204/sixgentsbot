@@ -2304,7 +2304,7 @@ class MatchSystem:
         # Rank boundary protection settings - NOW PROPERLY USED
         RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
         PROMOTION_PROTECTION_GAMES = 3  # 3 games of protection after ranking up
-        DEMOTION_PROTECTION_RANGE = 100  # 50 MMR buffer before demotion penalties kick in
+        DEMOTION_PROTECTION_RANGE = 100  # 100 MMR buffer before demotion penalties kick in
 
         # Calculate the MMR difference between teams
         mmr_difference = opponent_avg_mmr - team_avg_mmr
