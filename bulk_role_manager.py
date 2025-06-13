@@ -329,10 +329,8 @@ class BulkRoleManager:
             return 0, len(updates)
 
     async def _send_completion_summary(self, successful: int, errors: int):
-        """Send completion summary to admin channel"""
+        """Send completion summary to role-updates channel instead of admin channels"""
         try:
-            # You can configure this to send to a specific admin channel
-            # For now, just print the summary
             summary_msg = (
                 f"🌅 **Daily Role Update Complete**\n"
                 f"✅ **Successful:** {successful}\n"
@@ -342,32 +340,110 @@ class BulkRoleManager:
 
             print(summary_msg)
 
-            # Optionally send to admin channels in all guilds
+            # Send to role-updates channel in all guilds
             for guild in self.bot.guilds:
-                # Look for admin/log channels
-                admin_channels = [
-                    discord.utils.get(guild.text_channels, name="admin-logs"),
-                    discord.utils.get(guild.text_channels, name="bot-logs"),
-                    discord.utils.get(guild.text_channels, name="sixgents")  # Your main channel
-                ]
+                # Look for role-updates channel specifically
+                role_updates_channel = discord.utils.get(guild.text_channels, name="role-updates")
 
-                for channel in admin_channels:
-                    if channel:
-                        try:
-                            embed = discord.Embed(
-                                title="🌅 Daily Role Update Complete",
-                                color=0x00ff00 if errors == 0 else 0xffa500,
-                                timestamp=datetime.datetime.utcnow()
+                if role_updates_channel:
+                    try:
+                        embed = discord.Embed(
+                            title="🌅 Daily Role Update Complete",
+                            description="The automated role update process has finished.",
+                            color=0x00ff00 if errors == 0 else 0xffa500,
+                            timestamp=datetime.datetime.utcnow()
+                        )
+
+                        # Main stats
+                        embed.add_field(name="✅ Successful Updates", value=str(successful), inline=True)
+                        embed.add_field(name="❌ Failed Updates", value=str(errors), inline=True)
+                        embed.add_field(name="📊 Total Processed", value=str(successful + errors), inline=True)
+
+                        # Status indicator
+                        if errors == 0:
+                            embed.add_field(
+                                name="🎉 Status",
+                                value="All role updates completed successfully!",
+                                inline=False
                             )
-                            embed.add_field(name="✅ Successful", value=str(successful), inline=True)
-                            embed.add_field(name="❌ Errors", value=str(errors), inline=True)
-                            embed.add_field(name="📊 Total", value=str(successful + errors), inline=True)
+                        else:
+                            embed.add_field(
+                                name="⚠️ Status",
+                                value=f"Completed with {errors} errors. Check logs for details.",
+                                inline=False
+                            )
 
-                            await channel.send(embed=embed)
-                            break  # Only send to first available admin channel per guild
-                        except Exception as e:
-                            print(f"⚠️ Could not send summary to {channel.name}: {e}")
-                            continue
+                            # Add error rate
+                            error_rate = (errors / (successful + errors)) * 100 if (successful + errors) > 0 else 0
+                            embed.add_field(
+                                name="📈 Error Rate",
+                                value=f"{error_rate:.1f}%",
+                                inline=True
+                            )
+
+                        # Add next update info
+                        embed.add_field(
+                            name="⏰ Next Update",
+                            value="Tomorrow at 3:00 AM",
+                            inline=True
+                        )
+
+                        # Add helpful info
+                        embed.add_field(
+                            name="ℹ️ Information",
+                            value=(
+                                "• Role updates happen automatically every day at 3:00 AM\n"
+                                "• Only players with MMR changes get role updates\n"
+                                "• Use `/checkpending` to see queued updates\n"
+                                "• Use `/forceprocess @player` for immediate updates"
+                            ),
+                            inline=False
+                        )
+
+                        embed.set_footer(text="6 Mans Role Update System")
+
+                        await role_updates_channel.send(embed=embed)
+                        print(f"✅ Sent role update summary to #{role_updates_channel.name} in {guild.name}")
+
+                    except Exception as e:
+                        print(f"❌ Could not send summary to #{role_updates_channel.name} in {guild.name}: {e}")
+                else:
+                    print(f"⚠️ No #role-updates channel found in {guild.name}")
+
+                    # Fallback to other admin channels if role-updates doesn't exist
+                    fallback_channels = [
+                        discord.utils.get(guild.text_channels, name="admin-logs"),
+                        discord.utils.get(guild.text_channels, name="bot-logs"),
+                        discord.utils.get(guild.text_channels, name="sixgents")
+                    ]
+
+                    for channel in fallback_channels:
+                        if channel:
+                            try:
+                                fallback_embed = discord.Embed(
+                                    title="🌅 Daily Role Update Complete",
+                                    description=(
+                                        f"**Note:** This message should be in #role-updates channel\n\n"
+                                        f"✅ **Successful:** {successful}\n"
+                                        f"❌ **Errors:** {errors}\n"
+                                        f"📊 **Total:** {successful + errors}"
+                                    ),
+                                    color=0x00ff00 if errors == 0 else 0xffa500,
+                                    timestamp=datetime.datetime.utcnow()
+                                )
+
+                                fallback_embed.add_field(
+                                    name="💡 Recommendation",
+                                    value="Create a #role-updates channel for these notifications",
+                                    inline=False
+                                )
+
+                                await channel.send(embed=fallback_embed)
+                                print(f"✅ Sent fallback summary to #{channel.name} in {guild.name}")
+                                break  # Only send to first available fallback channel
+                            except Exception as e:
+                                print(f"⚠️ Could not send fallback summary to {channel.name}: {e}")
+                                continue
 
         except Exception as e:
             print(f"❌ Error sending completion summary: {e}")

@@ -2791,6 +2791,11 @@ async def activematches_slash(interaction: discord.Interaction):
             ephemeral=True)
         return
 
+    await show_active_matches_list(interaction)
+
+
+async def show_active_matches_list(interaction: discord.Interaction, edit_response: bool = False):
+    """Show the main active matches list"""
     channel_id = str(interaction.channel.id)
 
     # Find all active matches in this channel
@@ -2811,7 +2816,20 @@ async def activematches_slash(interaction: discord.Interaction):
             value="Active matches will appear here when players are in voting, team selection, or playing.",
             inline=False
         )
-        await interaction.response.send_message(embed=embed)
+
+        # Add close button
+        class CloseView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=300)
+
+            @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
+            async def close_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await interaction.response.edit_message(content="Menu closed.", embed=None, view=None)
+
+        if edit_response:
+            await interaction.response.edit_message(embed=embed, view=CloseView())
+        else:
+            await interaction.response.send_message(embed=embed, view=CloseView())
         return
 
     # Create embed showing active matches
@@ -2911,220 +2929,249 @@ async def activematches_slash(interaction: discord.Interaction):
                 await interaction.response.send_message("❌ Match not found or no longer active.", ephemeral=True)
                 return
 
-            # Create action buttons for the selected match
-            await self.show_match_actions(interaction, selected_match_id, selected_match)
+            # Show match actions
+            await show_match_actions(interaction, selected_match_id, selected_match)
 
-        async def show_match_actions(self, interaction, match_id, match):
-            status = match.get('status', 'unknown')
-
-            # Create action embed
-            embed = discord.Embed(
-                title=f"🎮 Match Management: `{match_id}`",
-                color=0xe74c3c
-            )
-
-            # Add match details
-            team1 = match.get('team1', [])
-            team2 = match.get('team2', [])
-            players = match.get('players', [])
-
-            embed.add_field(name="📊 Status", value=status.title(), inline=True)
-            embed.add_field(name="🆔 Match ID", value=f"`{match_id}`", inline=True)
-            embed.add_field(name="🏁 Type", value="Global" if match.get('is_global') else "Ranked", inline=True)
-
-            # Show players
-            if team1 and team2:
-                team1_names = [p.get('name', 'Unknown') for p in team1]
-                team2_names = [p.get('name', 'Unknown') for p in team2]
-                embed.add_field(name="👥 Team 1", value="\n".join(team1_names) or "None", inline=True)
-                embed.add_field(name="👥 Team 2", value="\n".join(team2_names) or "None", inline=True)
-                embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
-            elif players:
-                player_names = [p.get('name', 'Unknown') for p in players[:6]]  # Show first 6
-                embed.add_field(name="👥 Players", value="\n".join(player_names) or "None", inline=False)
-
-            # Create action buttons
-            class MatchActionView(discord.ui.View):
-                def __init__(self):
-                    super().__init__(timeout=300)  # 5 minute timeout
-
-                @discord.ui.button(label="🛑 Stop Match", style=discord.ButtonStyle.red)
-                async def stop_match(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    await self.confirm_action(interaction, "stop", match_id)
-
-                @discord.ui.button(label="🏆 Report Team 1 Win", style=discord.ButtonStyle.green)
-                async def team1_win(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if not team1 or not team2:
-                        await interaction.response.send_message("❌ Cannot report - teams not set up properly.",
-                                                                ephemeral=True)
-                        return
-                    await self.confirm_action(interaction, "report_team1", match_id)
-
-                @discord.ui.button(label="🏆 Report Team 2 Win", style=discord.ButtonStyle.green)
-                async def team2_win(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    if not team1 or not team2:
-                        await interaction.response.send_message("❌ Cannot report - teams not set up properly.",
-                                                                ephemeral=True)
-                        return
-                    await self.confirm_action(interaction, "report_team2", match_id)
-
-                @discord.ui.button(label="📊 Match Details", style=discord.ButtonStyle.gray)
-                async def match_details(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    await self.show_match_details(interaction, match_id, match)
-
-                @discord.ui.button(label="🔙 Back to List", style=discord.ButtonStyle.secondary)
-                async def back_to_list(self, interaction: discord.Interaction, button: discord.ui.Button):
-                    # Refresh the original match list
-                    await activematches_slash(interaction)
-
-                async def confirm_action(self, interaction, action, match_id):
-                    # Create confirmation embed
-                    action_names = {
-                        "stop": "🛑 Stop this match",
-                        "report_team1": "🏆 Report Team 1 as winners",
-                        "report_team2": "🏆 Report Team 2 as winners"
-                    }
-
-                    confirm_embed = discord.Embed(
-                        title="⚠️ Confirm Action",
-                        description=f"Are you sure you want to: **{action_names.get(action, action)}**?",
-                        color=0xff9900
-                    )
-                    confirm_embed.add_field(name="Match ID", value=f"`{match_id}`", inline=True)
-                    confirm_embed.add_field(name="Action", value=action_names.get(action, action), inline=True)
-
-                    class ConfirmView(discord.ui.View):
-                        def __init__(self):
-                            super().__init__(timeout=30)
-
-                        @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.green)
-                        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
-                            await self.execute_action(interaction, action, match_id)
-
-                        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
-                        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
-                            await interaction.response.edit_message(content="❌ Action cancelled.", embed=None,
-                                                                    view=None)
-
-                        async def execute_action(self, interaction, action, match_id):
-                            if action == "stop":
-                                # Stop the match
-                                success = system_coordinator.queue_manager.remove_match(match_id)
-                                if success:
-                                    embed = discord.Embed(
-                                        title="✅ Match Stopped",
-                                        description=f"Match `{match_id}` has been stopped and removed.",
-                                        color=0x00ff00
-                                    )
-                                else:
-                                    embed = discord.Embed(
-                                        title="❌ Error",
-                                        description=f"Failed to stop match `{match_id}`.",
-                                        color=0xff0000
-                                    )
-                                await interaction.response.edit_message(embed=embed, view=None)
-
-                            elif action.startswith("report_team"):
-                                # Report match result
-                                winner = 1 if action == "report_team1" else 2
-
-                                try:
-                                    # Update match in database
-                                    system_coordinator.match_system.matches.update_one(
-                                        {"match_id": match_id},
-                                        {"$set": {
-                                            "status": "completed",
-                                            "winner": winner,
-                                            "score": {"team1": 1 if winner == 1 else 0,
-                                                      "team2": 1 if winner == 2 else 0},
-                                            "completed_at": datetime.datetime.utcnow(),
-                                            "reported_by": str(interaction.user.id)
-                                        }}
-                                    )
-
-                                    # Remove from active matches
-                                    system_coordinator.queue_manager.remove_match(match_id)
-
-                                    # Get match for MMR updates
-                                    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
-                                    if match:
-                                        winning_team = match.get("team1" if winner == 1 else "team2", [])
-                                        losing_team = match.get("team2" if winner == 1 else "team1", [])
-                                        system_coordinator.match_system.update_player_mmr(winning_team, losing_team,
-                                                                                          match_id)
-
-                                    embed = discord.Embed(
-                                        title="✅ Match Reported",
-                                        description=f"Match `{match_id}` has been reported with Team {winner} as winners.",
-                                        color=0x00ff00
-                                    )
-                                    embed.add_field(name="Winner", value=f"Team {winner}", inline=True)
-                                    embed.add_field(name="MMR", value="Updated for all players", inline=True)
-
-                                except Exception as e:
-                                    embed = discord.Embed(
-                                        title="❌ Error",
-                                        description=f"Failed to report match `{match_id}`: {str(e)}",
-                                        color=0xff0000
-                                    )
-
-                                await interaction.response.edit_message(embed=embed, view=None)
-
-                    await interaction.response.edit_message(embed=confirm_embed, view=ConfirmView())
-
-                async def show_match_details(self, interaction, match_id, match):
-                    # Create detailed match info
-                    detail_embed = discord.Embed(
-                        title=f"📊 Match Details: `{match_id}`",
-                        color=0x3498db
-                    )
-
-                    # Basic info
-                    detail_embed.add_field(name="Status", value=match.get('status', 'Unknown').title(), inline=True)
-                    detail_embed.add_field(name="Type", value="Global" if match.get('is_global') else "Ranked",
-                                           inline=True)
-                    detail_embed.add_field(name="Channel", value=f"<#{match.get('channel_id', 'Unknown')}>",
-                                           inline=True)
-
-                    # Time info
-                    created_at = match.get('created_at')
-                    if created_at:
-                        detail_embed.add_field(name="Created", value=f"<t:{int(created_at.timestamp())}:R>",
-                                               inline=True)
-
-                    # Players
-                    team1 = match.get('team1', [])
-                    team2 = match.get('team2', [])
-                    players = match.get('players', [])
-
-                    if team1 and team2:
-                        team1_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in team1])
-                        team2_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in team2])
-                        detail_embed.add_field(name="Team 1", value=team1_list or "None", inline=True)
-                        detail_embed.add_field(name="Team 2", value=team2_list or "None", inline=True)
-                    elif players:
-                        player_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in players])
-                        detail_embed.add_field(name="Players", value=player_list or "None", inline=False)
-
-                    class BackView(discord.ui.View):
-                        def __init__(self):
-                            super().__init__(timeout=60)
-
-                        @discord.ui.button(label="🔙 Back to Actions", style=discord.ButtonStyle.secondary)
-                        async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
-                            await show_match_actions(interaction, match_id, match)
-
-                    await interaction.response.edit_message(embed=detail_embed, view=BackView())
-
-            await interaction.response.edit_message(embed=embed, view=MatchActionView())
-
-    # Create the view with the select menu
+    # Create the view with the select menu and close button
     class ActiveMatchView(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=300)  # 5 minute timeout
             self.add_item(ActiveMatchSelect())
 
-    await interaction.response.send_message(embed=embed, view=ActiveMatchView())
+        @discord.ui.button(label="❌ Close Menu", style=discord.ButtonStyle.red, row=1)
+        async def close_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(content="Menu closed.", embed=None, view=None)
+
+    if edit_response:
+        await interaction.response.edit_message(embed=embed, view=ActiveMatchView())
+    else:
+        await interaction.response.send_message(embed=embed, view=ActiveMatchView())
+
+
+async def show_match_actions(interaction: discord.Interaction, match_id: str, match: dict):
+    """Show action buttons for a selected match"""
+    status = match.get('status', 'unknown')
+
+    # Create action embed
+    embed = discord.Embed(
+        title=f"🎮 Match Management: `{match_id}`",
+        color=0xe74c3c
+    )
+
+    # Add match details
+    team1 = match.get('team1', [])
+    team2 = match.get('team2', [])
+    players = match.get('players', [])
+
+    embed.add_field(name="📊 Status", value=status.title(), inline=True)
+    embed.add_field(name="🆔 Match ID", value=f"`{match_id}`", inline=True)
+    embed.add_field(name="🏁 Type", value="Global" if match.get('is_global') else "Ranked", inline=True)
+
+    # Show players
+    if team1 and team2:
+        team1_names = [p.get('name', 'Unknown') for p in team1]
+        team2_names = [p.get('name', 'Unknown') for p in team2]
+        embed.add_field(name="👥 Team 1", value="\n".join(team1_names) or "None", inline=True)
+        embed.add_field(name="👥 Team 2", value="\n".join(team2_names) or "None", inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+    elif players:
+        player_names = [p.get('name', 'Unknown') for p in players[:6]]  # Show first 6
+        embed.add_field(name="👥 Players", value="\n".join(player_names) or "None", inline=False)
+
+    # Create action buttons
+    class MatchActionView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=300)  # 5 minute timeout
+
+        @discord.ui.button(label="🛑 Stop Match", style=discord.ButtonStyle.red)
+        async def stop_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_confirmation(interaction, "stop", match_id, match)
+
+        @discord.ui.button(label="🏆 Report Team 1 Win", style=discord.ButtonStyle.green)
+        async def team1_win(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if not team1 or not team2:
+                await interaction.response.send_message("❌ Cannot report - teams not set up properly.", ephemeral=True)
+                return
+            await show_confirmation(interaction, "report_team1", match_id, match)
+
+        @discord.ui.button(label="🏆 Report Team 2 Win", style=discord.ButtonStyle.green)
+        async def team2_win(self, interaction: discord.Interaction, button: discord.ui.Button):
+            if not team1 or not team2:
+                await interaction.response.send_message("❌ Cannot report - teams not set up properly.", ephemeral=True)
+                return
+            await show_confirmation(interaction, "report_team2", match_id, match)
+
+        @discord.ui.button(label="📊 Match Details", style=discord.ButtonStyle.gray)
+        async def match_details(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_match_details(interaction, match_id, match)
+
+        @discord.ui.button(label="🔙 Back to List", style=discord.ButtonStyle.secondary, row=1)
+        async def back_to_list(self, interaction: discord.Interaction, button: discord.ui.Button):
+            # Go back to the main list
+            await show_active_matches_list(interaction, edit_response=True)
+
+        @discord.ui.button(label="❌ Close Menu", style=discord.ButtonStyle.red, row=1)
+        async def close_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(content="Menu closed.", embed=None, view=None)
+
+    await interaction.response.edit_message(embed=embed, view=MatchActionView())
+
+
+async def show_confirmation(interaction: discord.Interaction, action: str, match_id: str, match: dict):
+    """Show confirmation dialog for destructive actions"""
+    # Create confirmation embed
+    action_names = {
+        "stop": "🛑 Stop this match",
+        "report_team1": "🏆 Report Team 1 as winners",
+        "report_team2": "🏆 Report Team 2 as winners"
+    }
+
+    confirm_embed = discord.Embed(
+        title="⚠️ Confirm Action",
+        description=f"Are you sure you want to: **{action_names.get(action, action)}**?",
+        color=0xff9900
+    )
+    confirm_embed.add_field(name="Match ID", value=f"`{match_id}`", inline=True)
+    confirm_embed.add_field(name="Action", value=action_names.get(action, action), inline=True)
+
+    class ConfirmView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=30)
+
+        @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.green)
+        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await execute_action(interaction, action, match_id)
+
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+            # Go back to the match actions screen
+            await show_match_actions(interaction, match_id, match)
+
+        @discord.ui.button(label="🔙 Back to Actions", style=discord.ButtonStyle.secondary)
+        async def back_to_actions(self, interaction: discord.Interaction, button: discord.ui.Button):
+            # Go back to the match actions screen
+            await show_match_actions(interaction, match_id, match)
+
+    await interaction.response.edit_message(embed=confirm_embed, view=ConfirmView())
+
+
+async def execute_action(interaction: discord.Interaction, action: str, match_id: str):
+    """Execute the confirmed action"""
+    if action == "stop":
+        # Stop the match
+        success = system_coordinator.queue_manager.remove_match(match_id)
+        if success:
+            embed = discord.Embed(
+                title="✅ Match Stopped",
+                description=f"Match `{match_id}` has been stopped and removed.",
+                color=0x00ff00
+            )
+        else:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"Failed to stop match `{match_id}`.",
+                color=0xff0000
+            )
+
+    elif action.startswith("report_team"):
+        # Report match result
+        winner = 1 if action == "report_team1" else 2
+
+        try:
+            # Update match in database
+            system_coordinator.match_system.matches.update_one(
+                {"match_id": match_id},
+                {"$set": {
+                    "status": "completed",
+                    "winner": winner,
+                    "score": {"team1": 1 if winner == 1 else 0, "team2": 1 if winner == 2 else 0},
+                    "completed_at": datetime.datetime.utcnow(),
+                    "reported_by": str(interaction.user.id)
+                }}
+            )
+
+            # Remove from active matches
+            system_coordinator.queue_manager.remove_match(match_id)
+
+            # Get match for MMR updates
+            match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+            if match:
+                winning_team = match.get("team1" if winner == 1 else "team2", [])
+                losing_team = match.get("team2" if winner == 1 else "team1", [])
+                system_coordinator.match_system.update_player_mmr(winning_team, losing_team, match_id)
+
+            embed = discord.Embed(
+                title="✅ Match Reported",
+                description=f"Match `{match_id}` has been reported with Team {winner} as winners.",
+                color=0x00ff00
+            )
+            embed.add_field(name="Winner", value=f"Team {winner}", inline=True)
+            embed.add_field(name="MMR", value="Updated for all players", inline=True)
+
+        except Exception as e:
+            embed = discord.Embed(
+                title="❌ Error",
+                description=f"Failed to report match `{match_id}`: {str(e)}",
+                color=0xff0000
+            )
+
+    # Add close button to final result
+    class ResultView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+
+        @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
+        async def close_result(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(content="Menu closed.", embed=None, view=None)
+
+    await interaction.response.edit_message(embed=embed, view=ResultView())
+
+
+async def show_match_details(interaction: discord.Interaction, match_id: str, match: dict):
+    """Show detailed match information"""
+    # Create detailed match info
+    detail_embed = discord.Embed(
+        title=f"📊 Match Details: `{match_id}`",
+        color=0x3498db
+    )
+
+    # Basic info
+    detail_embed.add_field(name="Status", value=match.get('status', 'Unknown').title(), inline=True)
+    detail_embed.add_field(name="Type", value="Global" if match.get('is_global') else "Ranked", inline=True)
+    detail_embed.add_field(name="Channel", value=f"<#{match.get('channel_id', 'Unknown')}>", inline=True)
+
+    # Time info
+    created_at = match.get('created_at')
+    if created_at:
+        detail_embed.add_field(name="Created", value=f"<t:{int(created_at.timestamp())}:R>", inline=True)
+
+    # Players
+    team1 = match.get('team1', [])
+    team2 = match.get('team2', [])
+    players = match.get('players', [])
+
+    if team1 and team2:
+        team1_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in team1])
+        team2_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in team2])
+        detail_embed.add_field(name="Team 1", value=team1_list or "None", inline=True)
+        detail_embed.add_field(name="Team 2", value=team2_list or "None", inline=True)
+    elif players:
+        player_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in players])
+        detail_embed.add_field(name="Players", value=player_list or "None", inline=False)
+
+    class BackView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=60)
+
+        @discord.ui.button(label="🔙 Back to Actions", style=discord.ButtonStyle.secondary)
+        async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_match_actions(interaction, match_id, match)
+
+        @discord.ui.button(label="❌ Close Menu", style=discord.ButtonStyle.red)
+        async def close_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await interaction.response.edit_message(content="Menu closed.", embed=None, view=None)
+
+    await interaction.response.edit_message(embed=detail_embed, view=BackView())
 
 @bot.tree.command(name="purgechat", description="Clear chat messages")
 @app_commands.describe(amount_to_delete="Number of messages to delete (1-100)")
