@@ -216,7 +216,7 @@ def discord_callback_enhanced():
         return redirect(url_for('home'))
 
     try:
-        # ENHANCED: Multiple attempts with exponential backoff for rate limits
+        # FIXED: Only retry on rate limits, not all failures
         max_attempts = 3
         base_delay = 5
 
@@ -225,10 +225,11 @@ def discord_callback_enhanced():
 
             token_data = discord_oauth.exchange_code(code)
 
-            # Handle rate limiting specifically
+            # FIXED: Only retry on specific rate limit errors
             if 'error' in token_data:
                 error_msg = token_data['error']
 
+                # Only retry for rate limits
                 if 'rate limit' in error_msg.lower() or 'try again' in error_msg.lower():
                     if attempt < max_attempts - 1:  # Not the last attempt
                         delay = base_delay * (2 ** attempt)  # Exponential backoff
@@ -236,13 +237,9 @@ def discord_callback_enhanced():
                         import time
                         time.sleep(delay)
                         continue
-                    else:
-                        # Last attempt failed
-                        flash('Discord is temporarily limiting access. Please wait 5-10 minutes and try again.',
-                              'warning')
-                        return redirect(url_for('home'))
                 else:
-                    # Non-rate-limit error
+                    # For non-rate-limit errors, don't retry - fail immediately
+                    print(f" OAuth error (no retry): {error_msg}")
                     flash(f'Authentication failed: {error_msg}', 'error')
                     return redirect(url_for('home'))
 
@@ -271,8 +268,12 @@ def discord_callback_enhanced():
                 'access_token': access_token
             }
 
-        flash(f'Successfully logged in as {user_info["username"]}!', 'success')
-        return redirect(url_for('profile'))
+            flash(f'Successfully logged in as {user_info["username"]}!', 'success')
+            return redirect(url_for('profile'))
+
+        # If we get here, all attempts failed due to rate limiting
+        flash('Discord is temporarily limiting access. Please wait 5-10 minutes and try again.', 'warning')
+        return redirect(url_for('home'))
 
     except Exception as e:
         print(f" Critical callback error: {e}")
