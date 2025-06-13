@@ -1557,7 +1557,7 @@ async def leaderboard_slash(interaction: discord.Interaction):
         return
 
     # Replace this URL with your actual leaderboard website URL from Render
-    leaderboard_url = os.environ.get('PUBLIC_URL', 'http://localhost:5000')
+    leaderboard_url = os.environ.get('PUBLIC_URL', '')
 
     embed = discord.Embed(
         title="🏆 Rocket League 6 Mans Leaderboard 🏆",
@@ -2971,7 +2971,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
 
         # Admin/Mod Match Management
         'adminreport': 'Force report match results by specifying the winning team (Admin/Mod only)',
-        'sub': 'Substitute a player in an active match (Admin/Mod only)',
+        'sub': 'Substitute or swap players in an active match (Admin/Mod only)',
         'forcestart': 'Force start a match with dummy players if needed (Admin/Mod only)',
         'removeactivematches': 'Cancel all active matches in the current channel (Admin/Mod only)',
         'removematch': 'Remove/reverse the results of a completed match (Admin/Mod only)',
@@ -2985,6 +2985,8 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         'resetleaderboard': 'Reset leaderboard data (global, ranked, or complete reset) (Admin/Mod only)',
         'topstreaks': 'View leaderboards for highest win/loss streaks (Admin/Mod only)',
         'streakstats': 'View server-wide streak statistics and analytics (Admin/Mod only)',
+        'checkpending': 'Check pending role updates scheduled for 3am processing (Admin/Mod only)',
+        'forceprocess': 'Force process a player\'s role update immediately (Admin/Mod only)',
 
         # Debug Commands (Admin/Mod only)
         'debugmmr': 'Debug MMR storage issues for a specific match (Admin/Mod only)',
@@ -3000,7 +3002,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     queue_admin_commands = ['addplayer', 'removeplayer']
     match_admin_commands = ['adminreport', 'sub', 'forcestart', 'removeactivematches', 'removematch']
     player_admin_commands = ['adjustmmr', 'resetplayer', 'resetstreak']
-    system_admin_commands = ['resetleaderboard', 'topstreaks', 'streakstats']
+    system_admin_commands = ['resetleaderboard', 'topstreaks', 'streakstats', 'checkpending', 'forceprocess']
     debug_commands = ['debugmmr', 'testmmr']
     utility_commands = ['help']
 
@@ -3073,12 +3075,26 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         name="🔥 Advanced Streak System:",
         value=(
             "**Enhanced Streak Tracking**\n"
-            "• **Win Streaks (3+)**: Bonus MMR with 🔥 indicator\n"
-            "• **Loss Streaks (3+)**: MMR penalties with ❄️ indicator\n"
-            "• **Streak Multipliers**: Longer streaks = bigger impact (up to +50%)\n"
+            "• **Win Streaks (2+)**: Bonus MMR with 🔥 indicator\n"
+            "• **Loss Streaks (2+)**: MMR penalties with ❄️ indicator\n"
+            "• **Streak Multipliers**: Up to 2x MMR impact (100% bonus at long streaks)\n"
             "• **Dual Tracking**: Separate streaks for ranked and global matches\n"
             "• **Live Monitoring**: Use `/streak` to check current status\n"
             "• **Admin Analytics**: `/topstreaks` and `/streakstats` for insights"
+        ),
+        inline=False
+    )
+
+    # Enhanced MMR system section
+    embed.add_field(
+        name="⚡ Enhanced MMR System:",
+        value=(
+            "**Dynamic MMR Changes**: Based on team balance, streaks, and experience\n"
+            "**Placement Period**: First 15 games have higher MMR changes\n"
+            "**Momentum Tracking**: Recent performance affects MMR gains/losses\n"
+            "**Rank Protection**: Promotion protection (3 games) + demotion buffers\n"
+            "**Promotion Assistance**: Bonus MMR gains near rank boundaries\n"
+            "**Global vs Ranked**: Separate MMR systems with different starting values"
         ),
         inline=False
     )
@@ -3091,6 +3107,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
             "**Match Management**: Substitute players, remove matches, admin reports\n"
             "**Player Management**: Adjust MMR, reset player data, manage streaks\n"
             "**System Control**: Reset leaderboards, view analytics, debug tools\n"
+            "**Role Management**: Check pending updates, force process roles\n"
             "**Requires**: Administrator permissions or '6mod' role"
         ),
         inline=False
@@ -3110,10 +3127,23 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         inline=False
     )
 
+    # Add role update system explanation
+    embed.add_field(
+        name="🕒 Role Update System:",
+        value=(
+            "**Automated Processing**: Discord roles updated daily at 3:00 AM\n"
+            "**Immediate Notifications**: Promotion messages sent instantly\n"
+            "**Bulk Processing**: Prevents rate limiting and ensures reliability\n"
+            "**Admin Override**: Use `/forceprocess` for immediate role updates\n"
+            "**Status Checking**: Use `/checkpending` to see queued updates"
+        ),
+        inline=False
+    )
+
     # Enhanced footer with command count
     total_commands = len(commands_dict)
     admin_commands = len(queue_admin_commands + match_admin_commands + player_admin_commands +
-                        system_admin_commands + debug_commands + ['purgechat'])
+                        system_admin_commands + debug_commands)
     user_commands = total_commands - admin_commands
 
     embed.set_footer(
