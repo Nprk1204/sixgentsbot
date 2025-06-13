@@ -2774,9 +2774,8 @@ async def add_dummy_players(channel, count):
         system_coordinator.queue_manager.channel_queues[channel_id].append(dummy_data)
 
 
-
-@bot.tree.command(name="removeactivematches", description="Remove all active matches in this channel (Admin only)")
-async def removeactivematches_slash(interaction: discord.Interaction):
+@bot.tree.command(name="activematches", description="Manage active matches in this channel (Admin only)")
+async def activematches_slash(interaction: discord.Interaction):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
@@ -2802,80 +2801,330 @@ async def removeactivematches_slash(interaction: discord.Interaction):
 
     # If no active matches, inform the user
     if not active_matches:
-        await interaction.response.send_message("No active matches found in this channel.")
+        embed = discord.Embed(
+            title="📋 No Active Matches",
+            description="There are no active matches in this channel.",
+            color=0x95a5a6
+        )
+        embed.add_field(
+            name="💡 Info",
+            value="Active matches will appear here when players are in voting, team selection, or playing.",
+            inline=False
+        )
+        await interaction.response.send_message(embed=embed)
         return
 
-    # First, cancel any active votings or selections
-    vote_active = system_coordinator.is_voting_active(channel_id)
-    if vote_active:
-        system_coordinator.cancel_voting(channel_id)
-
-    selection_active = system_coordinator.is_selection_active(channel_id)
-    if selection_active:
-        system_coordinator.cancel_selection(channel_id)
-
-    # Store match details for the embed
-    removed_matches = []
-    for match in active_matches:
-        match_id = match.get('match_id')
-        player_count = 0
-
-        # Count players in teams if available
-        team1 = match.get('team1', [])
-        team2 = match.get('team2', [])
-        if team1 or team2:
-            player_count = len(team1) + len(team2)
-        # Otherwise count players directly
-        elif 'players' in match:
-            player_count = len(match.get('players', []))
-
-        removed_matches.append({
-            'match_id': match_id,
-            'player_count': player_count,
-            'status': match.get('status', 'unknown')
-        })
-
-        # Remove the match
-        system_coordinator.queue_manager.remove_match(match_id)
-
-    # Create embed to display results - avoiding too many fields
+    # Create embed showing active matches
     embed = discord.Embed(
-        title="Active Matches Removed",
-        description=f"Removed {len(removed_matches)} active match(es) from this channel.",
-        color=0xff5555  # Red color
+        title="⚔️ Active Matches Management",
+        description=f"Found **{len(active_matches)}** active match(es) in this channel",
+        color=0x3498db
     )
 
-    # Instead of adding each match as a separate field, combine them into chunks
-    if removed_matches:
-        match_text = []
-        for i, match in enumerate(removed_matches, 1):
-            match_text.append(
-                f"Match {i}: ID `{match['match_id']}` (Status: {match['status']}, Players: {match['player_count']})")
+    # Create select menu options
+    select_options = []
 
-        # Join all matches into a single chunked field (max 10 per field to avoid value length issues)
-        chunks = []
-        current_chunk = []
-        for line in match_text:
-            current_chunk.append(line)
-            if len(current_chunk) >= 10:
-                chunks.append("\n".join(current_chunk))
-                current_chunk = []
+    for i, match in enumerate(active_matches):
+        match_id = match.get('match_id', f'unknown_{i}')
+        status = match.get('status', 'unknown')
+        created_at = match.get('created_at')
 
-        if current_chunk:  # Add any remaining items
-            chunks.append("\n".join(current_chunk))
+        # Get player count
+        player_count = 0
+        team1 = match.get('team1', [])
+        team2 = match.get('team2', [])
+        players = match.get('players', [])
 
-        # Add chunks as fields
-        for i, chunk in enumerate(chunks):
-            embed.add_field(
-                name=f"Matches Removed {i + 1}/{len(chunks)}" if len(chunks) > 1 else "Matches Removed",
-                value=chunk,
-                inline=False
+        if team1 and team2:
+            player_count = len(team1) + len(team2)
+        elif players:
+            player_count = len(players)
+
+        # Format time
+        time_str = "Unknown time"
+        if created_at:
+            time_diff = datetime.datetime.utcnow() - created_at
+            minutes = int(time_diff.total_seconds() / 60)
+            if minutes < 60:
+                time_str = f"{minutes}m ago"
+            else:
+                hours = minutes // 60
+                time_str = f"{hours}h {minutes % 60}m ago"
+
+        # Status emoji
+        status_emoji = {
+            'voting': '🗳️',
+            'selection': '👑',
+            'in_progress': '⚔️',
+            'completed': '✅'
+        }.get(status, '❓')
+
+        # Add to embed
+        embed.add_field(
+            name=f"{status_emoji} Match `{match_id}`",
+            value=f"**Status:** {status.title()}\n**Players:** {player_count}\n**Started:** {time_str}",
+            inline=True
+        )
+
+        # Add to select options (Discord limit: 25 options)
+        if len(select_options) < 25:
+            select_options.append(
+                discord.SelectOption(
+                    label=f"Match {match_id}",
+                    description=f"{status.title()} • {player_count} players • {time_str}",
+                    value=match_id,
+                    emoji=status_emoji
+                )
             )
 
-    embed.set_footer(text=f"Executed by {interaction.user.display_name}")
+    # Add instructions
+    embed.add_field(
+        name="🛠️ How to Use",
+        value="Select a match from the dropdown below to manage it.",
+        inline=False
+    )
 
-    # Send confirmation
-    await interaction.response.send_message(embed=embed)
+    embed.set_footer(text=f"Active Matches • {len(active_matches)} total")
+    embed.timestamp = datetime.datetime.utcnow()
+
+    # Create the select menu
+    class ActiveMatchSelect(discord.ui.Select):
+        def __init__(self):
+            super().__init__(
+                placeholder="Choose a match to manage...",
+                min_values=1,
+                max_values=1,
+                options=select_options
+            )
+
+        async def callback(self, interaction: discord.Interaction):
+            selected_match_id = self.values[0]
+
+            # Find the selected match
+            selected_match = None
+            for match_id, match in system_coordinator.queue_manager.active_matches.items():
+                if match_id == selected_match_id:
+                    selected_match = match
+                    break
+
+            if not selected_match:
+                await interaction.response.send_message("❌ Match not found or no longer active.", ephemeral=True)
+                return
+
+            # Create action buttons for the selected match
+            await self.show_match_actions(interaction, selected_match_id, selected_match)
+
+        async def show_match_actions(self, interaction, match_id, match):
+            status = match.get('status', 'unknown')
+
+            # Create action embed
+            embed = discord.Embed(
+                title=f"🎮 Match Management: `{match_id}`",
+                color=0xe74c3c
+            )
+
+            # Add match details
+            team1 = match.get('team1', [])
+            team2 = match.get('team2', [])
+            players = match.get('players', [])
+
+            embed.add_field(name="📊 Status", value=status.title(), inline=True)
+            embed.add_field(name="🆔 Match ID", value=f"`{match_id}`", inline=True)
+            embed.add_field(name="🏁 Type", value="Global" if match.get('is_global') else "Ranked", inline=True)
+
+            # Show players
+            if team1 and team2:
+                team1_names = [p.get('name', 'Unknown') for p in team1]
+                team2_names = [p.get('name', 'Unknown') for p in team2]
+                embed.add_field(name="👥 Team 1", value="\n".join(team1_names) or "None", inline=True)
+                embed.add_field(name="👥 Team 2", value="\n".join(team2_names) or "None", inline=True)
+                embed.add_field(name="\u200b", value="\u200b", inline=True)  # Spacer
+            elif players:
+                player_names = [p.get('name', 'Unknown') for p in players[:6]]  # Show first 6
+                embed.add_field(name="👥 Players", value="\n".join(player_names) or "None", inline=False)
+
+            # Create action buttons
+            class MatchActionView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=300)  # 5 minute timeout
+
+                @discord.ui.button(label="🛑 Stop Match", style=discord.ButtonStyle.red)
+                async def stop_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    await self.confirm_action(interaction, "stop", match_id)
+
+                @discord.ui.button(label="🏆 Report Team 1 Win", style=discord.ButtonStyle.green)
+                async def team1_win(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    if not team1 or not team2:
+                        await interaction.response.send_message("❌ Cannot report - teams not set up properly.",
+                                                                ephemeral=True)
+                        return
+                    await self.confirm_action(interaction, "report_team1", match_id)
+
+                @discord.ui.button(label="🏆 Report Team 2 Win", style=discord.ButtonStyle.green)
+                async def team2_win(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    if not team1 or not team2:
+                        await interaction.response.send_message("❌ Cannot report - teams not set up properly.",
+                                                                ephemeral=True)
+                        return
+                    await self.confirm_action(interaction, "report_team2", match_id)
+
+                @discord.ui.button(label="📊 Match Details", style=discord.ButtonStyle.gray)
+                async def match_details(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    await self.show_match_details(interaction, match_id, match)
+
+                @discord.ui.button(label="🔙 Back to List", style=discord.ButtonStyle.secondary)
+                async def back_to_list(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    # Refresh the original match list
+                    await activematches_slash(interaction)
+
+                async def confirm_action(self, interaction, action, match_id):
+                    # Create confirmation embed
+                    action_names = {
+                        "stop": "🛑 Stop this match",
+                        "report_team1": "🏆 Report Team 1 as winners",
+                        "report_team2": "🏆 Report Team 2 as winners"
+                    }
+
+                    confirm_embed = discord.Embed(
+                        title="⚠️ Confirm Action",
+                        description=f"Are you sure you want to: **{action_names.get(action, action)}**?",
+                        color=0xff9900
+                    )
+                    confirm_embed.add_field(name="Match ID", value=f"`{match_id}`", inline=True)
+                    confirm_embed.add_field(name="Action", value=action_names.get(action, action), inline=True)
+
+                    class ConfirmView(discord.ui.View):
+                        def __init__(self):
+                            super().__init__(timeout=30)
+
+                        @discord.ui.button(label="✅ Confirm", style=discord.ButtonStyle.green)
+                        async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+                            await self.execute_action(interaction, action, match_id)
+
+                        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+                        async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+                            await interaction.response.edit_message(content="❌ Action cancelled.", embed=None,
+                                                                    view=None)
+
+                        async def execute_action(self, interaction, action, match_id):
+                            if action == "stop":
+                                # Stop the match
+                                success = system_coordinator.queue_manager.remove_match(match_id)
+                                if success:
+                                    embed = discord.Embed(
+                                        title="✅ Match Stopped",
+                                        description=f"Match `{match_id}` has been stopped and removed.",
+                                        color=0x00ff00
+                                    )
+                                else:
+                                    embed = discord.Embed(
+                                        title="❌ Error",
+                                        description=f"Failed to stop match `{match_id}`.",
+                                        color=0xff0000
+                                    )
+                                await interaction.response.edit_message(embed=embed, view=None)
+
+                            elif action.startswith("report_team"):
+                                # Report match result
+                                winner = 1 if action == "report_team1" else 2
+
+                                try:
+                                    # Update match in database
+                                    system_coordinator.match_system.matches.update_one(
+                                        {"match_id": match_id},
+                                        {"$set": {
+                                            "status": "completed",
+                                            "winner": winner,
+                                            "score": {"team1": 1 if winner == 1 else 0,
+                                                      "team2": 1 if winner == 2 else 0},
+                                            "completed_at": datetime.datetime.utcnow(),
+                                            "reported_by": str(interaction.user.id)
+                                        }}
+                                    )
+
+                                    # Remove from active matches
+                                    system_coordinator.queue_manager.remove_match(match_id)
+
+                                    # Get match for MMR updates
+                                    match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
+                                    if match:
+                                        winning_team = match.get("team1" if winner == 1 else "team2", [])
+                                        losing_team = match.get("team2" if winner == 1 else "team1", [])
+                                        system_coordinator.match_system.update_player_mmr(winning_team, losing_team,
+                                                                                          match_id)
+
+                                    embed = discord.Embed(
+                                        title="✅ Match Reported",
+                                        description=f"Match `{match_id}` has been reported with Team {winner} as winners.",
+                                        color=0x00ff00
+                                    )
+                                    embed.add_field(name="Winner", value=f"Team {winner}", inline=True)
+                                    embed.add_field(name="MMR", value="Updated for all players", inline=True)
+
+                                except Exception as e:
+                                    embed = discord.Embed(
+                                        title="❌ Error",
+                                        description=f"Failed to report match `{match_id}`: {str(e)}",
+                                        color=0xff0000
+                                    )
+
+                                await interaction.response.edit_message(embed=embed, view=None)
+
+                    await interaction.response.edit_message(embed=confirm_embed, view=ConfirmView())
+
+                async def show_match_details(self, interaction, match_id, match):
+                    # Create detailed match info
+                    detail_embed = discord.Embed(
+                        title=f"📊 Match Details: `{match_id}`",
+                        color=0x3498db
+                    )
+
+                    # Basic info
+                    detail_embed.add_field(name="Status", value=match.get('status', 'Unknown').title(), inline=True)
+                    detail_embed.add_field(name="Type", value="Global" if match.get('is_global') else "Ranked",
+                                           inline=True)
+                    detail_embed.add_field(name="Channel", value=f"<#{match.get('channel_id', 'Unknown')}>",
+                                           inline=True)
+
+                    # Time info
+                    created_at = match.get('created_at')
+                    if created_at:
+                        detail_embed.add_field(name="Created", value=f"<t:{int(created_at.timestamp())}:R>",
+                                               inline=True)
+
+                    # Players
+                    team1 = match.get('team1', [])
+                    team2 = match.get('team2', [])
+                    players = match.get('players', [])
+
+                    if team1 and team2:
+                        team1_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in team1])
+                        team2_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in team2])
+                        detail_embed.add_field(name="Team 1", value=team1_list or "None", inline=True)
+                        detail_embed.add_field(name="Team 2", value=team2_list or "None", inline=True)
+                    elif players:
+                        player_list = "\n".join([f"• {p.get('name', 'Unknown')}" for p in players])
+                        detail_embed.add_field(name="Players", value=player_list or "None", inline=False)
+
+                    class BackView(discord.ui.View):
+                        def __init__(self):
+                            super().__init__(timeout=60)
+
+                        @discord.ui.button(label="🔙 Back to Actions", style=discord.ButtonStyle.secondary)
+                        async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+                            await show_match_actions(interaction, match_id, match)
+
+                    await interaction.response.edit_message(embed=detail_embed, view=BackView())
+
+            await interaction.response.edit_message(embed=embed, view=MatchActionView())
+
+    # Create the view with the select menu
+    class ActiveMatchView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=300)  # 5 minute timeout
+            self.add_item(ActiveMatchSelect())
+
+    await interaction.response.send_message(embed=embed, view=ActiveMatchView())
 
 @bot.tree.command(name="purgechat", description="Clear chat messages")
 @app_commands.describe(amount_to_delete="Number of messages to delete (1-100)")
@@ -2952,7 +3201,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         color=0x00ff00
     )
 
-    # Define commands and descriptions with all current commands
+    # Define commands and descriptions with updated activematches command
     commands_dict = {
         # Queue Commands
         'queue': 'Join the queue for 6 mans matches in your current channel',
@@ -2973,7 +3222,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         'adminreport': 'Force report match results by specifying the winning team (Admin/Mod only)',
         'sub': 'Substitute or swap players in an active match (Admin/Mod only)',
         'forcestart': 'Force start a match with dummy players if needed (Admin/Mod only)',
-        'removeactivematches': 'Cancel all active matches in the current channel (Admin/Mod only)',
+        'activematches': 'Interactive management of active matches - stop, report, or view details (Admin/Mod only)',
         'removematch': 'Remove/reverse the results of a completed match (Admin/Mod only)',
 
         # Admin/Mod Player Management
@@ -3000,7 +3249,7 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
     queue_commands = ['queue', 'leave', 'status']
     match_commands = ['report', 'leaderboard', 'rank', 'streak']
     queue_admin_commands = ['addplayer', 'removeplayer']
-    match_admin_commands = ['adminreport', 'sub', 'forcestart', 'removeactivematches', 'removematch']
+    match_admin_commands = ['adminreport', 'sub', 'forcestart', 'activematches', 'removematch']  # Updated here
     player_admin_commands = ['adjustmmr', 'resetplayer', 'resetstreak']
     system_admin_commands = ['resetleaderboard', 'topstreaks', 'streakstats', 'checkpending', 'forceprocess']
     debug_commands = ['debugmmr', 'testmmr']
@@ -3099,12 +3348,12 @@ async def help_slash(interaction: discord.Interaction, command_name: str = None)
         inline=False
     )
 
-    # Add admin tools section
+    # Updated admin tools section with new activematches command
     embed.add_field(
         name="👑 Admin/Moderator Tools:",
         value=(
             "**Queue Control**: Add/remove players, force start matches\n"
-            "**Match Management**: Substitute players, remove matches, admin reports\n"
+            "**Match Management**: Interactive match control with `/activematches` - stop, report, or view any active match\n"
             "**Player Management**: Adjust MMR, reset player data, manage streaks\n"
             "**System Control**: Reset leaderboards, view analytics, debug tools\n"
             "**Role Management**: Check pending updates, force process roles\n"

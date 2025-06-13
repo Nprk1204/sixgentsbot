@@ -57,7 +57,7 @@ class MatchSystem:
 
     async def update_discord_role_with_queue(self, ctx, player_id, new_mmr, old_mmr=None, immediate_announcement=True):
         """
-        Queue a role update for 3am processing while optionally sending immediate feedback
+        Queue a role update for 3am processing while sending immediate promotion feedback
 
         Args:
             ctx: Discord context (can be interaction or regular context)
@@ -122,11 +122,17 @@ class MatchSystem:
 
             # Check if this is a promotion
             promotion = False
+            demotion = False
             if old_rank and new_rank != old_rank:
                 old_rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}.get(old_rank, 1)
                 new_rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}.get(new_rank, 1)
                 promotion = new_rank_value > old_rank_value
-                print(f"🎉 Promotion detected for player {player_id}: {old_rank} → {new_rank}")
+                demotion = new_rank_value < old_rank_value
+
+                if promotion:
+                    print(f"🎉 Promotion detected for player {player_id}: {old_rank} → {new_rank}")
+                elif demotion:
+                    print(f"📉 Demotion detected for player {player_id}: {old_rank} → {new_rank}")
 
             # Queue the role update for 3am
             success = self.bulk_role_manager.queue_role_update(
@@ -143,10 +149,10 @@ class MatchSystem:
             else:
                 print(f"❌ Failed to queue role update for {player_id}")
 
-            # Send immediate announcement if it's a promotion and immediate_announcement is True
-            if immediate_announcement and promotion and old_rank and new_rank and channel:
+            # FIXED: Send immediate announcement for ANY rank change (promotion or demotion)
+            if immediate_announcement and (promotion or demotion) and old_rank and new_rank and channel:
                 try:
-                    print(f"📢 Sending immediate promotion message for player {player_id}")
+                    print(f"📢 Sending immediate rank change message for player {player_id}")
 
                     # Fetch member for mention with safety checks
                     member = None
@@ -162,50 +168,114 @@ class MatchSystem:
                         return
 
                     if member:
-                        embed = discord.Embed(
-                            title="🎉 Rank Promotion!",
-                            description=f"Congratulations {member.mention}! You've been promoted to **{new_rank}**!",
-                            color=0x00ff00
+                        # FIXED: Send the actual promotion/demotion message
+                        await self.send_immediate_rank_change_message(
+                            channel, member, old_rank, new_rank, new_mmr, old_mmr, promotion
                         )
-                        embed.add_field(
-                            name="MMR Change",
-                            value=f"{old_mmr} → {new_mmr}",
-                            inline=True
-                        )
-                        embed.add_field(
-                            name="Previous Rank",
-                            value=old_rank,
-                            inline=True
-                        )
-                        embed.add_field(
-                            name="Discord Role Update",
-                            value="Your Discord role will be updated at 3:00 AM",
-                            inline=False
-                        )
-                        embed.set_footer(text="Keep up the great work!")
-
-                        # Send the promotion message
-                        try:
-                            if self.rate_limiter:
-                                await self.rate_limiter.send_message_with_limit(channel, embed=embed)
-                            else:
-                                await asyncio.sleep(random.uniform(1.0, 2.0))
-                                await channel.send(embed=embed)
-
-                            print(f"✅ Sent promotion message for {member.display_name}: {old_rank} → {new_rank}")
-                        except Exception as send_error:
-                            print(f"❌ Failed to send promotion message: {send_error}")
                     else:
-                        print(f"⚠️ Could not find member {player_id} to send promotion message")
+                        print(f"⚠️ Could not find member {player_id} to send rank change message")
 
                 except Exception as e:
-                    print(f"⚠️ Could not send immediate promotion announcement: {e}")
+                    print(f"⚠️ Could not send immediate rank change announcement: {e}")
 
         except Exception as e:
             print(f"❌ Error in update_discord_role_with_queue: {e}")
             import traceback
             traceback.print_exc()
             # Don't let role update errors break the match reporting process
+
+    async def send_immediate_rank_change_message(self, channel, member, old_rank, new_rank, new_mmr, old_mmr,
+                                                 is_promotion):
+        """Send immediate rank change message with enhanced formatting"""
+        try:
+            # Determine message type and color
+            if is_promotion:
+                title = "🎉 RANK PROMOTION!"
+                description = f"Congratulations {member.mention}! You've been promoted!"
+                color = 0x00ff00  # Green
+            else:
+                title = "📉 Rank Change"
+                description = f"{member.mention}, your rank has changed."
+                color = 0xff9900  # Orange
+
+            # Create embed
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=color
+            )
+
+            # Add rank change info
+            embed.add_field(
+                name="🔄 Rank Change",
+                value=f"**{old_rank}** → **{new_rank}**",
+                inline=True
+            )
+
+            embed.add_field(
+                name="📊 MMR Change",
+                value=f"{old_mmr} → **{new_mmr}** ({new_mmr - old_mmr:+d})",
+                inline=True
+            )
+
+            embed.add_field(
+                name="👑 Discord Role",
+                value="Will be updated at 3:00 AM",
+                inline=True
+            )
+
+            # Add motivational message based on change type and new rank
+            if is_promotion:
+                if new_rank == "Rank A":
+                    embed.add_field(
+                        name="🏆 Achievement Unlocked",
+                        value="You've reached the highest rank! Elite tier achieved!",
+                        inline=False
+                    )
+                elif new_rank == "Rank B":
+                    embed.add_field(
+                        name="📈 Great Progress",
+                        value="You're climbing the ranks! Rank A is within reach!",
+                        inline=False
+                    )
+                else:
+                    embed.add_field(
+                        name="🚀 Keep Going",
+                        value="Great improvement! Keep playing to climb higher!",
+                        inline=False
+                    )
+            else:
+                # Demotion - be encouraging
+                embed.add_field(
+                    name="💪 Stay Strong",
+                    value="Every setback is a setup for a comeback! You've got this!",
+                    inline=False
+                )
+
+            # Add protection info if applicable
+            if is_promotion:
+                embed.add_field(
+                    name="🛡️ Promotion Protection",
+                    value="Next 3 games: 50% loss reduction",
+                    inline=False
+                )
+
+            embed.set_thumbnail(url=member.avatar.url if member.avatar else member.default_avatar.url)
+            embed.set_footer(text="Role update scheduled for 3:00 AM daily")
+            embed.timestamp = datetime.datetime.utcnow()
+
+            # Send with rate limiting
+            if self.rate_limiter:
+                await self.rate_limiter.send_message_with_limit(channel, embed=embed)
+                print(f"✅ Sent immediate rank change message for {member.display_name}: {old_rank} → {new_rank}")
+            else:
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+                await channel.send(embed=embed)
+                print(f"✅ Sent rank change message for {member.display_name}: {old_rank} → {new_rank}")
+
+        except Exception as e:
+            print(f"❌ Error sending rank change message for {member.display_name}: {e}")
+            # Don't let this error break the match reporting process
 
     async def update_discord_role_ultra_safe(self, ctx, player_id, new_mmr):
         """ULTRA-SAFE Discord role update method with extreme rate limiting protection"""

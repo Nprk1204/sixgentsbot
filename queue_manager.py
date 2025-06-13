@@ -136,24 +136,88 @@ class QueueManager:
 
                 print(f"Removed {result.deleted_count} inactive players from queue")
 
-                # Send notifications
+                # Send notifications with enhanced embeds
                 for player in expired_players:
                     player_id = player.get('id')
                     player_mention = player.get('mention')
+                    player_name = player.get('name', 'Unknown Player')
                     channel_id = player.get('channel_id')
+                    joined_at = player.get('joined_at')
+                    is_global = player.get('is_global', False)
 
                     if self.bot and channel_id:
                         try:
                             channel = self.bot.get_channel(int(channel_id))
                             if channel:
-                                await channel.send(
-                                    f"{player_mention} has been removed from the queue due to inactivity (60+ minutes)."
+                                # Calculate how long they were in queue
+                                time_in_queue = "60+ minutes"
+                                if joined_at:
+                                    duration = datetime.datetime.utcnow() - joined_at
+                                    hours = int(duration.total_seconds() // 3600)
+                                    minutes = int((duration.total_seconds() % 3600) // 60)
+
+                                    if hours > 0:
+                                        time_in_queue = f"{hours}h {minutes}m"
+                                    else:
+                                        time_in_queue = f"{minutes}m"
+
+                                # Create enhanced timeout embed
+                                embed = discord.Embed(
+                                    title="⏰ Queue Timeout",
+                                    description=f"{player_mention} has been automatically removed from the queue due to inactivity.",
+                                    color=0xff9900
                                 )
+
+                                embed.add_field(
+                                    name="⏱️ Time in Queue",
+                                    value=time_in_queue,
+                                    inline=True
+                                )
+
+                                embed.add_field(
+                                    name="🎮 Queue Type",
+                                    value="Global Queue" if is_global else f"#{channel.name.title()} Queue",
+                                    inline=True
+                                )
+
+                                embed.add_field(
+                                    name="📢 Reason",
+                                    value="60+ minutes of inactivity",
+                                    inline=True
+                                )
+
+                                embed.add_field(
+                                    name="🔄 To Rejoin",
+                                    value="Simply use `/queue` again when you're ready to play!",
+                                    inline=False
+                                )
+
+                                embed.add_field(
+                                    name="💡 Tip",
+                                    value="Stay active in Discord to avoid timeouts, or leave and rejoin the queue when ready.",
+                                    inline=False
+                                )
+
+                                embed.set_footer(text="Queue management system • Stay active to avoid timeouts")
+                                embed.timestamp = datetime.datetime.utcnow()
+
+                                # Add player avatar if possible
+                                try:
+                                    if player_id and player_id.isdigit():
+                                        member = await channel.guild.fetch_member(int(player_id))
+                                        if member and member.avatar:
+                                            embed.set_thumbnail(url=member.avatar.url)
+                                except:
+                                    pass  # Avatar is optional
+
+                                await channel.send(embed=embed)
+                                print(f"✅ Sent timeout notification for {player_name} in #{channel.name}")
+
                         except Exception as e:
-                            print(f"Error sending queue timeout notification: {e}")
+                            print(f"❌ Error sending queue timeout notification: {e}")
 
             except Exception as e:
-                print(f"Error in remove_inactive_players task: {e}")
+                print(f"❌ Error in remove_inactive_players task: {e}")
 
     async def add_player(self, player, channel):
         """Add a player to the queue for a specific channel"""
