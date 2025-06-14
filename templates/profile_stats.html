@@ -11,24 +11,24 @@
 <div class="content-container">
     <!-- Enhanced Header -->
     <div class="content-header">
-        <div class="row align-items-center">
-            <div class="col-md-8">
+        <div class="d-flex justify-content-between align-items-start w-100">
+            <div class="header-left">
                 <h2><i class="fas fa-chart-line me-2"></i> Detailed Statistics</h2>
-                <div class="user-indicator d-flex align-items-center">
+                <div class="user-indicator">
                     <i class="fas fa-user me-2"></i>
-                    <span class="me-2">{{ user.global_name or user.username }}</span>
+                    <span class="user-name">{{ user.global_name or user.username }}</span>
                     {% if rank_data %}
                         {% if rank_data.tier == 'Rank A' %}
-                            <span class="badge bg-danger">{{ rank_data.tier }}</span>
+                            <span class="badge bg-danger ms-2">{{ rank_data.tier }}</span>
                         {% elif rank_data.tier == 'Rank B' %}
-                            <span class="badge bg-primary">{{ rank_data.tier }}</span>
+                            <span class="badge bg-primary ms-2">{{ rank_data.tier }}</span>
                         {% elif rank_data.tier == 'Rank C' %}
-                            <span class="badge bg-success">{{ rank_data.tier }}</span>
+                            <span class="badge bg-success ms-2">{{ rank_data.tier }}</span>
                         {% endif %}
                     {% endif %}
                 </div>
             </div>
-            <div class="col-md-4 text-md-end">
+            <div class="header-right">
                 <button class="btn btn-outline-primary" onclick="refreshStats()">
                     <i class="fas fa-sync-alt me-1"></i> Refresh
                 </button>
@@ -314,8 +314,8 @@
 
                 <!-- Enhanced Career Summary Section -->
                 <div class="row">
-                    <div class="col-lg-8">
-                        <!-- Recent Activity -->
+                    <!-- Recent Activity - now full width -->
+                    <div class="col-12 mb-4">
                         {% if recent_matches and recent_matches|length > 0 %}
                         <div class="card bg-dark-medium">
                             <div class="card-header">
@@ -379,12 +379,13 @@
                         {% endif %}
                     </div>
 
-                    <div class="col-lg-4">
-                        <!-- Enhanced Career Summary Card -->
+                    <!-- Career Summary Cards in Grid Layout -->
+                    <div class="col-lg-4 mb-4">
+                        <!-- Overall Performance Card -->
                         <div class="card bg-dark-medium h-100">
                             <div class="card-header">
                                 <h5 class="mb-0">
-                                    <i class="fas fa-award me-2"></i> Career Summary
+                                    <i class="fas fa-chart-bar me-2"></i> Overall Performance
                                 </h5>
                             </div>
                             <div class="card-body">
@@ -392,102 +393,132 @@
                                 {% set total_wins = (player_data.wins or 0) + (player_data.global_wins or 0) %}
                                 {% set total_losses = (player_data.losses or 0) + (player_data.global_losses or 0) %}
 
-                                <!-- Overall Stats -->
-                                <div class="summary-section mb-4">
-                                    <h6 class="text-info mb-3">
-                                        <i class="fas fa-chart-bar me-1"></i> Overall Performance
-                                    </h6>
-                                    <div class="summary-stat mb-3">
-                                        <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
-                                            <div class="d-flex align-items-center">
-                                                <i class="fas fa-gamepad text-info me-2"></i>
-                                                <span>Total Matches</span>
-                                            </div>
-                                            <span class="fw-bold fs-5">{{ total_matches }}</span>
+                                <div class="summary-stat mb-3">
+                                    <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-gamepad text-info me-2"></i>
+                                            <span>Total Matches</span>
                                         </div>
-                                    </div>
-                                    <div class="summary-stat mb-3">
-                                        <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
-                                            <div class="d-flex align-items-center">
-                                                <i class="fas fa-trophy text-success me-2"></i>
-                                                <span>Total Wins</span>
-                                            </div>
-                                            <span class="fw-bold fs-5 text-success">{{ total_wins }}</span>
-                                        </div>
-                                    </div>
-                                    <div class="summary-stat mb-3">
-                                        <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
-                                            <div class="d-flex align-items-center">
-                                                <i class="fas fa-percentage text-primary me-2"></i>
-                                                <span>Overall Win Rate</span>
-                                            </div>
-                                            <span class="fw-bold fs-5 text-primary">{{ "%.1f"|format((total_wins / total_matches * 100) if total_matches > 0 else 0) }}%</span>
-                                        </div>
+                                        <span class="fw-bold fs-5">{{ total_matches }}</span>
                                     </div>
                                 </div>
-
-                                <!-- Peak MMR Section -->
-                                <div class="summary-section mb-4">
-                                    <h6 class="text-warning mb-3">
-                                        <i class="fas fa-mountain me-1"></i> Peak Performance
-                                    </h6>
-                                    {% if has_ranked_stats %}
-                                    <div class="summary-stat mb-2">
-                                        <div class="d-flex justify-content-between align-items-center p-2 bg-dark rounded">
-                                            <span class="small">
-                                                <i class="fas fa-trophy me-1 text-warning"></i> Ranked MMR
-                                            </span>
-                                            <span class="fw-bold text-warning">{{ player_data.mmr or 0 }}</span>
+                                <div class="summary-stat mb-3">
+                                    <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-trophy text-success me-2"></i>
+                                            <span>Total Wins</span>
                                         </div>
+                                        <span class="fw-bold fs-5 text-success">{{ total_wins }}</span>
                                     </div>
-                                    {% endif %}
-                                    {% if has_global_stats %}
-                                    <div class="summary-stat mb-2">
-                                        <div class="d-flex justify-content-between align-items-center p-2 bg-dark rounded">
-                                            <span class="small">
-                                                <i class="fas fa-globe me-1 text-primary"></i> Global MMR
-                                            </span>
-                                            <span class="fw-bold text-primary">{{ player_data.global_mmr or 300 }}</span>
-                                        </div>
-                                    </div>
-                                    {% endif %}
                                 </div>
-
-                                <!-- Streaks Section -->
-                                <div class="summary-section">
-                                    <h6 class="text-danger mb-3">
-                                        <i class="fas fa-fire me-1"></i> Best Streaks
-                                    </h6>
-                                    {% set ranked_best_streak = player_data.longest_win_streak or 0 %}
-                                    {% set global_best_streak = player_data.global_longest_win_streak or 0 %}
-                                    {% set best_overall_streak = ranked_best_streak if ranked_best_streak > global_best_streak else global_best_streak %}
-
-                                    {% if best_overall_streak > 0 %}
-                                    <div class="text-center">
-                                        <div class="streak-display-large mb-3">
-                                            <div class="display-6 text-warning fw-bold">{{ best_overall_streak }}</div>
-                                            <div class="text-muted small">Longest Win Streak</div>
+                                <div class="summary-stat mb-0">
+                                    <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
+                                        <div class="d-flex align-items-center">
+                                            <i class="fas fa-percentage text-primary me-2"></i>
+                                            <span>Overall Win Rate</span>
                                         </div>
-                                        {% if ranked_best_streak > 0 and global_best_streak > 0 %}
-                                        <div class="row text-center">
-                                            <div class="col-6">
+                                        <span class="fw-bold fs-5 text-primary">{{ "%.1f"|format((total_wins / total_matches * 100) if total_matches > 0 else 0) }}%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4 mb-4">
+                        <!-- Peak Performance Card -->
+                        <div class="card bg-dark-medium h-100">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-mountain me-2"></i> Peak Performance
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                {% if has_ranked_stats %}
+                                <div class="summary-stat mb-3">
+                                    <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
+                                        <span class="d-flex align-items-center">
+                                            <i class="fas fa-trophy me-2 text-warning"></i> Ranked MMR
+                                        </span>
+                                        <span class="fw-bold text-warning fs-5">{{ player_data.mmr or 0 }}</span>
+                                    </div>
+                                </div>
+                                {% endif %}
+                                {% if has_global_stats %}
+                                <div class="summary-stat mb-3">
+                                    <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
+                                        <span class="d-flex align-items-center">
+                                            <i class="fas fa-globe me-2 text-primary"></i> Global MMR
+                                        </span>
+                                        <span class="fw-bold text-primary fs-5">{{ player_data.global_mmr or 300 }}</span>
+                                    </div>
+                                </div>
+                                {% endif %}
+
+                                <!-- Rank Display -->
+                                {% if rank_data %}
+                                <div class="summary-stat mb-0">
+                                    <div class="d-flex justify-content-between align-items-center p-3 bg-dark rounded">
+                                        <span class="d-flex align-items-center">
+                                            <i class="fas fa-medal me-2 text-info"></i> Current Rank
+                                        </span>
+                                        <span class="fw-bold">
+                                            {% if rank_data.tier == 'Rank A' %}
+                                                <span class="badge bg-danger">{{ rank_data.tier }}</span>
+                                            {% elif rank_data.tier == 'Rank B' %}
+                                                <span class="badge bg-primary">{{ rank_data.tier }}</span>
+                                            {% else %}
+                                                <span class="badge bg-success">{{ rank_data.tier }}</span>
+                                            {% endif %}
+                                        </span>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4 mb-4">
+                        <!-- Best Streaks Card -->
+                        <div class="card bg-dark-medium h-100">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-fire me-2"></i> Best Streaks
+                                </h5>
+                            </div>
+                            <div class="card-body d-flex flex-column">
+                                {% set ranked_best_streak = player_data.longest_win_streak or 0 %}
+                                {% set global_best_streak = player_data.global_longest_win_streak or 0 %}
+                                {% set best_overall_streak = ranked_best_streak if ranked_best_streak > global_best_streak else global_best_streak %}
+
+                                {% if best_overall_streak > 0 %}
+                                <div class="text-center flex-grow-1 d-flex flex-column justify-content-center">
+                                    <div class="streak-display-large mb-3">
+                                        <div class="display-6 text-warning fw-bold">{{ best_overall_streak }}</div>
+                                        <div class="text-muted small">Longest Win Streak</div>
+                                    </div>
+                                    {% if ranked_best_streak > 0 and global_best_streak > 0 %}
+                                    <div class="row text-center mt-auto">
+                                        <div class="col-6">
+                                            <div class="p-2 bg-dark rounded">
                                                 <div class="small text-muted">Ranked</div>
                                                 <div class="fw-bold text-warning">{{ ranked_best_streak }}</div>
                                             </div>
-                                            <div class="col-6">
+                                        </div>
+                                        <div class="col-6">
+                                            <div class="p-2 bg-dark rounded">
                                                 <div class="small text-muted">Global</div>
                                                 <div class="fw-bold text-primary">{{ global_best_streak }}</div>
                                             </div>
                                         </div>
-                                        {% endif %}
-                                    </div>
-                                    {% else %}
-                                    <div class="text-center text-muted">
-                                        <i class="fas fa-clock fa-2x mb-2 opacity-50"></i>
-                                        <p class="small mb-0">Start winning to track your streaks!</p>
                                     </div>
                                     {% endif %}
                                 </div>
+                                {% else %}
+                                <div class="text-center flex-grow-1 d-flex flex-column justify-content-center">
+                                    <i class="fas fa-clock fa-3x mb-3 text-muted opacity-50"></i>
+                                    <p class="small mb-0 text-muted">Start winning to track your streaks!</p>
+                                </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -644,6 +675,114 @@
                                                 <th><i class="fas fa-info-circle me-1"></i> Details</th>
                                             </tr>
                                         </thead>
+                                        <tbody id="matchHistoryTableBody">
+                                            {% for match in recent_matches %}
+                                            <tr class="match-row" data-type="{{ 'global' if match.is_global else 'ranked' }}">
+                                                <td class="match-date-display">{{ match.date }}</td>
+                                                <td>
+                                                    {% if match.is_global %}
+                                                        <span class="badge bg-primary rounded-pill">
+                                                            <i class="fas fa-globe me-1"></i> Global
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="badge bg-warning rounded-pill">
+                                                            <i class="fas fa-trophy me-1"></i> Ranked
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if match.player_result == 'Win' %}
+                                                        <span class="badge bg-success rounded-pill">
+                                                            <i class="fas fa-trophy me-1"></i> Win
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="badge bg-danger rounded-pill">
+                                                            <i class="fas fa-times me-1"></i> Loss
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if match.mmr_change %}
+                                                        {% if match.mmr_change > 0 %}
+                                                            <span class="text-success fw-bold">
+                                                                <i class="fas fa-arrow-up me-1"></i> +{{ match.mmr_change }}
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="text-danger fw-bold">
+                                                                <i class="fas fa-arrow-down me-1"></i> {{ match.mmr_change }}
+                                                            </span>
+                                                        {% endif %}
+                                                    {% else %}
+                                                        <span class="text-muted">—</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if match.streak_display %}
+                                                        <span class="streak-indicator">{{ match.streak_display }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted">—</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-outline-primary" onclick="showMatchDetails('{{ loop.index0 }}')">
+                                                        <i class="fas fa-eye"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+
+                                <!-- Match Statistics Summary -->
+                                <div class="row mt-4">
+                                    <div class="col-md-4">
+                                        <div class="stat-summary-card">
+                                            <div class="d-flex align-items-center">
+                                                <i class="fas fa-gamepad fa-2x text-info me-3"></i>
+                                                <div>
+                                                    <div class="h4 mb-0" id="totalMatchesCount">{{ recent_matches|length }}</div>
+                                                    <small class="text-muted">Total Matches</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="stat-summary-card">
+                                            <div class="d-flex align-items-center">
+                                                {% set match_wins = recent_matches | selectattr("player_result", "equalto", "Win") | list | length %}
+                                                <i class="fas fa-trophy fa-2x text-success me-3"></i>
+                                                <div>
+                                                    <div class="h4 mb-0 text-success" id="totalWinsCount">{{ match_wins }}</div>
+                                                    <small class="text-muted">Wins</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <div class="stat-summary-card">
+                                            <div class="d-flex align-items-center">
+                                                {% set match_losses = recent_matches | selectattr("player_result", "equalto", "Loss") | list | length %}
+                                                <i class="fas fa-times fa-2x text-danger me-3"></i>
+                                                <div>
+                                                    <div class="h4 mb-0 text-danger" id="totalLossesCount">{{ match_losses }}</div>
+                                                    <small class="text-muted">Losses</small>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% else %}
+                                <!-- No Match History Available -->
+                                <div class="text-center py-5">
+                                    <i class="fas fa-history fa-4x text-muted mb-3 empty-state-icon"></i>
+                                    <h6>No Match History</h6>
+                                    <p class="text-muted">Start playing to see your matches here!</p>
+                                    <a href="{{ url_for('home') }}" class="btn btn-primary">
+                                        <i class="fas fa-gamepad me-1"></i> Learn How to Play
+                                    </a>
+                                </div>
+                                {% endif %}d>
                                         <tbody id="matchHistoryTableBody">
                                             {% for match in recent_matches %}
                                             <tr class="match-row" data-type="{{ 'global' if match.is_global else 'ranked' }}">
@@ -919,14 +1058,31 @@
 {% block extra_css %}
 <style>
 /* Enhanced header layout */
-.content-header .row {
-    align-items: center;
+.content-header {
+    margin-bottom: 2rem;
+}
+
+.content-header .d-flex {
+    align-items: flex-start;
+}
+
+.header-left h2 {
+    margin-bottom: 0.5rem;
 }
 
 .user-indicator {
     font-size: 0.9rem;
     color: var(--text-muted);
-    margin-top: 0.25rem;
+    margin-left: 1.5rem; /* Indent the user name */
+}
+
+.user-name {
+    font-weight: 500;
+    color: var(--text);
+}
+
+.header-right {
+    margin-left: auto;
 }
 
 /* Enhanced career summary */
@@ -1093,12 +1249,19 @@
 
 /* Responsive enhancements */
 @media (max-width: 992px) {
-    .content-header .row {
-        text-align: center;
+    .content-header .d-flex {
+        flex-direction: column;
+        align-items: flex-start !important;
     }
 
-    .content-header .col-md-4 {
+    .header-right {
+        margin-left: 0;
         margin-top: 1rem;
+        align-self: flex-end;
+    }
+
+    .user-indicator {
+        margin-left: 1rem; /* Reduce indent on smaller screens */
     }
 
     .match-filters {
@@ -1224,12 +1387,13 @@ function updateFilteredStats(type) {
     });
 
     // Update the summary cards if they exist
-    const summaryCards = document.querySelectorAll('.stat-summary-card');
-    if (summaryCards.length >= 3) {
-        summaryCards[0].querySelector('.h4').textContent = totalMatches;
-        summaryCards[1].querySelector('.h4').textContent = wins;
-        summaryCards[2].querySelector('.h4').textContent = losses;
-    }
+    const totalMatchesEl = document.getElementById('totalMatchesCount');
+    const totalWinsEl = document.getElementById('totalWinsCount');
+    const totalLossesEl = document.getElementById('totalLossesCount');
+
+    if (totalMatchesEl) totalMatchesEl.textContent = totalMatches;
+    if (totalWinsEl) totalWinsEl.textContent = wins;
+    if (totalLossesEl) totalLossesEl.textContent = losses;
 }
 
 function showMatchDetails(matchIndex) {
