@@ -35,15 +35,9 @@
     <header class="main-header">
         <div class="container">
             <div class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <img src="{{ url_for('static', filename='img/logo.png') }}"
-                         alt="Six Gents Logo"
-                         class="me-3"
-                         style="height: 60px; width: auto;">
-                    <div>
-                        <h1 class="site-title">Rocket League Six Gents</h1>
-                        <p class="site-subtitle">Discord Bot Leaderboard & Stats</p>
-                    </div>
+                <div>
+                    <h1 class="site-title">Rocket League Six Gents</h1>
+                    <p class="site-subtitle">Discord Bot Leaderboard & Stats</p>
                 </div>
                 <div class="auth-section">
                     {% if current_user %}
