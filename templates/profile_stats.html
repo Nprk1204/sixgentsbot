@@ -626,6 +626,8 @@
                 {% endif %}
             </div>
             {% endif %}
+            </div>
+            {% endif %}
 
             <!-- Enhanced Match History Tab -->
             <div class="tab-pane fade" id="match-history" role="tabpanel">
@@ -675,7 +677,7 @@
                                                 <th><i class="fas fa-info-circle me-1"></i> Details</th>
                                             </tr>
                                         </thead>
-                                        <tbody id="matchHistoryTableBody">
+                                        <tbody>
                                             {% for match in recent_matches %}
                                             <tr class="match-row" data-type="{{ 'global' if match.is_global else 'ranked' }}">
                                                 <td class="match-date-display">{{ match.date }}</td>
