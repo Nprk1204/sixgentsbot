@@ -410,17 +410,111 @@ def leaderboard_by_type(board_type):
 @app.route('/profile')
 @login_required
 def profile():
-    """Display the user's profile page"""
+    """Display the user's profile page with current stats"""
     try:
         user = get_current_user()
         if not user:
             flash('Please log in to view your profile.', 'error')
             return redirect(url_for('discord_login'))
 
-        return render_template('profile.html', user=user)
+        print(f"Loading profile for user: {user.get('username')} (ID: {user.get('id')})")
+
+        # Get player data from database
+        player_data = None
+        try:
+            player_data = players_collection.find_one({"id": user['id']})
+            print(f"Player data found: {player_data is not None}")
+        except Exception as db_error:
+            print(f"Database error fetching player: {db_error}")
+
+        # Get rank verification data
+        rank_data = None
+        try:
+            rank_data = ranks_collection.find_one({"discord_id": user['id']})
+            print(f"Rank data found: {rank_data is not None}")
+        except Exception as rank_error:
+            print(f"Error fetching rank data: {rank_error}")
+
+        # Get recent matches for the player
+        recent_matches = []
+        if player_data:
+            try:
+                print("Fetching recent matches...")
+                match_history = list(matches_collection.find({
+                    "$or": [
+                        {"team1.id": user['id']},
+                        {"team2.id": user['id']}
+                    ],
+                    "status": "completed"
+                }).sort("completed_at", -1).limit(10))
+
+                print(f"Found {len(match_history)} recent matches")
+
+                # Process match history
+                for match in match_history:
+                    try:
+                        # Determine if player won
+                        player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
+                        winner = match.get("winner")
+                        player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+
+                        # Get completed date
+                        completed_at = match.get('completed_at')
+                        if not completed_at:
+                            continue
+
+                        match_data = {
+                            'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(completed_at),
+                            'player_result': 'Win' if player_won else 'Loss',
+                            'is_global': match.get("is_global", False),
+                            'mmr_change': 0
+                        }
+
+                        # Find MMR change for this player
+                        mmr_changes = match.get("mmr_changes", [])
+                        for mmr_change in mmr_changes:
+                            if mmr_change.get("player_id") == user['id']:
+                                match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                                break
+
+                        recent_matches.append(match_data)
+
+                    except Exception as process_error:
+                        print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
+                        continue
+
+            except Exception as match_error:
+                print(f"Error fetching match history: {match_error}")
+
+        print(f"Processed {len(recent_matches)} matches for profile")
+
+        # If no player data exists, create default structure
+        if not player_data:
+            player_data = {
+                'id': user['id'],
+                'name': user.get('global_name') or user.get('username'),
+                'mmr': 0,
+                'global_mmr': 300,
+                'wins': 0,
+                'losses': 0,
+                'matches': 0,
+                'global_wins': 0,
+                'global_losses': 0,
+                'global_matches': 0,
+                'current_streak': 0,
+                'global_current_streak': 0
+            }
+
+        return render_template('profile.html',
+                             user=user,
+                             player_data=player_data,
+                             rank_data=rank_data,
+                             recent_matches=recent_matches)
 
     except Exception as e:
         print(f"Error in profile route: {e}")
+        import traceback
+        traceback.print_exc()
         flash('An error occurred loading your profile.', 'error')
         return redirect(url_for('home'))
 

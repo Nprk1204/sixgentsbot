@@ -16,25 +16,49 @@
                     <div class="mb-3">
                         {% if user.avatar %}
                             <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png?size=128"
-                                 alt="Avatar" class="rounded-circle" width="128" height="128">
+                                 alt="Avatar" class="rounded-circle profile-avatar" width="128" height="128">
                         {% else %}
-                            <div class="default-avatar rounded-circle d-flex align-items-center justify-content-center mx-auto"
+                            <div class="default-avatar rounded-circle d-flex align-items-center justify-content-center mx-auto profile-avatar"
                                  style="width: 128px; height: 128px; background: var(--primary);">
                                 <i class="fas fa-user fa-3x text-white"></i>
                             </div>
                         {% endif %}
                     </div>
                     <h4 class="mb-2">{{ user.global_name or user.username }}</h4>
+                    <p class="text-muted mb-3">
+                        <i class="fab fa-discord me-1"></i> Discord Member
+                    </p>
+
+                    <!-- Rank Badge -->
+                    {% if rank_data %}
+                        {% if rank_data.tier == 'Rank A' %}
+                            <div class="rank-badge rank-a mb-3">
+                                <i class="fas fa-trophy me-2"></i>
+                                <span class="badge bg-danger fs-6 px-3 py-2">{{ rank_data.tier }}</span>
+                            </div>
+                        {% elif rank_data.tier == 'Rank B' %}
+                            <div class="rank-badge rank-b mb-3">
+                                <i class="fas fa-award me-2"></i>
+                                <span class="badge bg-primary fs-6 px-3 py-2">{{ rank_data.tier }}</span>
+                            </div>
+                        {% elif rank_data.tier == 'Rank C' %}
+                            <div class="rank-badge rank-c mb-3">
+                                <i class="fas fa-medal me-2"></i>
+                                <span class="badge bg-success fs-6 px-3 py-2">{{ rank_data.tier }}</span>
+                            </div>
+                        {% endif %}
+                    {% else %}
+                        <div class="rank-badge mb-3">
+                            <i class="fas fa-question-circle me-2 text-muted"></i>
+                            <span class="badge bg-secondary fs-6 px-3 py-2">Unverified</span>
+                        </div>
+                    {% endif %}
 
                     {% if user.guild_member %}
                         <div class="guild-info">
-                            <h6 class="text-primary mb-2">Server Member</h6>
-                            {% if user.guild_member.roles %}
-                                <div class="roles mb-2">
-                                    <small class="text-muted">Roles:</small>
-                                    <!-- Role display would go here if needed -->
-                                </div>
-                            {% endif %}
+                            <h6 class="text-primary mb-2">
+                                <i class="fas fa-server me-1"></i> Server Member
+                            </h6>
                         </div>
                     {% endif %}
                 </div>
@@ -50,9 +74,11 @@
                         <a href="{{ url_for('profile_stats') }}" class="btn btn-primary">
                             <i class="fas fa-chart-line me-2"></i> View Detailed Stats
                         </a>
-                        <a href="{{ url_for('profile_rank_check') }}" class="btn btn-secondary">
-                            <i class="fas fa-check-circle me-2"></i> Verify Rank
-                        </a>
+                        {% if not rank_data %}
+                            <a href="{{ url_for('profile_rank_check') }}" class="btn btn-warning">
+                                <i class="fas fa-check-circle me-2"></i> Verify Rank
+                            </a>
+                        {% endif %}
                         <a href="{{ url_for('leaderboard') }}" class="btn btn-outline-primary">
                             <i class="fas fa-trophy me-2"></i> View Leaderboard
                         </a>
@@ -62,77 +88,285 @@
         </div>
 
         <div class="col-lg-8">
-            <!-- Profile Overview -->
-            <div class="card bg-dark-medium mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> Profile Overview</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="feature-card p-3 rounded mb-3" style="background: rgba(0, 168, 255, 0.1); border-left: 4px solid var(--primary);">
-                                <h6 class="text-primary mb-2">
-                                    <i class="fas fa-chart-line me-2"></i> Detailed Statistics
-                                </h6>
-                                <p class="mb-2">View comprehensive performance analytics, MMR history, match trends, and more.</p>
-                                <a href="{{ url_for('profile_stats') }}" class="btn btn-sm btn-primary">View Stats</a>
+            {% if player_data and (player_data.matches > 0 or player_data.global_matches > 0) %}
+                <!-- Player Stats Overview -->
+                <div class="row mb-4">
+                    <!-- Ranked Stats -->
+                    {% if player_data.matches > 0 %}
+                    <div class="col-md-6">
+                        <div class="card bg-dark-medium h-100">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-trophy me-2 text-warning"></i> Ranked Performance
+                                </h5>
                             </div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="feature-card p-3 rounded mb-3" style="background: rgba(255, 126, 49, 0.1); border-left: 4px solid var(--secondary);">
-                                <h6 class="text-secondary mb-2">
-                                    <i class="fas fa-check-circle me-2"></i> Rank Verification
-                                </h6>
-                                <p class="mb-2">Verify your Rocket League rank to get the appropriate Discord role and starting MMR.</p>
-                                <a href="{{ url_for('profile_rank_check') }}" class="btn btn-sm btn-secondary">Verify Rank</a>
+                            <div class="card-body">
+                                <div class="text-center mb-3">
+                                    <div class="display-4 text-primary fw-bold">{{ player_data.mmr or 0 }}</div>
+                                    <div class="text-muted">Current MMR</div>
+                                </div>
+
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <div class="stat-item">
+                                            <div class="stat-value text-info">{{ player_data.matches or 0 }}</div>
+                                            <div class="stat-label">Matches</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stat-item">
+                                            <div class="stat-value text-success">{{ player_data.wins or 0 }}</div>
+                                            <div class="stat-label">Wins</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stat-item">
+                                            <div class="stat-value text-danger">{{ player_data.losses or 0 }}</div>
+                                            <div class="stat-label">Losses</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mt-3 text-center">
+                                    {% set win_rate = (player_data.wins / player_data.matches * 100) if player_data.matches > 0 else 0 %}
+                                    <div class="progress mb-2" style="height: 8px;">
+                                        <div class="progress-bar bg-success" role="progressbar"
+                                             style="width: {{ win_rate }}%" aria-valuenow="{{ win_rate }}"
+                                             aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                    <small class="text-muted">{{ "%.1f"|format(win_rate) }}% Win Rate</small>
+                                </div>
+
+                                <!-- Current Streak -->
+                                {% if player_data.current_streak %}
+                                    <div class="mt-3 text-center">
+                                        {% if player_data.current_streak > 0 %}
+                                            <span class="badge bg-success">
+                                                <i class="fas fa-fire me-1"></i> {{ player_data.current_streak }} Win Streak
+                                            </span>
+                                        {% elif player_data.current_streak < 0 %}
+                                            <span class="badge bg-danger">
+                                                <i class="fas fa-arrow-down me-1"></i> {{ abs(player_data.current_streak) }} Loss Streak
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
+                    {% endif %}
 
-            <!-- Recent Activity -->
-            <div class="card bg-dark-medium">
-                <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-clock me-2"></i> Welcome to Six Gents!</h5>
+                    <!-- Global Stats -->
+                    {% if player_data.global_matches > 0 %}
+                    <div class="col-md-6">
+                        <div class="card bg-dark-medium h-100">
+                            <div class="card-header">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-globe me-2 text-primary"></i> Global Performance
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="text-center mb-3">
+                                    <div class="display-4 text-primary fw-bold">{{ player_data.global_mmr or 300 }}</div>
+                                    <div class="text-muted">Global MMR</div>
+                                </div>
+
+                                <div class="row text-center">
+                                    <div class="col-4">
+                                        <div class="stat-item">
+                                            <div class="stat-value text-info">{{ player_data.global_matches or 0 }}</div>
+                                            <div class="stat-label">Matches</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stat-item">
+                                            <div class="stat-value text-success">{{ player_data.global_wins or 0 }}</div>
+                                            <div class="stat-label">Wins</div>
+                                        </div>
+                                    </div>
+                                    <div class="col-4">
+                                        <div class="stat-item">
+                                            <div class="stat-value text-danger">{{ player_data.global_losses or 0 }}</div>
+                                            <div class="stat-label">Losses</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="mt-3 text-center">
+                                    {% set global_win_rate = (player_data.global_wins / player_data.global_matches * 100) if player_data.global_matches > 0 else 0 %}
+                                    <div class="progress mb-2" style="height: 8px;">
+                                        <div class="progress-bar bg-primary" role="progressbar"
+                                             style="width: {{ global_win_rate }}%" aria-valuenow="{{ global_win_rate }}"
+                                             aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                    <small class="text-muted">{{ "%.1f"|format(global_win_rate) }}% Win Rate</small>
+                                </div>
+
+                                <!-- Current Global Streak -->
+                                {% if player_data.global_current_streak %}
+                                    <div class="mt-3 text-center">
+                                        {% if player_data.global_current_streak > 0 %}
+                                            <span class="badge bg-success">
+                                                <i class="fas fa-fire me-1"></i> {{ player_data.global_current_streak }} Win Streak
+                                            </span>
+                                        {% elif player_data.global_current_streak < 0 %}
+                                            <span class="badge bg-danger">
+                                                <i class="fas fa-arrow-down me-1"></i> {{ abs(player_data.global_current_streak) }} Loss Streak
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
-                <div class="card-body">
-                    <div class="text-center py-4">
-                        <i class="fas fa-rocket fa-3x text-primary mb-3"></i>
-                        <h5>Ready to Get Started?</h5>
-                        <p class="text-muted mb-4">
-                            Welcome to the Rocket League Six Gents system! Here you can track your performance,
-                            verify your rank, and compete with other players.
+
+                <!-- Recent Performance -->
+                <div class="card bg-dark-medium">
+                    <div class="card-header">
+                        <h5 class="mb-0"><i class="fas fa-clock me-2"></i> Recent Performance</h5>
+                    </div>
+                    <div class="card-body">
+                        {% if recent_matches and recent_matches|length > 0 %}
+                            <div class="table-responsive">
+                                <table class="table table-dark table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Type</th>
+                                            <th>Result</th>
+                                            <th>MMR Change</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for match in recent_matches[:5] %}
+                                        <tr>
+                                            <td>{{ match.date }}</td>
+                                            <td>
+                                                {% if match.is_global %}
+                                                    <span class="badge bg-primary">Global</span>
+                                                {% else %}
+                                                    <span class="badge bg-warning">Ranked</span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if match.player_result == 'Win' %}
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-trophy me-1"></i> Win
+                                                    </span>
+                                                {% else %}
+                                                    <span class="badge bg-danger">
+                                                        <i class="fas fa-times me-1"></i> Loss
+                                                    </span>
+                                                {% endif %}
+                                            </td>
+                                            <td>
+                                                {% if match.mmr_change %}
+                                                    {% if match.mmr_change > 0 %}
+                                                        <span class="text-success">+{{ match.mmr_change }}</span>
+                                                    {% else %}
+                                                        <span class="text-danger">{{ match.mmr_change }}</span>
+                                                    {% endif %}
+                                                {% else %}
+                                                    <span class="text-muted">—</span>
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="text-center mt-3">
+                                <a href="{{ url_for('profile_stats') }}" class="btn btn-outline-primary">
+                                    <i class="fas fa-chart-line me-2"></i> View Full Match History
+                                </a>
+                            </div>
+                        {% else %}
+                            <div class="text-center py-4">
+                                <i class="fas fa-history fa-3x text-muted mb-3"></i>
+                                <h6>No Recent Matches</h6>
+                                <p class="text-muted">Start playing to see your match history here!</p>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            {% else %}
+                <!-- No Stats Available -->
+                <div class="card bg-dark-medium">
+                    <div class="card-body text-center py-5">
+                        <i class="fas fa-rocket fa-4x text-primary mb-4"></i>
+                        <h4>Welcome to Six Gents!</h4>
+                        <p class="text-muted mb-4 lead">
+                            Ready to start your competitive journey? Here's how to get started:
                         </p>
+
                         <div class="row">
-                            <div class="col-md-4 mb-2">
+                            <div class="col-md-4 mb-3">
                                 <div class="step-indicator">
                                     <div class="step-number bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2"
-                                         style="width: 40px; height: 40px;">1</div>
+                                         style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">1</div>
                                     <h6>Verify Your Rank</h6>
-                                    <small class="text-muted">Get the right Discord role</small>
+                                    <small class="text-muted">Get the right Discord role and starting MMR</small>
+                                    {% if not rank_data %}
+                                        <div class="mt-2">
+                                            <a href="{{ url_for('profile_rank_check') }}" class="btn btn-sm btn-warning">
+                                                <i class="fas fa-check-circle me-1"></i> Verify Now
+                                            </a>
+                                        </div>
+                                    {% else %}
+                                        <div class="mt-2">
+                                            <span class="badge bg-success">
+                                                <i class="fas fa-check me-1"></i> Completed
+                                            </span>
+                                        </div>
+                                    {% endif %}
                                 </div>
                             </div>
-                            <div class="col-md-4 mb-2">
+                            <div class="col-md-4 mb-3">
                                 <div class="step-indicator">
                                     <div class="step-number bg-secondary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2"
-                                         style="width: 40px; height: 40px;">2</div>
+                                         style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">2</div>
                                     <h6>Join the Queue</h6>
-                                    <small class="text-muted">Use Discord bot commands</small>
+                                    <small class="text-muted">Use <code>/queue</code> in Discord to find matches</small>
                                 </div>
                             </div>
-                            <div class="col-md-4 mb-2">
+                            <div class="col-md-4 mb-3">
                                 <div class="step-indicator">
                                     <div class="step-number bg-success text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-2"
-                                         style="width: 40px; height: 40px;">3</div>
+                                         style="width: 50px; height: 50px; font-size: 1.2rem; font-weight: bold;">3</div>
                                     <h6>Track Progress</h6>
-                                    <small class="text-muted">View your stats here</small>
+                                    <small class="text-muted">Watch your MMR grow and climb the leaderboard</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-4">
+                            <div class="card bg-dark p-4">
+                                <h6 class="text-primary mb-3">
+                                    <i class="fas fa-gamepad me-2"></i> Discord Commands
+                                </h6>
+                                <div class="row text-start">
+                                    <div class="col-md-6">
+                                        <ul class="list-unstyled">
+                                            <li class="mb-2"><code>/queue</code> - Join the queue</li>
+                                            <li class="mb-2"><code>/leave</code> - Leave the queue</li>
+                                            <li class="mb-2"><code>/status</code> - Check queue status</li>
+                                        </ul>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <ul class="list-unstyled">
+                                            <li class="mb-2"><code>/rank</code> - Check your rank</li>
+                                            <li class="mb-2"><code>/report</code> - Report match results</li>
+                                            <li class="mb-2"><code>/leaderboard</code> - Get leaderboard link</li>
+                                        </ul>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            {% endif %}
         </div>
     </div>
 </div>
