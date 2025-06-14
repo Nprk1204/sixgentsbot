@@ -2243,11 +2243,11 @@ class MatchSystem:
         NEW: Each player gets different MMR based on their individual MMR relative to the match
         """
         # Base values for MMR changes
-        BASE_MMR_CHANGE = 25
+        BASE_MMR_CHANGE = 30
         FIRST_GAME_WIN = 110
         FIRST_GAME_LOSS = 80
         MAX_MMR_CHANGE = 200
-        MIN_MMR_CHANGE = 10  # Reduced minimum for weaker players
+        MIN_MMR_CHANGE = 15  # Reduced minimum for weaker players
 
         # Extended placement period
         PLACEMENT_GAMES = 15
