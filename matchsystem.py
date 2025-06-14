@@ -2265,13 +2265,22 @@ class MatchSystem:
         match_avg_mmr = (team_avg_mmr + opponent_avg_mmr) / 2
 
         # NEW: Calculate individual adjustment factor
-        # Players above match average get slightly less MMR, players below get slightly more
+        # WINS: Higher MMR players get less, lower MMR players get more
+        # LOSSES: Higher MMR players lose more, lower MMR players lose less
         mmr_difference_from_match = player_mmr - match_avg_mmr
-        individual_adjustment = 1.0 - (mmr_difference_from_match / match_avg_mmr) * INDIVIDUAL_MMR_FACTOR
+
+        if is_win:
+            # For wins: Lower skill players get more MMR
+            individual_adjustment = 1.0 - (mmr_difference_from_match / match_avg_mmr) * INDIVIDUAL_MMR_FACTOR
+        else:
+            # For losses: Lower skill players lose less MMR (flip the logic)
+            individual_adjustment = 1.0 + (mmr_difference_from_match / match_avg_mmr) * INDIVIDUAL_MMR_FACTOR
+
         individual_adjustment = max(0.7, min(1.4, individual_adjustment))  # Constrain between 70% and 140%
 
+        win_lose_text = "WINS" if is_win else "LOSES"
         print(
-            f"Individual MMR adjustment: Player {player_mmr} vs Match Avg {match_avg_mmr:.1f} = {individual_adjustment:.2f}x")
+            f"Individual MMR adjustment ({win_lose_text}): Player {player_mmr} vs Match Avg {match_avg_mmr:.1f} = {individual_adjustment:.2f}x")
 
         # Calculate team vs opponent difference factor
         mmr_difference = opponent_avg_mmr - team_avg_mmr
@@ -2393,7 +2402,7 @@ class MatchSystem:
         try:
             print(f"Checking rank protection for player with MMR {current_mmr}, is_win: {is_win}")
 
-            # Check for recent promotion protection (50% loss reduction for 3 games)
+            # PRIORITY 1: Check for recent promotion protection (50% loss reduction for 3 games)
             if not is_win:  # Only apply to losses
                 promotion_data = player_data.get('last_promotion')
                 if promotion_data:
@@ -2401,32 +2410,19 @@ class MatchSystem:
                     matches_at_promotion = promotion_data.get('matches_at_promotion', 0)
                     games_since_promotion = current_matches - matches_at_promotion
 
-                    print(f"Promotion data found: {games_since_promotion} games since promotion")
+                    print(
+                        f"Promotion data found: {games_since_promotion} games since promotion (current: {current_matches}, at promotion: {matches_at_promotion})")
 
                     if games_since_promotion < 3:  # 3 games of protection
                         print(
                             f"APPLYING PROMOTION PROTECTION: 50% loss reduction ({3 - games_since_promotion} games left)")
-                        return 0.5  # 50% loss reduction
+                        return 0.5  # 50% loss reduction - RETURN IMMEDIATELY, don't check other protections
 
-            # Rank boundaries for demotion/promotion assistance
-            RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
-            BOUNDARY_RANGE = 100  # 100 MMR buffer
-
-            # Check for demotion protection (close to losing a rank)
-            if not is_win:  # Only for losses
-                for boundary in RANK_BOUNDARIES:
-                    if current_mmr >= boundary:  # Player is above this boundary
-                        distance_from_boundary = current_mmr - boundary
-                        if distance_from_boundary <= BOUNDARY_RANGE:
-                            # Reduce loss when close to demotion
-                            protection_factor = distance_from_boundary / BOUNDARY_RANGE
-                            protection_modifier = 0.7 + (0.3 * protection_factor)  # 70-100% of normal loss
-                            print(
-                                f"Demotion protection: {distance_from_boundary} MMR from boundary, {protection_modifier:.2f}x modifier")
-                            return protection_modifier
-
-            # Check for promotion assistance (close to ranking up)
+            # PRIORITY 2: Check for promotion assistance (close to ranking up)
             if is_win:  # Only for wins
+                RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
+                BOUNDARY_RANGE = 100  # 100 MMR buffer
+
                 for boundary in RANK_BOUNDARIES:
                     if current_mmr < boundary:  # Player is below this boundary
                         distance_to_boundary = boundary - current_mmr
@@ -2438,6 +2434,23 @@ class MatchSystem:
                                 f"Promotion assistance: {distance_to_boundary} MMR to boundary, {assistance_modifier:.2f}x modifier")
                             return assistance_modifier
 
+            # PRIORITY 3: Check for demotion protection (close to losing a rank) - ONLY if no promotion protection
+            if not is_win:  # Only for losses
+                RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
+                BOUNDARY_RANGE = 100  # 100 MMR buffer
+
+                for boundary in RANK_BOUNDARIES:
+                    if current_mmr >= boundary:  # Player is above this boundary
+                        distance_from_boundary = current_mmr - boundary
+                        if distance_from_boundary <= BOUNDARY_RANGE:
+                            # Reduce loss when close to demotion
+                            protection_factor = distance_from_boundary / BOUNDARY_RANGE
+                            protection_modifier = 0.7 + (0.3 * protection_factor)  # 70-100% of normal loss
+                            print(
+                                f"Demotion protection: {distance_from_boundary} MMR from boundary, {protection_modifier:.2f}x modifier")
+                            return protection_modifier
+
+            print(f"No protection applied for player with MMR {current_mmr}")
             return 1.0
 
         except Exception as e:
