@@ -4007,57 +4007,82 @@ async def perform_reset_background_enhanced(interaction: discord.Interaction, re
         matches_removed = 0
 
         if reset_type == "global":
-            # Reset only global stats
-            result = system_coordinator.match_system.players.update_many(
-                {},
-                {"$set": {
-                    "global_mmr": 300,
-                    "global_wins": 0,
-                    "global_losses": 0,
-                    "global_matches": 0,
-                    "global_current_streak": 0,
-                    "global_longest_win_streak": 0,
-                    "global_longest_loss_streak": 0
-                }}
-            )
-            reset_count = result.modified_count
+            # Soft reset only global stats
+            await safe_send_message(channel, "🔄 (2/5) Performing global soft reset...")
 
-            # Reset global matches
-            matches_result = system_coordinator.match_system.matches.delete_many({"is_global": True})
-            matches_removed = matches_result.deleted_count
+            reset_summary = []
 
-        elif reset_type == "ranked":
-            # Reset only ranked stats
             for player in all_players:
                 player_id = player.get("id")
+                old_global_mmr = player.get("global_mmr", 300)
 
-                # Look up rank record for default MMR based on tier
-                rank_record = db.get_collection('ranks').find_one({"discord_id": player_id})
+                # Calculate soft reset MMR
+                new_global_mmr = calculate_soft_reset_mmr(old_global_mmr, "global")
 
-                if rank_record:
-                    tier = rank_record.get("tier", "Rank C")
-                    starting_mmr = system_coordinator.match_system.TIER_MMR.get(tier, 600)
-                else:
-                    starting_mmr = 600  # Default
-
-                # Update with tier-based starting MMR
+                # Update player with soft reset
                 system_coordinator.match_system.players.update_one(
                     {"id": player_id},
                     {"$set": {
-                        "mmr": starting_mmr,
-                        "wins": 0,
-                        "losses": 0,
-                        "matches": 0,
-                        "current_streak": 0,
-                        "longest_win_streak": 0,
-                        "longest_loss_streak": 0
+                        "global_mmr": new_global_mmr,
+                        "global_current_streak": 0,  # Reset global streaks
+                        "last_updated": datetime.datetime.utcnow()
                     }}
                 )
                 reset_count += 1
 
-            # Reset ranked matches
-            matches_result = system_coordinator.match_system.matches.delete_many({"is_global": {"$ne": True}})
-            matches_removed = matches_result.deleted_count
+                # Track the reset for summary
+                player_name = player.get("name", "Unknown")
+                mmr_reduction = old_global_mmr - new_global_mmr
+                reset_summary.append((player_name, old_global_mmr, new_global_mmr, mmr_reduction))
+                print(f"Global soft reset: {player_name} {old_global_mmr} → {new_global_mmr} MMR")
+
+            # Archive global matches instead of deleting them
+            matches_result = system_coordinator.match_system.matches.update_many(
+                {"is_global": True},
+                {"$set": {"status": "archived_global_reset"}}
+            )
+            matches_removed = matches_result.modified_count
+
+        elif reset_type == "ranked":
+            # Soft reset only ranked stats
+            await safe_send_message(channel, "🔄 (2/5) Performing ranked soft reset...")
+
+            reset_summary = []
+
+            for player in all_players:
+                player_id = player.get("id")
+                old_mmr = player.get("mmr", 600)
+
+                # Calculate soft reset MMR
+                new_mmr = calculate_soft_reset_mmr(old_mmr, "ranked")
+
+                # Update player with soft reset
+                system_coordinator.match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "current_streak": 0,  # Reset streaks
+                        "last_promotion": None,  # Remove promotion protection
+                        "last_updated": datetime.datetime.utcnow()
+                    }}
+                )
+                reset_count += 1
+
+                # Track the reset for summary
+                player_name = player.get("name", "Unknown")
+                mmr_reduction = old_mmr - new_mmr
+                old_rank = get_rank_from_mmr(old_mmr)
+                new_rank = get_rank_from_mmr(new_mmr)
+
+                reset_summary.append((player_name, old_mmr, new_mmr, mmr_reduction, old_rank, new_rank))
+                print(f"Ranked soft reset: {player_name} {old_mmr} → {new_mmr} MMR")
+
+            # Archive ranked matches instead of deleting them
+            matches_result = system_coordinator.match_system.matches.update_many(
+                {"is_global": {"$ne": True}},
+                {"$set": {"status": "archived_ranked_reset"}}
+            )
+            matches_removed = matches_result.modified_count
 
         else:  # "all" - Complete reset including Discord roles
             # Send initial progress message
@@ -4127,28 +4152,84 @@ async def perform_reset_background_enhanced(interaction: discord.Interaction, re
             color=0x00ff00  # Green for success
         )
 
-        embed.add_field(
-            name="Database Reset",
-            value=f"Players affected: {reset_count}/{player_count}\nMatches removed: {matches_removed}",
-            inline=False
-        )
-
-        embed.add_field(
-            name="Backup Created",
-            value=f"Collection: `{backup_collection_name}`",
-            inline=False
-        )
-
         if reset_type == "all":
+            # Keep existing complete reset embed logic
             embed.add_field(
-                name="Discord Role Removal",
-                value=f"✅ Success: **{roles_removed_count}** members\n❌ Errors: **{len(role_removal_errors)}** members",
+                name="Database Reset",
+                value=f"Players affected: {reset_count}/{player_count}\nMatches removed: {matches_removed}",
                 inline=False
             )
 
             embed.add_field(
-                name="Important",
-                value="**All players must re-verify their ranks** before joining queues again.",
+                name="Backup Created",
+                value=f"Collection: `{backup_collection_name}`",
+                inline=False
+            )
+
+            if reset_type == "all":
+                embed.add_field(
+                    name="Discord Role Removal",
+                    value=f"✅ Success: **{roles_removed_count}** members\n❌ Errors: **{len(role_removal_errors)}** members",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="Important",
+                    value="**All players must re-verify their ranks** before joining queues again.",
+                    inline=False
+                )
+
+        else:
+            # NEW: Soft reset embed
+            embed.add_field(
+                name="🎯 Soft Reset Applied",
+                value=f"Players reset: {reset_count}/{player_count}\nMatches archived: {matches_removed}",
+                inline=False
+            )
+
+            embed.add_field(
+                name="✅ What Was Reset",
+                value="• MMR (compressed toward tier benchmarks)\n• Current streaks → 0\n• Promotion protection removed",
+                inline=True
+            )
+
+            embed.add_field(
+                name="❌ What Was Preserved",
+                value="• Win/loss records\n• Match history\n• Longest streak records\n• Player accounts",
+                inline=True
+            )
+
+            # Show some example resets
+            if reset_summary and len(reset_summary) <= 10:
+                if reset_type == "ranked":
+                    examples = []
+                    for name, old, new, reduction, old_rank, new_rank in reset_summary[:5]:
+                        if old_rank == new_rank:
+                            examples.append(f"{name}: {old} → {new} [{new_rank}]")
+                        else:
+                            examples.append(f"{name}: {old} → {new} [{old_rank}→{new_rank}]")
+
+                    embed.add_field(
+                        name="📊 Example Resets",
+                        value="\n".join(examples) + (
+                            f"\n... and {len(reset_summary) - 5} more" if len(reset_summary) > 5 else ""),
+                        inline=False
+                    )
+                else:  # global
+                    examples = []
+                    for name, old, new, reduction in reset_summary[:5]:
+                        examples.append(f"{name}: {old} → {new} Global MMR")
+
+                    embed.add_field(
+                        name="📊 Example Resets",
+                        value="\n".join(examples) + (
+                            f"\n... and {len(reset_summary) - 5} more" if len(reset_summary) > 5 else ""),
+                        inline=False
+                    )
+
+            embed.add_field(
+                name="Backup Created",
+                value=f"Collection: `{backup_collection_name}`",
                 inline=False
             )
 
@@ -4156,37 +4237,6 @@ async def perform_reset_background_enhanced(interaction: discord.Interaction, re
             text=f"Reset by {user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
         await safe_send_message(channel, embed=embed)
-
-        # Final announcement for complete reset
-        if reset_type == "all":
-            announcement = discord.Embed(
-                title="🚨 Complete Season Reset Performed",
-                description=f"A complete leaderboard reset has been performed by {user.mention}",
-                color=0xff0000
-            )
-
-            announcement.add_field(
-                name="What This Means",
-                value=(
-                    f"• **{roles_removed_count}** members had their Discord rank roles removed\n"
-                    f"• All match history and MMR has been cleared\n"
-                    f"• All rank verifications have been reset"
-                ),
-                inline=False
-            )
-
-            announcement.add_field(
-                name="To Play Again",
-                value=(
-                    "1. Visit the rank verification page on the website\n"
-                    "2. Re-verify your Rocket League rank\n"
-                    "3. Get your Discord role and starting MMR back\n"
-                    "4. Use `/queue` to join matches again"
-                ),
-                inline=False
-            )
-
-            await safe_send_message(channel, embed=announcement)
 
         await set_reset_status(False, interaction)
 
