@@ -197,7 +197,7 @@
                                             </span>
                                         {% elif player_data.current_streak < 0 %}
                                             <span class="streak-badge streak-loss">
-                                                <i class="fas fa-arrow-down me-1"></i> {{ abs(player_data.current_streak) }} Loss Streak
+                                                <i class="fas fa-arrow-down me-1"></i> {{ player_data.current_streak * -1 if player_data.current_streak < 0 else player_data.current_streak }} Loss Streak
                                             </span>
                                         {% endif %}
                                     </div>
@@ -655,7 +655,7 @@
                                     <div class="streak-item">
                                         <div class="streak-label">Worst Loss Streak</div>
                                         <div class="streak-value text-info">
-                                            <i class="fas fa-snowflake me-1"></i> {{ abs(player_data.global_longest_loss_streak or 0) }}
+                                            <i class="fas fa-snowflake me-1"></i> {{ (player_data.global_longest_loss_streak or 0) * -1 if (player_data.global_longest_loss_streak or 0) < 0 else (player_data.global_longest_loss_streak or 0) }}
                                         </div>
                                     </div>
                                 </div>
