@@ -407,7 +407,10 @@
                                         <div class="summary-label">Best Win Streak</div>
                                         <div class="summary-value text-warning">
                                             <i class="fas fa-fire me-1"></i>
-                                            {{ max(player_data.longest_win_streak or 0, player_data.global_longest_win_streak or 0) }}
+                                            {% set ranked_best_streak = player_data.longest_win_streak or 0 %}
+                                            {% set global_best_streak = player_data.global_longest_win_streak or 0 %}
+                                            {% set best_overall_streak = ranked_best_streak if ranked_best_streak > global_best_streak else global_best_streak %}
+                                            {{ best_overall_streak }}
                                         </div>
                                     </div>
                                     {% endif %}
