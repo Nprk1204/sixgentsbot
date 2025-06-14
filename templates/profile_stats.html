@@ -10,9 +10,29 @@
 {% block content %}
 <div class="content-container">
     <div class="content-header">
-        <h2><i class="fas fa-chart-line me-2"></i> Detailed Statistics</h2>
-        <div class="user-indicator">
-            <i class="fas fa-user me-1"></i> {{ user.global_name or user.username }}
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2><i class="fas fa-chart-line me-2"></i> Detailed Statistics</h2>
+                <div class="user-indicator">
+                    <i class="fas fa-user me-1"></i> {{ user.global_name or user.username }}
+                    {% if rank_data %}
+                        <span class="ms-2">
+                            {% if rank_data.tier == 'Rank A' %}
+                                <span class="badge bg-danger">{{ rank_data.tier }}</span>
+                            {% elif rank_data.tier == 'Rank B' %}
+                                <span class="badge bg-primary">{{ rank_data.tier }}</span>
+                            {% elif rank_data.tier == 'Rank C' %}
+                                <span class="badge bg-success">{{ rank_data.tier }}</span>
+                            {% endif %}
+                        </span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="stats-actions">
+                <button class="btn btn-outline-primary btn-sm" onclick="refreshStats()">
+                    <i class="fas fa-sync-alt me-1"></i> Refresh
+                </button>
+            </div>
         </div>
     </div>
 
@@ -22,34 +42,59 @@
 
     {% if not has_any_stats %}
         <!-- No Stats Available -->
-        <div class="card bg-dark-medium">
-            <div class="card-body text-center py-5">
-                <i class="fas fa-chart-line fa-4x text-muted mb-4"></i>
-                <h4>No Statistics Available</h4>
-                <p class="text-muted mb-4">
-                    You haven't played any matches yet! Join the queue in Discord to start building your stats.
-                </p>
-                <div class="row justify-content-center">
-                    <div class="col-md-6">
-                        <div class="getting-started-card p-4 rounded" style="background: rgba(0, 168, 255, 0.1); border: 1px solid var(--border);">
-                            <h6 class="text-primary mb-3">Getting Started</h6>
-                            <ol class="text-start">
-                                <li class="mb-2">Join our Discord server</li>
-                                <li class="mb-2">Use <code>/queue</code> to join the queue</li>
-                                <li class="mb-2">Play matches and report results</li>
-                                <li>Watch your stats grow here!</li>
-                            </ol>
-                            <a href="{{ url_for('profile_rank_check') }}" class="btn btn-primary btn-sm mt-2">
-                                <i class="fas fa-check-circle me-1"></i> Verify Your Rank First
-                            </a>
+        <div class="empty-state">
+            <div class="card bg-dark-medium text-center">
+                <div class="card-body py-5">
+                    <div class="empty-state-icon mb-4">
+                        <i class="fas fa-chart-line fa-5x text-muted"></i>
+                    </div>
+                    <h4>No Statistics Available</h4>
+                    <p class="text-muted mb-4 lead">
+                        You haven't played any matches yet! Join the queue in Discord to start building your stats.
+                    </p>
+                    <div class="row justify-content-center">
+                        <div class="col-md-8">
+                            <div class="getting-started-enhanced p-4 rounded">
+                                <h6 class="text-primary mb-3">
+                                    <i class="fas fa-rocket me-2"></i> Getting Started
+                                </h6>
+                                <div class="row">
+                                    <div class="col-md-4 text-center mb-3">
+                                        <div class="step-circle">1</div>
+                                        <h6 class="mt-2">Verify Rank</h6>
+                                        <small class="text-muted">Get your Discord role</small>
+                                    </div>
+                                    <div class="col-md-4 text-center mb-3">
+                                        <div class="step-circle">2</div>
+                                        <h6 class="mt-2">Join Queue</h6>
+                                        <small class="text-muted">Use <code>/queue</code></small>
+                                    </div>
+                                    <div class="col-md-4 text-center mb-3">
+                                        <div class="step-circle">3</div>
+                                        <h6 class="mt-2">Track Progress</h6>
+                                        <small class="text-muted">Watch stats grow</small>
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    {% if not rank_data %}
+                                        <a href="{{ url_for('profile_rank_check') }}" class="btn btn-primary">
+                                            <i class="fas fa-check-circle me-1"></i> Verify Your Rank First
+                                        </a>
+                                    {% else %}
+                                        <p class="text-success mb-0">
+                                            <i class="fas fa-check me-1"></i> Rank verified! Ready to play.
+                                        </p>
+                                    {% endif %}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
     {% else %}
-        <!-- Stats Available -->
-        <ul class="nav nav-tabs mb-4" id="statsTabsNav" role="tablist">
+        <!-- Enhanced Stats Layout -->
+        <ul class="nav nav-tabs enhanced-tabs mb-4" id="statsTabsNav" role="tablist">
             <li class="nav-item" role="presentation">
                 <button class="nav-link active" id="overview-tab" data-bs-toggle="tab"
                         data-bs-target="#overview" type="button" role="tab">
@@ -72,39 +117,91 @@
                 </button>
             </li>
             {% endif %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="advanced-tab" data-bs-toggle="tab"
+                        data-bs-target="#advanced" type="button" role="tab">
+                    <i class="fas fa-microscope me-1"></i> Advanced
+                </button>
+            </li>
         </ul>
 
-        <div class="tab-content" id="statsTabsContent">
+        <div class="tab-content enhanced-tab-content" id="statsTabsContent">
             <!-- Overview Tab -->
             <div class="tab-pane fade show active" id="overview" role="tabpanel">
-                <div class="row">
+                <!-- Quick Stats Cards -->
+                <div class="row mb-4">
                     {% if has_ranked_stats %}
                     <div class="col-lg-6">
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-header">
-                                <h5 class="mb-0">Ranked Performance</h5>
+                        <div class="performance-card ranked-card">
+                            <div class="card-header-enhanced">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="mb-0">
+                                            <i class="fas fa-trophy me-2 text-warning"></i> Ranked Performance
+                                        </h5>
+                                        <small class="text-muted">Competitive matches</small>
+                                    </div>
+                                    <div class="rank-badge-mini">
+                                        {% if rank_data and rank_data.tier %}
+                                            {% if rank_data.tier == 'Rank A' %}
+                                                <span class="badge bg-danger">{{ rank_data.tier }}</span>
+                                            {% elif rank_data.tier == 'Rank B' %}
+                                                <span class="badge bg-primary">{{ rank_data.tier }}</span>
+                                            {% else %}
+                                                <span class="badge bg-success">{{ rank_data.tier }}</span>
+                                            {% endif %}
+                                        {% endif %}
+                                    </div>
+                                </div>
                             </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-6">
-                                        <div class="stat-item text-center p-3">
-                                            <h3 class="text-primary">{{ player_data.mmr or 0 }}</h3>
-                                            <small class="text-muted">Current MMR</small>
-                                        </div>
+                            <div class="card-body-enhanced">
+                                <div class="mmr-display-large">
+                                    <div class="mmr-value">{{ player_data.mmr or 0 }}</div>
+                                    <div class="mmr-label">Current MMR</div>
+                                </div>
+
+                                <div class="stats-grid-enhanced">
+                                    <div class="stat-box">
+                                        <div class="stat-value text-info">{{ player_data.matches or 0 }}</div>
+                                        <div class="stat-label">Matches</div>
                                     </div>
-                                    <div class="col-6">
-                                        <div class="stat-item text-center p-3">
-                                            <h3 class="text-success">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</h3>
-                                            <small class="text-muted">Win Rate</small>
-                                        </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value text-success">{{ player_data.wins or 0 }}</div>
+                                        <div class="stat-label">Wins</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value text-danger">{{ player_data.losses or 0 }}</div>
+                                        <div class="stat-label">Losses</div>
                                     </div>
                                 </div>
-                                <hr>
-                                <div class="text-center">
-                                    <span class="badge bg-info me-2">{{ player_data.matches or 0 }} Matches</span>
-                                    <span class="badge bg-success me-2">{{ player_data.wins or 0 }} Wins</span>
-                                    <span class="badge bg-danger">{{ player_data.losses or 0 }} Losses</span>
+
+                                {% set win_rate = (player_data.wins / player_data.matches * 100) if player_data.matches > 0 else 0 %}
+                                <div class="progress-section">
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span class="progress-label">Win Rate</span>
+                                        <span class="progress-value">{{ "%.1f"|format(win_rate) }}%</span>
+                                    </div>
+                                    <div class="progress enhanced-progress">
+                                        <div class="progress-bar bg-gradient-success" role="progressbar"
+                                             style="width: {{ win_rate }}%" aria-valuenow="{{ win_rate }}"
+                                             aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
                                 </div>
+
+                                <!-- Enhanced Streak Display -->
+                                {% if player_data.current_streak %}
+                                    <div class="streak-display">
+                                        {% if player_data.current_streak > 0 %}
+                                            <span class="streak-badge streak-win">
+                                                <i class="fas fa-fire me-1"></i> {{ player_data.current_streak }} Win Streak
+                                            </span>
+                                        {% elif player_data.current_streak < 0 %}
+                                            <span class="streak-badge streak-loss">
+                                                <i class="fas fa-arrow-down me-1"></i> {{ abs(player_data.current_streak) }} Loss Streak
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -112,406 +209,1058 @@
 
                     {% if has_global_stats %}
                     <div class="col-lg-6">
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-header">
-                                <h5 class="mb-0">Global Performance</h5>
-                            </div>
-                            <div class="card-body">
-                                <div class="row">
-                                    <div class="col-6">
-                                        <div class="stat-item text-center p-3">
-                                            <h3 class="text-primary">{{ player_data.global_mmr or 300 }}</h3>
-                                            <small class="text-muted">Global MMR</small>
-                                        </div>
+                        <div class="performance-card global-card">
+                            <div class="card-header-enhanced">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="mb-0">
+                                            <i class="fas fa-globe me-2 text-primary"></i> Global Performance
+                                        </h5>
+                                        <small class="text-muted">Cross-rank matches</small>
                                     </div>
-                                    <div class="col-6">
-                                        <div class="stat-item text-center p-3">
-                                            <h3 class="text-success">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</h3>
-                                            <small class="text-muted">Win Rate</small>
-                                        </div>
+                                    <div class="global-indicator">
+                                        <span class="badge bg-primary">Global</span>
                                     </div>
                                 </div>
-                                <hr>
-                                <div class="text-center">
-                                    <span class="badge bg-info me-2">{{ player_data.global_matches or 0 }} Matches</span>
-                                    <span class="badge bg-success me-2">{{ player_data.global_wins or 0 }} Wins</span>
-                                    <span class="badge bg-danger">{{ player_data.global_losses or 0 }} Losses</span>
-                                </div>
                             </div>
-                        </div>
-                    </div>
-                    {% endif %}
+                            <div class="card-body-enhanced">
+                                <div class="mmr-display-large">
+                                    <div class="mmr-value text-primary">{{ player_data.global_mmr or 300 }}</div>
+                                    <div class="mmr-label">Global MMR</div>
+                                </div>
 
-                    {% if not has_ranked_stats and not has_global_stats %}
-                    <div class="col-12">
-                        <div class="card bg-dark-medium mb-4">
-                            <div class="card-body text-center py-4">
-                                <i class="fas fa-info-circle fa-2x text-muted mb-3"></i>
-                                <h5>No Match Data</h5>
-                                <p class="text-muted">Start playing matches to see your performance statistics here!</p>
+                                <div class="stats-grid-enhanced">
+                                    <div class="stat-box">
+                                        <div class="stat-value text-info">{{ player_data.global_matches or 0 }}</div>
+                                        <div class="stat-label">Matches</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value text-success">{{ player_data.global_wins or 0 }}</div>
+                                        <div class="stat-label">Wins</div>
+                                    </div>
+                                    <div class="stat-box">
+                                        <div class="stat-value text-danger">{{ player_data.global_losses or 0 }}</div>
+                                        <div class="stat-label">Losses</div>
+                                    </div>
+                                </div>
+
+                                {% set global_win_rate = (player_data.global_wins / player_data.global_matches * 100) if player_data.global_matches > 0 else 0 %}
+                                <div class="progress-section">
+                                    <div class="d-flex justify-content-between mb-2">
+                                        <span class="progress-label">Win Rate</span>
+                                        <span class="progress-value">{{ "%.1f"|format(global_win_rate) }}%</span>
+                                    </div>
+                                    <div class="progress enhanced-progress">
+                                        <div class="progress-bar bg-gradient-primary" role="progressbar"
+                                             style="width: {{ global_win_rate }}%" aria-valuenow="{{ global_win_rate }}"
+                                             aria-valuemin="0" aria-valuemax="100"></div>
+                                    </div>
+                                </div>
+
+                                <!-- Enhanced Global Streak Display -->
+                                {% if player_data.global_current_streak %}
+                                    <div class="streak-display">
+                                        {% if player_data.global_current_streak > 0 %}
+                                            <span class="streak-badge streak-win">
+                                                <i class="fas fa-fire me-1"></i> {{ player_data.global_current_streak }} Win Streak
+                                            </span>
+                                        {% elif player_data.global_current_streak < 0 %}
+                                            <span class="streak-badge streak-loss">
+                                                <i class="fas fa-arrow-down me-1"></i> {{ abs(player_data.global_current_streak) }} Loss Streak
+                                            </span>
+                                        {% endif %}
+                                    </div>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
                     {% endif %}
                 </div>
 
-                <!-- Performance Charts -->
+                <!-- Enhanced Performance Charts -->
                 {% if (ranked_matches and ranked_matches|length > 0) or (global_matches and global_matches|length > 0) %}
-                <div class="card bg-dark-medium">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="fas fa-chart-line me-2"></i> MMR Progress</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="chart-container">
-                            <canvas id="mmrChart" height="100"></canvas>
+                <div class="row">
+                    <div class="col-12">
+                        <div class="chart-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-chart-line me-2"></i> MMR Progress Over Time
+                                </h5>
+                                <small class="text-muted">Track your improvement across all matches</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container-enhanced">
+                                    <canvas id="mmrChart" height="80"></canvas>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
                 {% endif %}
+
+                <!-- Additional Overview Stats -->
+                <div class="row mt-4">
+                    <div class="col-lg-8">
+                        <!-- Recent Activity Timeline -->
+                        {% if recent_matches and recent_matches|length > 0 %}
+                        <div class="activity-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-clock me-2"></i> Recent Activity
+                                </h5>
+                                <small class="text-muted">Your last {{ recent_matches|length }} matches</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="activity-timeline">
+                                    {% for match in recent_matches[:5] %}
+                                    <div class="timeline-item">
+                                        <div class="timeline-marker {{ 'success' if match.player_result == 'Win' else 'danger' }}"></div>
+                                        <div class="timeline-content">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <div class="match-result">
+                                                        {% if match.player_result == 'Win' %}
+                                                            <span class="badge bg-success">
+                                                                <i class="fas fa-trophy me-1"></i> Win
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="badge bg-danger">
+                                                                <i class="fas fa-times me-1"></i> Loss
+                                                            </span>
+                                                        {% endif %}
+                                                        {% if match.is_global %}
+                                                            <span class="badge bg-primary ms-1">Global</span>
+                                                        {% else %}
+                                                            <span class="badge bg-warning ms-1">Ranked</span>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="match-date">{{ match.date }}</div>
+                                                </div>
+                                                <div class="mmr-change-display">
+                                                    {% if match.mmr_change %}
+                                                        {% if match.mmr_change > 0 %}
+                                                            <span class="mmr-change positive">+{{ match.mmr_change }}</span>
+                                                        {% else %}
+                                                            <span class="mmr-change negative">{{ match.mmr_change }}</span>
+                                                        {% endif %}
+                                                    {% endif %}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="text-center mt-3">
+                                    <a href="#" class="btn btn-outline-primary btn-sm" onclick="switchToAdvancedTab()">
+                                        <i class="fas fa-list me-1"></i> View All Matches
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="col-lg-4">
+                        <!-- Quick Stats Summary -->
+                        <div class="summary-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-award me-2"></i> Career Summary
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="summary-stats">
+                                    {% if has_ranked_stats %}
+                                    <div class="summary-item">
+                                        <div class="summary-label">Peak Ranked MMR</div>
+                                        <div class="summary-value">{{ player_data.mmr or 0 }}</div>
+                                    </div>
+                                    {% endif %}
+                                    {% if has_global_stats %}
+                                    <div class="summary-item">
+                                        <div class="summary-label">Peak Global MMR</div>
+                                        <div class="summary-value text-primary">{{ player_data.global_mmr or 300 }}</div>
+                                    </div>
+                                    {% endif %}
+
+                                    {% set total_matches = (player_data.matches or 0) + (player_data.global_matches or 0) %}
+                                    {% set total_wins = (player_data.wins or 0) + (player_data.global_wins or 0) %}
+
+                                    <div class="summary-item">
+                                        <div class="summary-label">Total Matches</div>
+                                        <div class="summary-value">{{ total_matches }}</div>
+                                    </div>
+                                    <div class="summary-item">
+                                        <div class="summary-label">Total Wins</div>
+                                        <div class="summary-value text-success">{{ total_wins }}</div>
+                                    </div>
+                                    <div class="summary-item">
+                                        <div class="summary-label">Overall Win Rate</div>
+                                        <div class="summary-value">
+                                            {{ "%.1f"|format((total_wins / total_matches * 100) if total_matches > 0 else 0) }}%
+                                        </div>
+                                    </div>
+
+                                    <!-- Best Streaks -->
+                                    {% if player_data.longest_win_streak or player_data.global_longest_win_streak %}
+                                    <div class="summary-item highlight">
+                                        <div class="summary-label">Best Win Streak</div>
+                                        <div class="summary-value text-warning">
+                                            <i class="fas fa-fire me-1"></i>
+                                            {{ max(player_data.longest_win_streak or 0, player_data.global_longest_win_streak or 0) }}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Ranked Stats Tab -->
             {% if has_ranked_stats %}
             <div class="tab-pane fade" id="ranked-stats" role="tabpanel">
-                <div class="row">
+                <div class="row mb-4">
                     <div class="col-md-3">
                         <div class="stat-card primary">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-trophy"></i>
+                            </div>
                             <div class="stat-card-value">{{ player_data.mmr or 0 }}</div>
                             <div class="stat-card-title">Current MMR</div>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="stat-card secondary">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-gamepad"></i>
+                            </div>
                             <div class="stat-card-value">{{ player_data.matches or 0 }}</div>
                             <div class="stat-card-title">Total Matches</div>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="stat-card accent">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-percentage"></i>
+                            </div>
                             <div class="stat-card-value">{{ "%.1f"|format((player_data.wins or 0) / (player_data.matches or 1) * 100) }}%</div>
                             <div class="stat-card-title">Win Rate</div>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="stat-card">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-fire"></i>
+                            </div>
                             <div class="stat-card-value">{{ player_data.current_streak or 0 }}</div>
                             <div class="stat-card-title">Current Streak</div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Ranked chart -->
-                {% if ranked_matches and ranked_matches|length > 0 %}
-                <div class="card bg-dark-medium mt-4">
-                    <div class="card-header">
-                        <h5 class="mb-0">Ranked MMR History</h5>
+                <!-- Detailed Ranked Stats -->
+                <div class="row">
+                    <div class="col-lg-8">
+                        <!-- Ranked chart -->
+                        {% if ranked_matches and ranked_matches|length > 0 %}
+                        <div class="chart-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-chart-line me-2"></i> Ranked MMR History
+                                </h5>
+                                <small class="text-muted">Your ranked progression over time</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container-enhanced">
+                                    <canvas id="rankedChart" height="100"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
-                    <div class="card-body">
-                        <div class="chart-container">
-                            <canvas id="rankedChart" height="100"></canvas>
+
+                    <div class="col-lg-4">
+                        <!-- Ranked Streaks -->
+                        <div class="card bg-dark-medium mb-4">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-fire me-2"></i> Ranked Streaks
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="streak-stats">
+                                    <div class="streak-item">
+                                        <div class="streak-label">Current Streak</div>
+                                        <div class="streak-value">
+                                            {% if player_data.current_streak and player_data.current_streak > 0 %}
+                                                <span class="text-success">
+                                                    <i class="fas fa-arrow-up me-1"></i> +{{ player_data.current_streak }}
+                                                </span>
+                                            {% elif player_data.current_streak and player_data.current_streak < 0 %}
+                                                <span class="text-danger">
+                                                    <i class="fas fa-arrow-down me-1"></i> {{ player_data.current_streak }}
+                                                </span>
+                                            {% else %}
+                                                <span class="text-muted">0</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="streak-item">
+                                        <div class="streak-label">Best Win Streak</div>
+                                        <div class="streak-value text-warning">
+                                            <i class="fas fa-fire me-1"></i> {{ player_data.longest_win_streak or 0 }}
+                                        </div>
+                                    </div>
+                                    <div class="streak-item">
+                                        <div class="streak-label">Worst Loss Streak</div>
+                                        <div class="streak-value text-info">
+                                            <i class="fas fa-snowflake me-1"></i> {{ abs(player_data.longest_loss_streak or 0) }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Ranked Performance -->
+                        <div class="card bg-dark-medium">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-chart-pie me-2"></i> Performance
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="performance-breakdown">
+                                    <div class="performance-item">
+                                        <div class="performance-label">Wins</div>
+                                        <div class="performance-bar">
+                                            <div class="bar-fill bg-success" style="width: {{ (player_data.wins or 0) / (player_data.matches or 1) * 100 }}%"></div>
+                                        </div>
+                                        <div class="performance-value">{{ player_data.wins or 0 }}</div>
+                                    </div>
+                                    <div class="performance-item">
+                                        <div class="performance-label">Losses</div>
+                                        <div class="performance-bar">
+                                            <div class="bar-fill bg-danger" style="width: {{ (player_data.losses or 0) / (player_data.matches or 1) * 100 }}%"></div>
+                                        </div>
+                                        <div class="performance-value">{{ player_data.losses or 0 }}</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                {% endif %}
             </div>
             {% endif %}
 
             <!-- Global Stats Tab -->
             {% if has_global_stats %}
             <div class="tab-pane fade" id="global-stats" role="tabpanel">
-                <div class="row">
+                <div class="row mb-4">
                     <div class="col-md-3">
                         <div class="stat-card primary">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-globe"></i>
+                            </div>
                             <div class="stat-card-value">{{ player_data.global_mmr or 300 }}</div>
                             <div class="stat-card-title">Global MMR</div>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="stat-card secondary">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-gamepad"></i>
+                            </div>
                             <div class="stat-card-value">{{ player_data.global_matches or 0 }}</div>
                             <div class="stat-card-title">Global Matches</div>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="stat-card accent">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-percentage"></i>
+                            </div>
                             <div class="stat-card-value">{{ "%.1f"|format((player_data.global_wins or 0) / (player_data.global_matches or 1) * 100) }}%</div>
                             <div class="stat-card-title">Win Rate</div>
                         </div>
                     </div>
                     <div class="col-md-3">
                         <div class="stat-card">
+                            <div class="stat-card-icon">
+                                <i class="fas fa-fire"></i>
+                            </div>
                             <div class="stat-card-value">{{ player_data.global_current_streak or 0 }}</div>
                             <div class="stat-card-title">Current Streak</div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Global chart -->
-                {% if global_matches and global_matches|length > 0 %}
-                <div class="card bg-dark-medium mt-4">
-                    <div class="card-header">
-                        <h5 class="mb-0">Global MMR History</h5>
+                <!-- Detailed Global Stats -->
+                <div class="row">
+                    <div class="col-lg-8">
+                        <!-- Global chart -->
+                        {% if global_matches and global_matches|length > 0 %}
+                        <div class="chart-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-chart-line me-2"></i> Global MMR History
+                                </h5>
+                                <small class="text-muted">Your global progression over time</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container-enhanced">
+                                    <canvas id="globalChart" height="100"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
                     </div>
-                    <div class="card-body">
-                        <div class="chart-container">
-                            <canvas id="globalChart" height="100"></canvas>
+
+                    <div class="col-lg-4">
+                        <!-- Global Streaks -->
+                        <div class="card bg-dark-medium mb-4 global-streak-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-fire me-2"></i> Global Streaks
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="streak-stats">
+                                    <div class="streak-item">
+                                        <div class="streak-label">Current Streak</div>
+                                        <div class="streak-value">
+                                            {% if player_data.global_current_streak and player_data.global_current_streak > 0 %}
+                                                <span class="text-success">
+                                                    <i class="fas fa-arrow-up me-1"></i> +{{ player_data.global_current_streak }}
+                                                </span>
+                                            {% elif player_data.global_current_streak and player_data.global_current_streak < 0 %}
+                                                <span class="text-danger">
+                                                    <i class="fas fa-arrow-down me-1"></i> {{ player_data.global_current_streak }}
+                                                </span>
+                                            {% else %}
+                                                <span class="text-muted">0</span>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    <div class="streak-item">
+                                        <div class="streak-label">Best Win Streak</div>
+                                        <div class="streak-value text-warning">
+                                            <i class="fas fa-fire me-1"></i> {{ player_data.global_longest_win_streak or 0 }}
+                                        </div>
+                                    </div>
+                                    <div class="streak-item">
+                                        <div class="streak-label">Worst Loss Streak</div>
+                                        <div class="streak-value text-info">
+                                            <i class="fas fa-snowflake me-1"></i> {{ abs(player_data.global_longest_loss_streak or 0) }}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Global Performance -->
+                        <div class="card bg-dark-medium">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-chart-pie me-2"></i> Performance
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="performance-breakdown">
+                                    <div class="performance-item">
+                                        <div class="performance-label">Wins</div>
+                                        <div class="performance-bar">
+                                            <div class="bar-fill bg-success" style="width: {{ (player_data.global_wins or 0) / (player_data.global_matches or 1) * 100 }}%"></div>
+                                        </div>
+                                        <div class="performance-value">{{ player_data.global_wins or 0 }}</div>
+                                    </div>
+                                    <div class="performance-item">
+                                        <div class="performance-label">Losses</div>
+                                        <div class="performance-bar">
+                                            <div class="bar-fill bg-danger" style="width: {{ (player_data.global_losses or 0) / (player_data.global_matches or 1) * 100 }}%"></div>
+                                        </div>
+                                        <div class="performance-value">{{ player_data.global_losses or 0 }}</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                {% endif %}
             </div>
             {% endif %}
+
+            <!-- Advanced Tab -->
+            <div class="tab-pane fade" id="advanced" role="tabpanel">
+                <div class="row">
+                    <div class="col-lg-8">
+                        <!-- Full Match History -->
+                        <div class="matches-card">
+                            <div class="card-header-enhanced">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5 class="mb-0">
+                                            <i class="fas fa-history me-2"></i> Complete Match History
+                                        </h5>
+                                        <small class="text-muted">All your matches with detailed information</small>
+                                    </div>
+                                    <div class="match-filters">
+                                        <button class="btn btn-sm btn-outline-primary active" onclick="filterMatches('all')">All</button>
+                                        <button class="btn btn-sm btn-outline-warning" onclick="filterMatches('ranked')">Ranked</button>
+                                        <button class="btn btn-sm btn-outline-info" onclick="filterMatches('global')">Global</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% if recent_matches and recent_matches|length > 0 %}
+                                <div class="table-responsive">
+                                    <table class="table table-dark table-striped enhanced-table">
+                                        <thead>
+                                            <tr>
+                                                <th><i class="fas fa-calendar me-1"></i> Date</th>
+                                                <th><i class="fas fa-tag me-1"></i> Type</th>
+                                                <th><i class="fas fa-trophy me-1"></i> Result</th>
+                                                <th><i class="fas fa-chart-line me-1"></i> MMR Change</th>
+                                                <th><i class="fas fa-target me-1"></i> New MMR</th>
+                                                <th><i class="fas fa-fire me-1"></i> Streak</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for match in recent_matches %}
+                                            <tr class="match-row" data-type="{{ 'global' if match.is_global else 'ranked' }}">
+                                                <td>
+                                                    <span class="match-date-display">{{ match.date }}</span>
+                                                </td>
+                                                <td>
+                                                    {% if match.is_global %}
+                                                        <span class="badge bg-primary">
+                                                            <i class="fas fa-globe me-1"></i> Global
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="badge bg-warning">
+                                                            <i class="fas fa-trophy me-1"></i> Ranked
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if match.player_result == 'Win' %}
+                                                        <span class="badge bg-success">
+                                                            <i class="fas fa-trophy me-1"></i> Win
+                                                        </span>
+                                                    {% else %}
+                                                        <span class="badge bg-danger">
+                                                            <i class="fas fa-times me-1"></i> Loss
+                                                        </span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if match.mmr_change %}
+                                                        {% if match.mmr_change > 0 %}
+                                                            <span class="text-success fw-bold">
+                                                                <i class="fas fa-arrow-up me-1"></i> +{{ match.mmr_change }}
+                                                            </span>
+                                                        {% else %}
+                                                            <span class="text-danger fw-bold">
+                                                                <i class="fas fa-arrow-down me-1"></i> {{ match.mmr_change }}
+                                                            </span>
+                                                        {% endif %}
+                                                    {% else %}
+                                                        <span class="text-muted">—</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td class="fw-bold">
+                                                    {% if match.new_mmr %}
+                                                        <span class="mmr-display-small">{{ match.new_mmr }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted">—</span>
+                                                    {% endif %}
+                                                </td>
+                                                <td>
+                                                    {% if match.streak_display %}
+                                                        <span class="streak-indicator">{{ match.streak_display }}</span>
+                                                    {% else %}
+                                                        <span class="text-muted">—</span>
+                                                    {% endif %}
+                                                </td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                {% else %}
+                                <div class="text-center py-5">
+                                    <div class="empty-matches-state">
+                                        <i class="fas fa-history fa-4x text-muted mb-3"></i>
+                                        <h6>No Match History</h6>
+                                        <p class="text-muted">Start playing to see your matches here!</p>
+                                        <a href="{{ url_for('home') }}" class="btn btn-primary">
+                                            <i class="fas fa-gamepad me-1"></i> Learn How to Play
+                                        </a>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <!-- Advanced Analytics -->
+                        <div class="analytics-card">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-microscope me-2"></i> Advanced Analytics
+                                </h5>
+                                <small class="text-muted">Detailed performance insights</small>
+                            </div>
+                            <div class="card-body">
+                                <div class="analytics-stats">
+                                    <!-- Win Rate by Type -->
+                                    {% if has_ranked_stats and has_global_stats %}
+                                    <div class="analytics-section">
+                                        <h6 class="analytics-title">
+                                            <i class="fas fa-balance-scale me-1"></i> Performance Comparison
+                                        </h6>
+                                        <div class="comparison-chart">
+                                            <div class="comparison-item">
+                                                <span class="comparison-label">
+                                                    <i class="fas fa-trophy me-1"></i> Ranked Win Rate
+                                                </span>
+                                                <span class="comparison-value">{{ "%.1f"|format((player_data.wins / player_data.matches * 100) if player_data.matches > 0 else 0) }}%</span>
+                                            </div>
+                                            <div class="comparison-item">
+                                                <span class="comparison-label">
+                                                    <i class="fas fa-globe me-1"></i> Global Win Rate
+                                                </span>
+                                                <span class="comparison-value text-primary">{{ "%.1f"|format((player_data.global_wins / player_data.global_matches * 100) if player_data.global_matches > 0 else 0) }}%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- Recent Form -->
+                                    {% if recent_matches and recent_matches|length >= 5 %}
+                                    <div class="analytics-section">
+                                        <h6 class="analytics-title">
+                                            <i class="fas fa-chart-bar me-1"></i> Recent Form (Last 5)
+                                        </h6>
+                                        <div class="form-indicator">
+                                            {% for match in recent_matches[:5] %}
+                                                {% if match.player_result == 'Win' %}
+                                                    <span class="form-dot win" title="Win - {{ match.date }}">W</span>
+                                                {% else %}
+                                                    <span class="form-dot loss" title="Loss - {{ match.date }}">L</span>
+                                                {% endif %}
+                                            {% endfor %}
+                                        </div>
+                                        <div class="form-summary mt-2">
+                                            {% set recent_wins = recent_matches[:5] | selectattr("player_result", "equalto", "Win") | list | length %}
+                                            <small class="text-muted">{{ recent_wins }}/5 wins in recent matches</small>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- MMR Trends -->
+                                    {% if (ranked_matches and ranked_matches|length > 1) or (global_matches and global_matches|length > 1) %}
+                                    <div class="analytics-section">
+                                        <h6 class="analytics-title">
+                                            <i class="fas fa-trending-up me-1"></i> MMR Trends
+                                        </h6>
+                                        <div class="trend-indicators">
+                                            {% if ranked_matches and ranked_matches|length > 1 %}
+                                            <div class="trend-item">
+                                                <span class="trend-label">Ranked Trend</span>
+                                                {% set first_ranked = ranked_matches[0].new_mmr or 0 %}
+                                                {% set last_ranked = ranked_matches[-1].new_mmr or 0 %}
+                                                {% if last_ranked > first_ranked %}
+                                                    <span class="trend-value text-success">
+                                                        <i class="fas fa-arrow-up me-1"></i> +{{ last_ranked - first_ranked }}
+                                                    </span>
+                                                {% elif last_ranked < first_ranked %}
+                                                    <span class="trend-value text-danger">
+                                                        <i class="fas fa-arrow-down me-1"></i> {{ last_ranked - first_ranked }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="trend-value text-muted">
+                                                        <i class="fas fa-minus me-1"></i> 0
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                            {% endif %}
+
+                                            {% if global_matches and global_matches|length > 1 %}
+                                            <div class="trend-item">
+                                                <span class="trend-label">Global Trend</span>
+                                                {% set first_global = global_matches[0].new_mmr or 0 %}
+                                                {% set last_global = global_matches[-1].new_mmr or 0 %}
+                                                {% if last_global > first_global %}
+                                                    <span class="trend-value text-success">
+                                                        <i class="fas fa-arrow-up me-1"></i> +{{ last_global - first_global }}
+                                                    </span>
+                                                {% elif last_global < first_global %}
+                                                    <span class="trend-value text-danger">
+                                                        <i class="fas fa-arrow-down me-1"></i> {{ last_global - first_global }}
+                                                    </span>
+                                                {% else %}
+                                                    <span class="trend-value text-muted">
+                                                        <i class="fas fa-minus me-1"></i> 0
+                                                    </span>
+                                                {% endif %}
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                    {% endif %}
+
+                                    <!-- Activity Stats -->
+                                    <div class="analytics-section">
+                                        <h6 class="analytics-title">
+                                            <i class="fas fa-clock me-1"></i> Activity
+                                        </h6>
+                                        <div class="activity-stats">
+                                            {% set total_matches = (player_data.matches or 0) + (player_data.global_matches or 0) %}
+                                            <div class="activity-item">
+                                                <span class="activity-label">Total Games</span>
+                                                <span class="activity-value">{{ total_matches }}</span>
+                                            </div>
+                                            {% if total_matches > 0 and recent_matches %}
+                                                {% set days_since_last = (recent_matches[0].date | string) %}
+                                                <div class="activity-item">
+                                                    <span class="activity-label">Last Match</span>
+                                                    <span class="activity-value">{{ recent_matches[0].date }}</span>
+                                                </div>
+                                            {% endif %}
+                                            {% if has_ranked_stats and has_global_stats %}
+                                                {% set ranked_percentage = ((player_data.matches or 0) / total_matches * 100) if total_matches > 0 else 0 %}
+                                                <div class="activity-item">
+                                                    <span class="activity-label">Ranked Games</span>
+                                                    <span class="activity-value">{{ "%.0f"|format(ranked_percentage) }}%</span>
+                                                </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="card bg-dark-medium mt-4">
+                            <div class="card-header-enhanced">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-bolt me-2"></i> Quick Actions
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="d-grid gap-2">
+                                    <a href="{{ url_for('leaderboard') }}" class="btn btn-primary">
+                                        <i class="fas fa-trophy me-2"></i> View Leaderboard
+                                    </a>
+                                    <a href="{{ url_for('profile') }}" class="btn btn-secondary">
+                                        <i class="fas fa-user me-2"></i> Back to Profile
+                                    </a>
+                                    {% if not rank_data %}
+                                        <a href="{{ url_for('profile_rank_check') }}" class="btn btn-warning">
+                                            <i class="fas fa-check-circle me-2"></i> Verify Rank
+                                        </a>
+                                    {% endif %}
+                                    <button class="btn btn-outline-primary" onclick="refreshStats()">
+                                        <i class="fas fa-sync-alt me-2"></i> Refresh Stats
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     {% endif %}
+</div>
+
+<!-- Quick Action Buttons -->
+<div class="floating-actions">
+    <a href="{{ url_for('leaderboard') }}" class="btn btn-primary btn-floating" title="View Leaderboard">
+        <i class="fas fa-trophy"></i>
+    </a>
+    <a href="{{ url_for('profile') }}" class="btn btn-secondary btn-floating" title="Back to Profile">
+        <i class="fas fa-user"></i>
+    </a>
 </div>
 {% endblock %}
 
 {% block extra_js %}
+<!-- Enhanced JavaScript for charts and interactions -->
 <script>
-// Chart configuration and data
+// Enhanced chart data and functionality
 const chartData = {
     ranked: {{ ranked_matches | tojsonfilter | safe if ranked_matches else [] }},
     global: {{ global_matches | tojsonfilter | safe if global_matches else [] }}
 };
 
-// Chart.js default configuration
+// Chart.js configuration with enhanced styling
 Chart.defaults.color = '#f1f1f1';
 Chart.defaults.borderColor = '#2a303c';
 
-// Helper function to format chart data with match numbers
-function formatChartDataSimple(matches, label, color) {
-    if (!matches || matches.length === 0) return null;
+// Helper functions
+function refreshStats() {
+    // Show loading state
+    const refreshBtn = document.querySelector('[onclick="refreshStats()"]');
+    if (refreshBtn) {
+        refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing...';
+        refreshBtn.disabled = true;
+    }
 
-    return {
-        label: label,
-        data: matches.map((match, index) => ({
-            x: index + 1, // Use match number instead of date
-            y: match.new_mmr || 0
-        })),
-        borderColor: color,
-        backgroundColor: color.replace(')', ', 0.1)').replace('rgb', 'rgba'),
-        tension: 0.3,
-        fill: false
-    };
+    // Reload page after short delay for better UX
+    setTimeout(() => {
+        window.location.reload();
+    }, 500);
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Chart data:', chartData);
+function switchToAdvancedTab() {
+    const advancedTab = document.getElementById('advanced-tab');
+    const advancedTabPane = document.getElementById('advanced');
 
-    // Combined MMR chart
+    if (advancedTab && advancedTabPane) {
+        // Remove active from all tabs
+        document.querySelectorAll('.nav-link').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        document.querySelectorAll('.tab-pane').forEach(pane => {
+            pane.classList.remove('show', 'active');
+        });
+
+        // Activate advanced tab
+        advancedTab.classList.add('active');
+        advancedTabPane.classList.add('show', 'active');
+    }
+}
+
+function filterMatches(type) {
+    const rows = document.querySelectorAll('.match-row');
+    const buttons = document.querySelectorAll('.match-filters .btn');
+
+    // Update button states
+    buttons.forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Filter rows with animation
+    rows.forEach(row => {
+        if (type === 'all' || row.dataset.type === type) {
+            row.style.display = '';
+            row.style.opacity = '1';
+        } else {
+            row.style.opacity = '0';
+            setTimeout(() => {
+                if (!row.dataset.type.includes(type) && type !== 'all') {
+                    row.style.display = 'none';
+                }
+            }, 150);
+        }
+    });
+}
+
+// Enhanced chart creation
+document.addEventListener('DOMContentLoaded', function() {
+    // Create charts if data exists
     const mmrCtx = document.getElementById('mmrChart');
     if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {
-        const datasets = [];
-
-        // Add ranked data if available
-        if (chartData.ranked.length > 0) {
-            const rankedDataset = formatChartDataSimple(chartData.ranked, 'Ranked MMR', '#00a8ff');
-            if (rankedDataset) datasets.push(rankedDataset);
-        }
-
-        // Add global data if available
-        if (chartData.global.length > 0) {
-            const globalDataset = formatChartDataSimple(chartData.global, 'Global MMR', '#ff7e31');
-            if (globalDataset) datasets.push(globalDataset);
-        }
-
-        if (datasets.length > 0) {
-            new Chart(mmrCtx, {
-                type: 'line',
-                data: { datasets: datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            title: {
-                                display: true,
-                                text: 'Match Number',
-                                color: '#f1f1f1'
-                            },
-                            ticks: {
-                                color: '#f1f1f1',
-                                stepSize: 1
-                            },
-                            grid: {
-                                color: '#2a303c'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'MMR',
-                                color: '#f1f1f1'
-                            },
-                            ticks: {
-                                color: '#f1f1f1'
-                            },
-                            grid: {
-                                color: '#2a303c'
-                            },
-                            beginAtZero: false
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: true,
-                            position: 'top',
-                            labels: {
-                                color: '#f1f1f1'
-                            }
-                        },
-                        tooltip: {
-                            mode: 'index',
-                            intersect: false,
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                            titleColor: '#f1f1f1',
-                            bodyColor: '#f1f1f1',
-                            borderColor: '#2a303c',
-                            borderWidth: 1,
-                            callbacks: {
-                                title: function(tooltipItems) {
-                                    if (tooltipItems && tooltipItems[0]) {
-                                        return `Match ${tooltipItems[0].parsed.x}`;
-                                    }
-                                    return '';
-                                }
-                            }
-                        }
-                    },
-                    interaction: {
-                        mode: 'nearest',
-                        axis: 'x',
-                        intersect: false
-                    }
-                }
-            });
-        }
+        createEnhancedChart(mmrCtx, 'combined');
     }
 
-    // Individual ranked chart
     const rankedCtx = document.getElementById('rankedChart');
     if (rankedCtx && chartData.ranked.length > 0) {
-        const rankedDataset = formatChartDataSimple(chartData.ranked, 'Ranked MMR', '#00a8ff');
-        if (rankedDataset) {
-
-            new Chart(rankedCtx, {
-                type: 'line',
-                data: {
-                    datasets: [rankedDataset]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            title: {
-                                display: true,
-                                text: 'Match Number',
-                                color: '#f1f1f1'
-                            },
-                            ticks: {
-                                color: '#f1f1f1',
-                                stepSize: 1
-                            },
-                            grid: {
-                                color: '#2a303c'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'MMR',
-                                color: '#f1f1f1'
-                            },
-                            ticks: {
-                                color: '#f1f1f1'
-                            },
-                            grid: {
-                                color: '#2a303c'
-                            },
-                            beginAtZero: false
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                            titleColor: '#f1f1f1',
-                            bodyColor: '#f1f1f1',
-                            borderColor: '#2a303c',
-                            borderWidth: 1
-                        }
-                    }
-                }
-            });
-        }
+        createEnhancedChart(rankedCtx, 'ranked');
     }
 
-    // Individual global chart
     const globalCtx = document.getElementById('globalChart');
     if (globalCtx && chartData.global.length > 0) {
-        const globalDataset = formatChartDataSimple(chartData.global, 'Global MMR', '#ff7e31');
-        if (globalDataset) {
+        createEnhancedChart(globalCtx, 'global');
+    }
 
-            new Chart(globalCtx, {
-                type: 'line',
-                data: {
-                    datasets: [globalDataset]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: {
-                        x: {
-                            type: 'linear',
-                            title: {
-                                display: true,
-                                text: 'Match Number',
-                                color: '#f1f1f1'
-                            },
-                            ticks: {
-                                color: '#f1f1f1',
-                                stepSize: 1
-                            },
-                            grid: {
-                                color: '#2a303c'
-                            }
-                        },
-                        y: {
-                            title: {
-                                display: true,
-                                text: 'MMR',
-                                color: '#f1f1f1'
-                            },
-                            ticks: {
-                                color: '#f1f1f1'
-                            },
-                            grid: {
-                                color: '#2a303c'
-                            },
-                            beginAtZero: false
-                        }
-                    },
-                    plugins: {
-                        legend: {
-                            display: false
-                        },
-                        tooltip: {
-                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                            titleColor: '#f1f1f1',
-                            bodyColor: '#f1f1f1',
-                            borderColor: '#2a303c',
-                            borderWidth: 1
-                        }
-                    }
-                }
+    // Add hover effects to stat cards
+    addHoverEffects();
+
+    // Initialize tooltips for form indicators
+    initializeTooltips();
+});
+
+function createEnhancedChart(ctx, type) {
+    const datasets = [];
+
+    if (type === 'combined' || type === 'ranked') {
+        if (chartData.ranked.length > 0) {
+            datasets.push({
+                label: 'Ranked MMR',
+                data: chartData.ranked.map((match, index) => ({
+                    x: index + 1,
+                    y: match.new_mmr || 0
+                })),
+                borderColor: '#ffd700',
+                backgroundColor: 'rgba(255, 215, 0, 0.1)',
+                tension: 0.4,
+                fill: false,
+                borderWidth: 3,
+                pointBackgroundColor: '#ffd700',
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2,
+                pointRadius: 5,
+                pointHoverRadius: 7
             });
         }
     }
+
+    if (type === 'combined' || type === 'global') {
+        if (chartData.global.length > 0) {
+            datasets.push({
+                label: 'Global MMR',
+                data: chartData.global.map((match, index) => ({
+                    x: index + 1,
+                    y: match.new_mmr || 0
+                })),
+                borderColor: '#00a8ff',
+                backgroundColor: 'rgba(0, 168, 255, 0.1)',
+                tension: 0.4,
+                fill: false,
+                borderWidth: 3,
+                pointBackgroundColor: '#00a8ff',
+                pointBorderColor: '#ffffff',
+                pointBorderWidth: 2,
+                pointRadius: 5,
+                pointHoverRadius: 7
+            });
+        }
+    }
+
+    new Chart(ctx, {
+        type: 'line',
+        data: { datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                legend: {
+                    display: datasets.length > 1,
+                    position: 'top',
+                    labels: {
+                        color: '#f1f1f1',
+                        usePointStyle: true,
+                        padding: 20,
+                        font: {
+                            size: 12,
+                            weight: '500'
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                    titleColor: '#f1f1f1',
+                    bodyColor: '#f1f1f1',
+                    borderColor: '#2a303c',
+                    borderWidth: 1,
+                    cornerRadius: 8,
+                    displayColors: true,
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            return `Match ${tooltipItems[0].parsed.x}`;
+                        },
+                        label: function(context) {
+                            return `${context.dataset.label}: ${context.parsed.y} MMR`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'linear',
+                    title: {
+                        display: true,
+                        text: 'Match Number',
+                        color: '#f1f1f1',
+                        font: {
+                            size: 12,
+                            weight: '500'
+                        }
+                    },
+                    ticks: {
+                        color: '#a0a8b1',
+                        stepSize: 1,
+                        font: {
+                            size: 11
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(42, 48, 60, 0.5)',
+                        drawBorder: false
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'MMR',
+                        color: '#f1f1f1',
+                        font: {
+                            size: 12,
+                            weight: '500'
+                        }
+                    },
+                    ticks: {
+                        color: '#a0a8b1',
+                        font: {
+                            size: 11
+                        }
+                    },
+                    grid: {
+                        color: 'rgba(42, 48, 60, 0.5)',
+                        drawBorder: false
+                    },
+                    beginAtZero: false
+                }
+            }
+        }
+    });
+}
+
+function addHoverEffects() {
+    // Add pulse effect to streak badges
+    const streakBadges = document.querySelectorAll('.streak-badge');
+    streakBadges.forEach(badge => {
+        badge.addEventListener('mouseenter', function() {
+            this.classList.add('pulse');
+        });
+        badge.addEventListener('mouseleave', function() {
+            this.classList.remove('pulse');
+        });
+    });
+}
+
+function initializeTooltips() {
+    // Initialize Bootstrap tooltips for form dots
+    const formDots = document.querySelectorAll('.form-dot[title]');
+    formDots.forEach(dot => {
+        new bootstrap.Tooltip(dot);
+    });
+}
+
+// Add smooth scrolling for internal links
+document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    anchor.addEventListener('click', function (e) {
+        e.preventDefault();
+        const target = document.querySelector(this.getAttribute('href'));
+        if (target) {
+            target.scrollIntoView({
+                behavior: 'smooth',
+                block: 'start'
+            });
+        }
+    });
 });
+
+// Console debug info
+console.log('Enhanced Profile Stats loaded');
+console.log('Chart data:', chartData);
+console.log('Has ranked stats:', chartData.ranked.length > 0);
+console.log('Has global stats:', chartData.global.length > 0);
 </script>
 {% endblock %}
