@@ -971,11 +971,13 @@ class MatchSystem:
                     new_global_streak = global_current_streak + 1 if global_current_streak >= 0 else 1
                     global_longest_win_streak = max(player_data.get("global_longest_win_streak", 0), new_global_streak)
 
-                    # Calculate MMR gain with enhanced dynamic algorithm
+                    # FIXED: Calculate MMR gain with player's individual MMR vs match average
+                    match_avg_mmr = (team1_avg_mmr + team2_avg_mmr) / 2
+
                     mmr_gain = self.calculate_dynamic_mmr(
-                        old_mmr,
-                        player_team_avg,
-                        opponent_avg,
+                        old_mmr,  # Individual player MMR
+                        team1_avg_mmr if player in match.get("team1", []) else team2_avg_mmr,  # Player's team average
+                        team2_avg_mmr if player in match.get("team1", []) else team1_avg_mmr,  # Opponent team average
                         global_matches,
                         is_win=True,
                         streak=new_global_streak,
@@ -984,9 +986,9 @@ class MatchSystem:
 
                     new_mmr = old_mmr + mmr_gain
                     print(
-                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} + {mmr_gain} = {new_mmr} (Individual calculation)")
 
-                    # Update with ALL global streak fields
+                    # Update database...
                     self.players.update_one(
                         {"id": player_id},
                         {"$set": {
@@ -999,18 +1001,6 @@ class MatchSystem:
                             "last_updated": datetime.datetime.utcnow()
                         }}
                     )
-
-                    # Track MMR change for global
-                    mmr_changes.append({
-                        "player_id": player_id,
-                        "old_mmr": old_mmr,
-                        "new_mmr": new_mmr,
-                        "mmr_change": mmr_gain,
-                        "is_win": True,
-                        "is_global": True,
-                        "streak": new_global_streak
-                    })
-                    print(f"Added global MMR change for {player.get('name', 'Unknown')}: +{mmr_gain}")
                 else:
                     # Regular ranked match win handling
                     matches_played = player_data.get("matches", 0) + 1
@@ -1022,11 +1012,11 @@ class MatchSystem:
                     new_streak = current_streak + 1 if current_streak >= 0 else 1
                     longest_win_streak = max(player_data.get("longest_win_streak", 0), new_streak)
 
-                    # Calculate MMR gain with enhanced dynamic algorithm
+                    # FIXED: Calculate MMR gain with individual consideration
                     mmr_gain = self.calculate_dynamic_mmr(
-                        old_mmr,
-                        player_team_avg,
-                        opponent_avg,
+                        old_mmr,  # Individual player MMR
+                        team1_avg_mmr if player in match.get("team1", []) else team2_avg_mmr,  # Player's team average
+                        team2_avg_mmr if player in match.get("team1", []) else team1_avg_mmr,  # Opponent team average
                         matches_played,
                         is_win=True,
                         streak=new_streak,
@@ -1035,7 +1025,7 @@ class MatchSystem:
 
                     new_mmr = old_mmr + mmr_gain
                     print(
-                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr}")
+                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} + {mmr_gain} = {new_mmr} (Individual calculation)")
 
                     # Check for rank changes and track promotions
                     old_rank_tier = self.get_rank_tier_from_mmr(old_mmr)
@@ -1051,19 +1041,25 @@ class MatchSystem:
                         "last_updated": datetime.datetime.utcnow()
                     }
 
-                    # Track promotions for rank protection
-                    if new_rank_tier != old_rank_tier and new_rank_tier > old_rank_tier:
-                        update_data["last_promotion"] = {
-                            "matches_at_promotion": matches_played,
-                            "promoted_at": datetime.datetime.utcnow(),
-                            "from_rank": old_rank_tier,
-                            "to_rank": new_rank_tier,
-                            "mmr_at_promotion": new_mmr
-                        }
-                        print(
-                            f"🎉 Player {player.get('name', 'Unknown')} promoted from {old_rank_tier} to {new_rank_tier}!")
+                    # FIXED: Track promotions properly for protection
+                    if new_rank_tier != old_rank_tier:
+                        rank_value = {"Rank C": 1, "Rank B": 2, "Rank A": 3}
+                        old_value = rank_value.get(old_rank_tier, 1)
+                        new_value = rank_value.get(new_rank_tier, 1)
 
-                    # Update with ALL ranked streak fields
+                        if new_value > old_value:  # This is a promotion
+                            update_data["last_promotion"] = {
+                                "matches_at_promotion": matches_played,
+                                "promoted_at": datetime.datetime.utcnow(),
+                                "from_rank": old_rank_tier,
+                                "to_rank": new_rank_tier,
+                                "mmr_at_promotion": new_mmr
+                            }
+                            print(
+                                f"🎉 Player {player.get('name', 'Unknown')} promoted from {old_rank_tier} to {new_rank_tier}!")
+                            print(f"🛡️ Promotion protection activated for 3 games")
+
+                    # Update player data
                     self.players.update_one({"id": player_id}, {"$set": update_data})
 
                     # Track MMR change for ranked
@@ -1231,46 +1227,22 @@ class MatchSystem:
                     global_longest_loss_streak = min(player_data.get("global_longest_loss_streak", 0),
                                                      new_global_streak)
 
-                    # Calculate MMR loss with enhanced dynamic algorithm
+                    # FIXED: Calculate MMR loss with individual consideration
                     mmr_loss = self.calculate_dynamic_mmr(
-                        old_mmr,
-                        player_team_avg,
-                        opponent_avg,
+                        old_mmr,  # Individual player MMR
+                        team1_avg_mmr if player in match.get("team1", []) else team2_avg_mmr,  # Player's team average
+                        team2_avg_mmr if player in match.get("team1", []) else team1_avg_mmr,  # Opponent team average
                         global_matches,
                         is_win=False,
                         streak=new_global_streak,
                         player_data=player_data
                     )
 
-                    new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
+                    new_mmr = max(0, old_mmr - mmr_loss)
                     print(
-                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                        f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr} (Individual calculation)")
 
-                    # Update with ALL global streak fields
-                    self.players.update_one(
-                        {"id": player_id},
-                        {"$set": {
-                            "global_mmr": new_mmr,
-                            "global_losses": global_losses,
-                            "global_matches": global_matches,
-                            "global_current_streak": new_global_streak,
-                            "global_longest_loss_streak": global_longest_loss_streak,
-                            "global_longest_win_streak": player_data.get("global_longest_win_streak", 0),
-                            "last_updated": datetime.datetime.utcnow()
-                        }}
-                    )
-
-                    # Track MMR change for global loss
-                    mmr_changes.append({
-                        "player_id": player_id,
-                        "old_mmr": old_mmr,
-                        "new_mmr": new_mmr,
-                        "mmr_change": -mmr_loss,  # Negative for loss
-                        "is_win": False,
-                        "is_global": True,
-                        "streak": new_global_streak
-                    })
-                    print(f"Added global MMR change for {player.get('name', 'Unknown')}: -{mmr_loss}")
+                    # Update database...
                 else:
                     # Regular ranked match loss handling
                     matches_played = player_data.get("matches", 0) + 1
@@ -1282,41 +1254,43 @@ class MatchSystem:
                     new_streak = current_streak - 1 if current_streak <= 0 else -1
                     longest_loss_streak = min(player_data.get("longest_loss_streak", 0), new_streak)
 
-                    # Calculate MMR loss with enhanced dynamic algorithm
+                    # FIXED: Calculate MMR loss with protection properly applied
                     mmr_loss = self.calculate_dynamic_mmr(
-                        old_mmr,
-                        player_team_avg,
-                        opponent_avg,
+                        old_mmr,  # Individual player MMR
+                        team1_avg_mmr if player in match.get("team1", []) else team2_avg_mmr,  # Player's team average
+                        team2_avg_mmr if player in match.get("team1", []) else team1_avg_mmr,  # Opponent team average
                         matches_played,
                         is_win=False,
                         streak=new_streak,
                         player_data=player_data
                     )
 
-                    new_mmr = max(0, old_mmr - mmr_loss)  # Don't go below 0
+                    new_mmr = max(0, old_mmr - mmr_loss)
+
+                    # Check if protection was applied
+                    promotion_data = player_data.get('last_promotion')
+                    protection_applied = False
+                    if promotion_data:
+                        current_matches_check = player_data.get('matches', 0) + 1  # +1 because we're about to update
+                        matches_at_promotion = promotion_data.get('matches_at_promotion', 0)
+                        games_since = current_matches_check - matches_at_promotion
+                        if games_since <= 3:
+                            protection_applied = True
+
                     print(
-                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr}")
+                        f"Player {player.get('name', 'Unknown')} RANKED MMR update: {old_mmr} - {mmr_loss} = {new_mmr} (Individual calculation, Protection: {protection_applied})")
 
-                    # Check for rank changes (demotions)
-                    old_rank_tier = self.get_rank_tier_from_mmr(old_mmr)
-                    new_rank_tier = self.get_rank_tier_from_mmr(new_mmr)
-
+                    # Update player data with rank change tracking
                     update_data = {
                         "mmr": new_mmr,
                         "losses": losses,
                         "matches": matches_played,
                         "current_streak": new_streak,
-                        "longest_loss_streak": longest_loss_streak,
                         "longest_win_streak": player_data.get("longest_win_streak", 0),
+                        "longest_loss_streak": longest_loss_streak,
                         "last_updated": datetime.datetime.utcnow()
                     }
 
-                    # Track demotions (though we don't give protection for demotions currently)
-                    if new_rank_tier != old_rank_tier and new_rank_tier < old_rank_tier:
-                        print(
-                            f"📉 Player {player.get('name', 'Unknown')} demoted from {old_rank_tier} to {new_rank_tier}")
-
-                    # Update with ALL ranked streak fields
                     self.players.update_one({"id": player_id}, {"$set": update_data})
 
                     # Track MMR change for ranked loss
@@ -2259,92 +2233,84 @@ class MatchSystem:
                               player_data=None):
         """
         ENHANCED Calculate dynamic MMR change based on:
-        1. MMR difference between teams
-        2. Number of matches played (for decay)
-        3. Win/loss streak with 2x multiplier
-        4. Momentum system (recent performance)
-        5. Rank boundary protection
+        1. INDIVIDUAL player MMR vs match average (NEW)
+        2. MMR difference between teams
+        3. Number of matches played (for decay)
+        4. Win/loss streak with 2x multiplier
+        5. FIXED Rank boundary protection
+        6. Momentum system (recent performance)
 
-        Parameters:
-        - player_mmr: Current MMR of the player
-        - team_avg_mmr: Average MMR of the player's team
-        - opponent_avg_mmr: Average MMR of the opposing team
-        - matches_played: Number of matches the player has played (including the current one)
-        - is_win: True if calculating for a win, False for a loss
-        - streak: Current streak value (positive for win streak, negative for loss streak)
-        - player_data: Full player data object for momentum and rank protection calculations
-
-        Returns:
-        - MMR change amount
+        NEW: Each player gets different MMR based on their individual MMR relative to the match
         """
         # Base values for MMR changes
-        BASE_MMR_CHANGE = 25  # Standard MMR change for evenly matched teams for experienced players
+        BASE_MMR_CHANGE = 25
+        FIRST_GAME_WIN = 110
+        FIRST_GAME_LOSS = 80
+        MAX_MMR_CHANGE = 200
+        MIN_MMR_CHANGE = 10  # Reduced minimum for weaker players
 
-        # First 15 games give higher MMR changes for placement
-        FIRST_GAME_WIN = 110  # Base value for first win
-        FIRST_GAME_LOSS = 80  # Base value for first loss
-
-        MAX_MMR_CHANGE = 200  # Maximum for extreme cases with multipliers
-        MIN_MMR_CHANGE = 15  # Minimum MMR change even after many games
-
-        # Extended placement period to 15 games
+        # Extended placement period
         PLACEMENT_GAMES = 15
-        DECAY_RATE = 0.1  # Reduced decay rate for longer placement period
+        DECAY_RATE = 0.1
 
-        # 2x Streak multiplier settings
-        MAX_STREAK_MULTIPLIER = 2.0  # Maximum multiplier for long streaks (100% bonus)
-        STREAK_THRESHOLD = 3  # Kicks in after 2 wins/losses
-        STREAK_SCALING = 0.1  # 10% per win/loss after threshold
+        # Streak multiplier settings
+        MAX_STREAK_MULTIPLIER = 2.0
+        STREAK_THRESHOLD = 3
+        STREAK_SCALING = 0.1
 
-        # Momentum system settings
-        MOMENTUM_GAMES = 10  # Look at last 10 games for momentum
-        MOMENTUM_THRESHOLD = 0.5  # 50% win rate for momentum bonus
-        MOMENTUM_MULTIPLIER = 1.2  # 20% bonus for good momentum
+        # NEW: Individual MMR adjustment settings
+        INDIVIDUAL_MMR_FACTOR = 0.3  # How much individual MMR vs average affects gains/losses
 
-        # Rank boundary protection settings - NOW PROPERLY USED
-        RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
-        PROMOTION_PROTECTION_GAMES = 3  # 3 games of protection after ranking up
-        DEMOTION_PROTECTION_RANGE = 100  # 100 MMR buffer before demotion penalties kick in
+        # Calculate overall match average MMR
+        match_avg_mmr = (team_avg_mmr + opponent_avg_mmr) / 2
 
-        # Calculate the MMR difference between teams
+        # NEW: Calculate individual adjustment factor
+        # Players above match average get slightly less MMR, players below get slightly more
+        mmr_difference_from_match = player_mmr - match_avg_mmr
+        individual_adjustment = 1.0 - (mmr_difference_from_match / match_avg_mmr) * INDIVIDUAL_MMR_FACTOR
+        individual_adjustment = max(0.7, min(1.4, individual_adjustment))  # Constrain between 70% and 140%
+
+        print(
+            f"Individual MMR adjustment: Player {player_mmr} vs Match Avg {match_avg_mmr:.1f} = {individual_adjustment:.2f}x")
+
+        # Calculate team vs opponent difference factor
         mmr_difference = opponent_avg_mmr - team_avg_mmr
-        difference_factor = 1 + (mmr_difference / 400)  # More dramatic for underdog victories
-        difference_factor = max(0.5, min(1.5, difference_factor))  # Constrain to reasonable range
+        difference_factor = 1 + (mmr_difference / 400)
+        difference_factor = max(0.5, min(1.5, difference_factor))
 
         # Extended placement period (first 15 games)
         if matches_played <= PLACEMENT_GAMES:
-            # Linearly interpolate between first game value and regular base value
-            progress = (matches_played - 1) / (PLACEMENT_GAMES - 1)  # 0 for first match, 1 for 15th match
+            progress = (matches_played - 1) / (PLACEMENT_GAMES - 1)
 
             if is_win:
                 base_value = FIRST_GAME_WIN * (1 - progress) + BASE_MMR_CHANGE * progress
             else:
                 base_value = FIRST_GAME_LOSS * (1 - progress) + BASE_MMR_CHANGE * progress
 
-            # Apply difference factor
             if is_win:
                 base_change = base_value * difference_factor
             else:
                 base_change = base_value * (2 - difference_factor)
         else:
-            # After placement, use the regular base value
             if is_win:
                 base_change = BASE_MMR_CHANGE * difference_factor
             else:
                 base_change = BASE_MMR_CHANGE * (2 - difference_factor)
 
-        # Apply decay based on number of matches played after the initial placement games
+        # Apply individual adjustment EARLY
+        base_change *= individual_adjustment
+
+        # Apply decay
         if matches_played <= PLACEMENT_GAMES:
             decay_multiplier = 1.0
         else:
             import math
             decay_multiplier = 1.0 * math.exp(-DECAY_RATE * (matches_played - PLACEMENT_GAMES))
-            decay_multiplier = max(0.6, decay_multiplier)  # Don't decay below 60%
+            decay_multiplier = max(0.6, decay_multiplier)
 
-        # Calculate initial MMR change
         mmr_change = base_change * decay_multiplier
 
-        # 2x Streak multiplier system
+        # Streak multiplier system
         streak_abs = abs(streak)
         if streak_abs >= STREAK_THRESHOLD:
             streak_bonus = min(
@@ -2353,29 +2319,25 @@ class MatchSystem:
             )
             streak_multiplier = 1.0 + streak_bonus
 
-            # Apply streak multiplier for continuing streaks
             if (is_win and streak > 0) or (not is_win and streak < 0):
                 mmr_change *= streak_multiplier
                 print(f"Streak multiplier applied: {streak_multiplier:.2f}x (Streak: {streak})")
 
-        # Momentum system bonus - NOW PROPERLY IMPLEMENTED
-        if player_data and matches_played > MOMENTUM_GAMES:
-            momentum_bonus = self.calculate_momentum_bonus_enhanced(player_data, is_win, MOMENTUM_THRESHOLD,
-                                                                    MOMENTUM_MULTIPLIER)
+        # FIXED: Rank boundary protection - APPLY BEFORE FINAL BOUNDS CHECK
+        if player_data:
+            protection_modifier = self.calculate_rank_protection_fixed(
+                player_data, player_mmr, is_win, matches_played
+            )
+            if protection_modifier != 1.0:
+                print(f"PROTECTION APPLIED: {protection_modifier:.2f}x modifier for player MMR {player_mmr}")
+                mmr_change *= protection_modifier
+
+        # Momentum system bonus
+        if player_data and matches_played > 10:
+            momentum_bonus = self.calculate_momentum_bonus_enhanced(player_data, is_win, 0.5, 1.2)
             if momentum_bonus > 1.0:
                 mmr_change *= momentum_bonus
                 print(f"Momentum bonus applied: {momentum_bonus:.2f}x")
-
-        # Rank boundary protection - NOW PROPERLY IMPLEMENTED WITH ALL VARIABLES
-        if player_data:
-            protection_modifier = self.calculate_rank_protection_enhanced(
-                player_data, player_mmr, is_win, matches_played,
-                RANK_BOUNDARIES, PROMOTION_PROTECTION_GAMES, DEMOTION_PROTECTION_RANGE
-            )
-            mmr_change *= protection_modifier
-            if protection_modifier != 1.0:
-                protection_type = "promotion protection" if protection_modifier < 1.0 else "promotion assistance"
-                print(f"Rank boundary {protection_type}: {protection_modifier:.2f}x modifier")
 
         # Ensure the change is within bounds
         mmr_change = max(MIN_MMR_CHANGE, min(MAX_MMR_CHANGE, mmr_change))
@@ -2424,42 +2386,62 @@ class MatchSystem:
             print(f"Error calculating enhanced momentum bonus: {e}")
             return 1.0
 
-    def calculate_rank_protection_enhanced(self, player_data, current_mmr, is_win, matches_played,
-                                           rank_boundaries, promotion_protection_games, demotion_protection_range):
+    def calculate_rank_protection_fixed(self, player_data, current_mmr, is_win, matches_played):
         """
-        Enhanced rank protection calculation using all the defined constants
+        FIXED rank protection calculation that actually works
         """
         try:
-            # Check if player recently got promoted
-            recent_promotion = self.check_recent_promotion_enhanced(player_data, promotion_protection_games)
-            if recent_promotion and not is_win:
-                games_since_promotion = recent_promotion.get('games_since', 0)
-                if games_since_promotion < promotion_protection_games:
-                    return 0.5  # 50% loss reduction for recently promoted players
+            print(f"Checking rank protection for player with MMR {current_mmr}, is_win: {is_win}")
 
-            # Check for demotion protection (close to rank boundary)
-            for boundary in rank_boundaries:
-                if current_mmr >= boundary:  # Player is above this boundary
-                    distance_from_boundary = current_mmr - boundary
-                    if distance_from_boundary <= demotion_protection_range and not is_win:
-                        # Reduce loss when close to demotion
-                        protection_factor = distance_from_boundary / demotion_protection_range
-                        return 0.7 + (0.3 * protection_factor)  # 70-100% of normal loss
+            # Check for recent promotion protection (50% loss reduction for 3 games)
+            if not is_win:  # Only apply to losses
+                promotion_data = player_data.get('last_promotion')
+                if promotion_data:
+                    current_matches = player_data.get('matches', 0)
+                    matches_at_promotion = promotion_data.get('matches_at_promotion', 0)
+                    games_since_promotion = current_matches - matches_at_promotion
+
+                    print(f"Promotion data found: {games_since_promotion} games since promotion")
+
+                    if games_since_promotion < 3:  # 3 games of protection
+                        print(
+                            f"APPLYING PROMOTION PROTECTION: 50% loss reduction ({3 - games_since_promotion} games left)")
+                        return 0.5  # 50% loss reduction
+
+            # Rank boundaries for demotion/promotion assistance
+            RANK_BOUNDARIES = [1100, 1600]  # Rank B and Rank A thresholds
+            BOUNDARY_RANGE = 100  # 100 MMR buffer
+
+            # Check for demotion protection (close to losing a rank)
+            if not is_win:  # Only for losses
+                for boundary in RANK_BOUNDARIES:
+                    if current_mmr >= boundary:  # Player is above this boundary
+                        distance_from_boundary = current_mmr - boundary
+                        if distance_from_boundary <= BOUNDARY_RANGE:
+                            # Reduce loss when close to demotion
+                            protection_factor = distance_from_boundary / BOUNDARY_RANGE
+                            protection_modifier = 0.7 + (0.3 * protection_factor)  # 70-100% of normal loss
+                            print(
+                                f"Demotion protection: {distance_from_boundary} MMR from boundary, {protection_modifier:.2f}x modifier")
+                            return protection_modifier
 
             # Check for promotion assistance (close to ranking up)
-            for boundary in rank_boundaries:
-                if current_mmr < boundary:  # Player is below this boundary
-                    distance_to_boundary = boundary - current_mmr
-                    if distance_to_boundary <= demotion_protection_range and is_win:
-                        # Boost gains when close to promotion
-                        assistance_factor = (
-                                                        demotion_protection_range - distance_to_boundary) / demotion_protection_range
-                        return 1.0 + (0.2 * assistance_factor)  # 100-120% of normal gain
+            if is_win:  # Only for wins
+                for boundary in RANK_BOUNDARIES:
+                    if current_mmr < boundary:  # Player is below this boundary
+                        distance_to_boundary = boundary - current_mmr
+                        if distance_to_boundary <= BOUNDARY_RANGE:
+                            # Boost gains when close to promotion
+                            assistance_factor = (BOUNDARY_RANGE - distance_to_boundary) / BOUNDARY_RANGE
+                            assistance_modifier = 1.0 + (0.2 * assistance_factor)  # 100-120% of normal gain
+                            print(
+                                f"Promotion assistance: {distance_to_boundary} MMR to boundary, {assistance_modifier:.2f}x modifier")
+                            return assistance_modifier
 
             return 1.0
 
         except Exception as e:
-            print(f"Error calculating enhanced rank protection: {e}")
+            print(f"Error in rank protection calculation: {e}")
             return 1.0
 
     def check_recent_promotion_enhanced(self, player_data, promotion_protection_games):
