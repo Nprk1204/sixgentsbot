@@ -589,6 +589,7 @@ def profile_stats():
         # Get match history for performance graphs
         ranked_matches = []
         global_matches = []
+        recent_matches = []
 
         try:
             print("Fetching match history...")
@@ -602,7 +603,7 @@ def profile_stats():
 
             print(f"Found {len(match_history)} matches in history")
 
-            # Process match history for graphs
+            # Process match history - CLEAN VERSION
             for match in match_history:
                 try:
                     # Get completed date
@@ -611,45 +612,46 @@ def profile_stats():
                         print(f"Skipping match {match.get('match_id')} - no completed_at timestamp")
                         continue
 
-                    # Find MMR change for this player first
+                    # Find MMR change for this player
                     mmr_change_for_player = 0
+                    new_mmr = 0
+                    streak_value = 0
+
                     mmr_changes = match.get("mmr_changes", [])
                     for mmr_change in mmr_changes:
                         if mmr_change.get("player_id") == user['id']:
                             mmr_change_for_player = mmr_change.get("mmr_change", 0)
+                            new_mmr = mmr_change.get("new_mmr", 0)
+                            streak_value = mmr_change.get("streak", 0)
                             break
 
                     # Simple logic: if MMR went up, it's a win
                     player_won = mmr_change_for_player > 0
 
+                    # Create match data for both charts and display
                     match_data = {
-                        'date': completed_at.isoformat() if hasattr(completed_at, 'isoformat') else str(completed_at),
+                        'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(
+                            completed_at),
                         'won': player_won,
                         'match_id': match.get('match_id', ''),
                         'mmr_change': mmr_change_for_player,
-                        'new_mmr': 0,
+                        'new_mmr': new_mmr,
                         'player_result': 'Win' if player_won else 'Loss',
                         'is_global': match.get("is_global", False),
-                        'streak': 0,  # We'll get this from MMR changes
+                        'streak': streak_value,
                         'team1': match.get('team1', []),
                         'team2': match.get('team2', []),
                         'winner': match.get('winner')
                     }
 
-                    # Get new MMR and streak if available
-                    for mmr_change in mmr_changes:
-                        if mmr_change.get("player_id") == user['id']:
-                            match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
-                            match_data['streak'] = mmr_change.get("streak", 0)  # Add streak data
-                            break
-
-                    # Sort into ranked vs global based on match type
+                    # Add to appropriate collections
                     if match.get("is_global", False):
-                        # Only include if this was a global MMR change
                         global_matches.append(match_data)
                     else:
-                        # Only include if this was a ranked MMR change
                         ranked_matches.append(match_data)
+
+                    # Add to recent matches for display
+                    recent_matches.append(match_data)
 
                     print(
                         f"Processed match {match.get('match_id')}: {match_data['player_result']}, MMR: {mmr_change_for_player}")
@@ -658,49 +660,13 @@ def profile_stats():
                     print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
                     continue
 
-                    # Find MMR change for this player
-                    mmr_changes = match.get("mmr_changes", [])
-                    player_mmr_change = None
-
-                    for mmr_change in mmr_changes:
-                        if mmr_change.get("player_id") == user['id']:
-                            player_mmr_change = mmr_change
-                            break
-
-                    if player_mmr_change:
-                        match_data['mmr_change'] = player_mmr_change.get("mmr_change", 0)
-                        match_data['new_mmr'] = player_mmr_change.get("new_mmr", 0)
-
-                        # Sort into ranked vs global based on match type
-                        if match.get("is_global", False):
-                            # Only include if this was a global MMR change
-                            if player_mmr_change.get("is_global", False):
-                                global_matches.append(match_data)
-                        else:
-                            # Only include if this was a ranked MMR change
-                            if not player_mmr_change.get("is_global", False):
-                                ranked_matches.append(match_data)
-                    else:
-                        print(f"No MMR change found for player in match {match.get('match_id')}")
-
-                except Exception as process_error:
-                    print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
-                    continue
-
         except Exception as match_error:
             print(f"Error fetching match history: {match_error}")
 
-        print(f"Processed matches: {len(ranked_matches)} ranked, {len(global_matches)} global")
-
-        # Combine ranked and global matches for recent_matches
-        recent_matches = []
-        if ranked_matches:
-            recent_matches.extend(ranked_matches)
-        if global_matches:
-            recent_matches.extend(global_matches)
-
-        # Sort by date (most recent first)
+        # Sort recent matches by date (most recent first)
         recent_matches.sort(key=lambda x: x.get('date', ''), reverse=True)
+
+        print(f"Final counts: {len(ranked_matches)} ranked, {len(global_matches)} global, {len(recent_matches)} total")
 
         return render_template('profile_stats.html',
                                user=user,
