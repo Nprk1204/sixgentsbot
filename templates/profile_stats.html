@@ -1305,14 +1305,20 @@ console.log('=== JAVASCRIPT DEBUG END ===');
 
 {% block extra_js %}
 <script>
+// Enhanced data loading with better error handling
+console.log('Loading JavaScript data...');
+
+// Store matches data for details modal
+const matchesData = {{ recent_matches | tojsonfilter | safe }};
+
 // Enhanced chart data and functionality
 const chartData = {
-    ranked: {{ ranked_matches | tojsonfilter | safe if ranked_matches else [] }},
-    global: {{ global_matches | tojsonfilter | safe if global_matches else [] }}
+    ranked: {{ ranked_matches | tojsonfilter | safe }},
+    global: {{ global_matches | tojsonfilter | safe }}
 };
 
-// Store matches data for details modal - FIXED VERSION
-const matchesData = {{ recent_matches | tojsonfilter | safe if recent_matches else [] }};
+console.log('Loaded matchesData:', matchesData);
+console.log('Loaded chartData:', chartData);
 
 console.log('Chart data loaded:', chartData);
 console.log('Matches data loaded:', matchesData);
