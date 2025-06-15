@@ -215,150 +215,7 @@
                         <i class="fab fa-discord me-1"></i> Discord Member
                     </p>
 
-                    <!-- Enhanced Rank Card -->
-                    {% if rank_data %}
-                        <div class="enhanced-rank-card mb-3">
-                            {% if rank_data.tier == 'Rank A' %}
-                                <div class="rank-card-header bg-danger">
-                                    <div class="rank-letter-circle">
-                                        <span class="rank-letter">A</span>
-                                    </div>
-                                </div>
-                                <div class="rank-card-content">
-                                    <div class="rank-icon-section">
-                                        <i class="fas fa-trophy text-danger"></i>
-                                    </div>
-                                    <h6 class="rank-title">Ranks: Grand Champion I & Above</h6>
 
-                                    <div class="rank-stats-section">
-                                        <div class="rank-stat-row">
-                                            <span class="stat-label">STARTING MMR</span>
-                                            <span class="stat-value text-danger">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
-                                        </div>
-                                        <div class="rank-stat-row">
-                                            <span class="stat-label">DISCORD ROLE</span>
-                                            <span class="badge bg-danger">Rank A</span>
-                                        </div>
-                                    </div>
-
-                                    {% if player_data and player_data.global_mmr %}
-                                    <div class="global-mmr-section">
-                                        <i class="fas fa-globe me-1"></i>
-                                        <span>{{ player_data.global_mmr }} Global</span>
-                                    </div>
-                                    {% endif %}
-
-                                    <div class="rank-description">
-                                        <i class="fas fa-star me-1"></i>
-                                        <small>For the most skilled players who have reached the highest ranks</small>
-                                    </div>
-                                </div>
-                            {% elif rank_data.tier == 'Rank B' %}
-                                <div class="rank-card-header bg-primary">
-                                    <div class="rank-letter-circle">
-                                        <span class="rank-letter">B</span>
-                                    </div>
-                                </div>
-                                <div class="rank-card-content">
-                                    <div class="rank-icon-section">
-                                        <i class="fas fa-award text-primary"></i>
-                                    </div>
-                                    <h6 class="rank-title">Ranks: Champion I - Champion III</h6>
-
-                                    <div class="rank-stats-section">
-                                        <div class="rank-stat-row">
-                                            <span class="stat-label">STARTING MMR</span>
-                                            <span class="stat-value text-primary">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
-                                        </div>
-                                        <div class="rank-stat-row">
-                                            <span class="stat-label">DISCORD ROLE</span>
-                                            <span class="badge bg-primary">Rank B</span>
-                                        </div>
-                                    </div>
-
-                                    {% if player_data and player_data.global_mmr %}
-                                    <div class="global-mmr-section">
-                                        <i class="fas fa-globe me-1"></i>
-                                        <span>{{ player_data.global_mmr }} Global</span>
-                                    </div>
-                                    {% endif %}
-
-                                    <div class="rank-description">
-                                        <i class="fas fa-chart-line me-1"></i>
-                                        <small>For experienced players who have mastered advanced mechanics</small>
-                                    </div>
-                                </div>
-                            {% else %}
-                                <div class="rank-card-header bg-success">
-                                    <div class="rank-letter-circle">
-                                        <span class="rank-letter">C</span>
-                                    </div>
-                                </div>
-                                <div class="rank-card-content">
-                                    <div class="rank-icon-section">
-                                        <i class="fas fa-medal text-success"></i>
-                                    </div>
-                                    <h6 class="rank-title">Ranks: Bronze I - Diamond III</h6>
-
-                                    <div class="rank-stats-section">
-                                        <div class="rank-stat-row">
-                                            <span class="stat-label">STARTING MMR</span>
-                                            <span class="stat-value text-success">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
-                                        </div>
-                                        <div class="rank-stat-row">
-                                            <span class="stat-label">DISCORD ROLE</span>
-                                            <span class="badge bg-success">Rank C</span>
-                                        </div>
-                                    </div>
-
-                                    {% if player_data and player_data.global_mmr %}
-                                    <div class="global-mmr-section">
-                                        <i class="fas fa-globe me-1"></i>
-                                        <span>{{ player_data.global_mmr }} Global</span>
-                                    </div>
-                                    {% endif %}
-
-                                    <div class="rank-description">
-                                        <i class="fas fa-graduation-cap me-1"></i>
-                                        <small>For players learning and improving their skills</small>
-                                    </div>
-                                </div>
-                            {% endif %}
-                        </div>
-                    {% else %}
-                        <!-- Unverified Enhanced Card -->
-                        <div class="enhanced-rank-card mb-3">
-                            <div class="rank-card-header bg-secondary">
-                                <div class="rank-letter-circle">
-                                    <span class="rank-letter">?</span>
-                                </div>
-                            </div>
-                            <div class="rank-card-content">
-                                <div class="rank-icon-section">
-                                    <i class="fas fa-question text-muted"></i>
-                                </div>
-                                <h6 class="rank-title">Rank Verification Needed</h6>
-
-                                <div class="rank-stats-section">
-                                    <div class="rank-stat-row">
-                                        <span class="stat-label">STATUS</span>
-                                        <span class="badge bg-warning">Unverified</span>
-                                    </div>
-                                </div>
-
-                                <div class="verification-action mt-3">
-                                    <a href="{{ url_for('profile_rank_check') }}" class="btn btn-warning btn-sm w-100">
-                                        <i class="fas fa-check-circle me-1"></i> Verify Your Rank
-                                    </a>
-                                </div>
-
-                                <div class="rank-description">
-                                    <i class="fas fa-info-circle me-1"></i>
-                                    <small>Verify your rank to get the right Discord role and starting MMR</small>
-                                </div>
-                            </div>
-                        </div>
-                    {% endif %}
 
                     {% if user.guild_member %}
                         <div class="guild-info">
@@ -369,6 +226,112 @@
                     {% endif %}
                 </div>
             </div>
+
+            <!-- Separate Rank Card -->
+            {% if rank_data %}
+                <div class="enhanced-rank-card mb-4">
+                    {% if rank_data.tier == 'Rank A' %}
+                        <div class="rank-card-header bg-danger">
+                            <div class="rank-letter-circle">
+                                <span class="rank-letter">A</span>
+                            </div>
+                        </div>
+                        <div class="rank-card-content">
+                            <div class="rank-icon-section">
+                                <i class="fas fa-trophy text-danger"></i>
+                            </div>
+                            <h6 class="rank-title">Ranks: Grand Champion I & Above</h6>
+
+                            <div class="rank-stats-section">
+                                <div class="rank-stat-row">
+                                    <span class="stat-label">CURRENT MMR</span>
+                                    <span class="stat-value text-danger">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
+                                </div>
+                            </div>
+
+                            {% if player_data and player_data.global_mmr %}
+                            <div class="global-mmr-section">
+                                <i class="fas fa-globe me-1"></i>
+                                <span>{{ player_data.global_mmr }} Current Global MMR</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    {% elif rank_data.tier == 'Rank B' %}
+                        <div class="rank-card-header bg-primary">
+                            <div class="rank-letter-circle">
+                                <span class="rank-letter">B</span>
+                            </div>
+                        </div>
+                        <div class="rank-card-content">
+                            <div class="rank-icon-section">
+                                <i class="fas fa-award text-primary"></i>
+                            </div>
+                            <h6 class="rank-title">Ranks: Champion I - Champion III</h6>
+
+                            <div class="rank-stats-section">
+                                <div class="rank-stat-row">
+                                    <span class="stat-label">CURRENT MMR</span>
+                                    <span class="stat-value text-primary">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
+                                </div>
+                            </div>
+
+                            {% if player_data and player_data.global_mmr %}
+                            <div class="global-mmr-section">
+                                <i class="fas fa-globe me-1"></i>
+                                <span>{{ player_data.global_mmr }} Current Global MMR</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <div class="rank-card-header bg-success">
+                            <div class="rank-letter-circle">
+                                <span class="rank-letter">C</span>
+                            </div>
+                        </div>
+                        <div class="rank-card-content">
+                            <div class="rank-icon-section">
+                                <i class="fas fa-medal text-success"></i>
+                            </div>
+                            <h6 class="rank-title">Ranks: Bronze I - Diamond III</h6>
+
+                            <div class="rank-stats-section">
+                                <div class="rank-stat-row">
+                                    <span class="stat-label">CURRENT MMR</span>
+                                    <span class="stat-value text-success">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
+                                </div>
+                            </div>
+
+                            {% if player_data and player_data.global_mmr %}
+                            <div class="global-mmr-section">
+                                <i class="fas fa-globe me-1"></i>
+                                <span>{{ player_data.global_mmr }} Current Global MMR</span>
+                            </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+            {% else %}
+                <!-- Unverified Rank Card -->
+                <div class="enhanced-rank-card mb-4">
+                    <div class="rank-card-header bg-secondary">
+                        <div class="rank-letter-circle">
+                            <span class="rank-letter">?</span>
+                        </div>
+                    </div>
+                    <div class="rank-card-content">
+                        <div class="rank-icon-section">
+                            <i class="fas fa-question text-muted"></i>
+                        </div>
+                        <h6 class="rank-title">Rank Verification Needed</h6>
+
+                        <div class="verification-action mt-3">
+                            <a href="{{ url_for('profile_rank_check') }}" class="btn btn-warning btn-sm w-100">
+                                <i class="fas fa-check-circle me-1"></i> Verify Your Rank
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            {% endif %}
 
             <!-- Quick Actions Card -->
             <div class="card bg-dark-medium">
