@@ -658,11 +658,22 @@ def profile_stats():
 
         print(f"Processed matches: {len(ranked_matches)} ranked, {len(global_matches)} global")
 
+        # Combine ranked and global matches for recent_matches
+        recent_matches = []
+        if ranked_matches:
+            recent_matches.extend(ranked_matches)
+        if global_matches:
+            recent_matches.extend(global_matches)
+
+        # Sort by date (most recent first)
+        recent_matches.sort(key=lambda x: x.get('date', ''), reverse=True)
+
         return render_template('profile_stats.html',
                                user=user,
                                player_data=player_data,
                                ranked_matches=ranked_matches,
-                               global_matches=global_matches)
+                               global_matches=global_matches,
+                               recent_matches=recent_matches)
 
     except Exception as e:
         print(f"Error in profile_stats route: {e}")
