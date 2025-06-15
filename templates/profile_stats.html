@@ -1491,6 +1491,37 @@ function createChart(ctx, type) {
     });
 }
 
+function calculateInitialStats() {
+    // Calculate the correct initial stats from the actual match data
+    if (!matchesData || matchesData.length === 0) {
+        return;
+    }
+
+    let totalMatches = matchesData.length;
+    let totalWins = 0;
+    let totalLosses = 0;
+
+    // Count wins and losses from the actual data
+    matchesData.forEach(match => {
+        if (match.player_result === 'Win') {
+            totalWins++;
+        } else if (match.player_result === 'Loss') {
+            totalLosses++;
+        }
+    });
+
+    // Update the display
+    const totalMatchesEl = document.getElementById('totalMatchesCount');
+    const totalWinsEl = document.getElementById('totalWinsCount');
+    const totalLossesEl = document.getElementById('totalLossesCount');
+
+    if (totalMatchesEl) totalMatchesEl.textContent = totalMatches;
+    if (totalWinsEl) totalWinsEl.textContent = totalWins;
+    if (totalLossesEl) totalLossesEl.textContent = totalLosses;
+
+    console.log(`Initial stats: ${totalMatches} matches, ${totalWins} wins, ${totalLosses} losses`);
+}
+
 // FIXED: Better match details function
 function showMatchDetails(matchIndex) {
     console.log('Showing match details for index:', matchIndex);
@@ -1696,16 +1727,26 @@ function updateFilteredStats(type) {
     const rows = document.querySelectorAll('.match-row');
     let totalMatches = 0;
     let wins = 0;
+    let losses = 0;
 
     rows.forEach(row => {
         if (type === 'all' || row.dataset.type === type) {
             totalMatches++;
-            const resultBadge = row.querySelector('.badge');
-            if (resultBadge && resultBadge.textContent.includes('Win')) {
-                wins++;
+
+            // FIXED: Look for the actual result badge, not just any badge
+            const resultBadge = row.querySelector('.badge.bg-success, .badge.bg-danger');
+            if (resultBadge) {
+                if (resultBadge.classList.contains('bg-success') || resultBadge.textContent.trim().includes('Win')) {
+                    wins++;
+                } else if (resultBadge.classList.contains('bg-danger') || resultBadge.textContent.trim().includes('Loss')) {
+                    losses++;
+                }
             }
         }
     });
+
+    // Double-check: losses should equal totalMatches - wins
+    losses = totalMatches - wins;
 
     const totalMatchesEl = document.getElementById('totalMatchesCount');
     const totalWinsEl = document.getElementById('totalWinsCount');
@@ -1713,7 +1754,9 @@ function updateFilteredStats(type) {
 
     if (totalMatchesEl) totalMatchesEl.textContent = totalMatches;
     if (totalWinsEl) totalWinsEl.textContent = wins;
-    if (totalLossesEl) totalLossesEl.textContent = totalMatches - wins;
+    if (totalLossesEl) totalLossesEl.textContent = losses;
+
+    console.log(`Filter stats updated: ${totalMatches} matches, ${wins} wins, ${losses} losses`);
 }
 
 // Chart creation
@@ -1721,6 +1764,9 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Enhanced Profile Stats loaded');
     console.log('Chart data:', chartData);
     console.log('Matches data:', matchesData);
+
+    // Calculate initial stats correctly
+    calculateInitialStats();
 
     // Wait for Chart.js to be fully loaded
     if (typeof Chart === 'undefined') {
