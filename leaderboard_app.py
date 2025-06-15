@@ -672,6 +672,141 @@ def profile_stats():
         return redirect(url_for('profile'))
 
 
+@app.route('/debug/player-data/<player_id>')
+def debug_player_data(player_id):
+    """Debug route to check what data exists for a player"""
+    try:
+        print(f"=== DEBUG: Checking data for player {player_id} ===")
+
+        # 1. Check if player exists in players collection
+        player = players_collection.find_one({"id": player_id})
+        print(f"Player document: {player}")
+
+        # 2. Check matches where this player participated
+        matches = list(matches_collection.find({
+            "$or": [
+                {"team1.id": player_id},
+                {"team2.id": player_id}
+            ]
+        }).sort("completed_at", -1))
+
+        print(f"Found {len(matches)} matches for player {player_id}")
+
+        # 3. Check each match structure
+        for i, match in enumerate(matches):
+            print(f"\n--- Match {i + 1} ---")
+            print(f"Match ID: {match.get('match_id')}")
+            print(f"Status: {match.get('status')}")
+            print(f"Completed at: {match.get('completed_at')}")
+            print(f"Is global: {match.get('is_global')}")
+            print(f"Team1: {match.get('team1')}")
+            print(f"Team2: {match.get('team2')}")
+            print(f"Winner: {match.get('winner')}")
+            print(f"MMR Changes: {match.get('mmr_changes')}")
+
+            # Check if player is actually in the teams
+            player_in_team1 = any(p.get("id") == player_id for p in match.get("team1", []))
+            player_in_team2 = any(p.get("id") == player_id for p in match.get("team2", []))
+            print(f"Player in team1: {player_in_team1}")
+            print(f"Player in team2: {player_in_team2}")
+
+        # 4. Check what the profile route would return
+        from datetime import datetime, timedelta
+
+        recent_matches = []
+        for match in matches:
+            try:
+                # Determine if player won
+                player_in_team1 = any(p.get("id") == player_id for p in match.get("team1", []))
+                winner = match.get("winner")
+                player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+
+                # Get completed date
+                completed_at = match.get('completed_at')
+                if not completed_at:
+                    print(f"Skipping match {match.get('match_id')} - no completed_at")
+                    continue
+
+                match_data = {
+                    'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(
+                        completed_at),
+                    'player_result': 'Win' if player_won else 'Loss',
+                    'is_global': match.get("is_global", False),
+                    'mmr_change': 0
+                }
+
+                # Find MMR change for this player
+                mmr_changes = match.get("mmr_changes", [])
+                for mmr_change in mmr_changes:
+                    if mmr_change.get("player_id") == player_id:
+                        match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                        break
+
+                recent_matches.append(match_data)
+                print(f"Processed match: {match_data}")
+
+            except Exception as process_error:
+                print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
+                continue
+
+        return {
+            "player_exists": player is not None,
+            "player_data": player,
+            "total_matches_found": len(matches),
+            "processed_matches": len(recent_matches),
+            "recent_matches": recent_matches,
+            "raw_matches": [
+                {
+                    "match_id": m.get("match_id"),
+                    "status": m.get("status"),
+                    "completed_at": str(m.get("completed_at")),
+                    "is_global": m.get("is_global"),
+                    "has_teams": bool(m.get("team1") and m.get("team2")),
+                    "has_mmr_changes": bool(m.get("mmr_changes"))
+                } for m in matches
+            ]
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+# Also add this simpler debug route
+@app.route('/debug/collections')
+def debug_collections():
+    """Check the state of all collections"""
+    try:
+        return {
+            "players_count": players_collection.count_documents({}),
+            "matches_count": matches_collection.count_documents({}),
+            "ranks_count": ranks_collection.count_documents({}),
+            "sample_player": players_collection.find_one({}),
+            "sample_match": matches_collection.find_one({}),
+            "completed_matches": matches_collection.count_documents({"status": "completed"}),
+            "matches_with_teams": matches_collection.count_documents({
+                "team1": {"$exists": True, "$ne": []},
+                "team2": {"$exists": True, "$ne": []}
+            })
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# Add this to check your specific user ID
+@app.route('/debug/my-data')
+@login_required
+def debug_my_data():
+    """Debug the current user's data"""
+    user = get_current_user()
+    if not user:
+        return {"error": "Not logged in"}
+
+    return debug_player_data(user['id'])
+
 @app.route('/profile/rank-check')
 @login_required
 def profile_rank_check():
