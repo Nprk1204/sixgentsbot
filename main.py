@@ -1179,9 +1179,35 @@ async def report_slash_cloud_enhanced(interaction: discord.Interaction, match_id
         winning_team_streaks = []
         losing_team_streaks = []
 
+        # Debug: Print all MMR changes and player data
+        print(f"\n=== DEBUG MMR CHANGES FOR MATCH {match_id} ===")
+        print(f"Match is global: {is_global}")
+        print(f"Total MMR changes found: {len(match_result.get('mmr_changes', []))}")
+
+        for i, change in enumerate(match_result.get('mmr_changes', [])):
+            player_id = change.get("player_id")
+            mmr_change = change.get("mmr_change", 0)
+            change_is_global = change.get("is_global", False)
+            streak = change.get("streak", 0)
+            print(
+                f"  Change {i + 1}: Player {player_id}, MMR: {mmr_change:+d}, Global: {change_is_global}, Streak: {streak}")
+
+        print(f"\nProcessing teams:")
+        print(f"Winning team: {[p.get('name', 'Unknown') + ' (' + p.get('id', 'no-id') + ')' for p in winning_team]}")
+        print(f"Losing team: {[p.get('name', 'Unknown') + ' (' + p.get('id', 'no-id') + ')' for p in losing_team]}")
+
+        print(f"\nMMR changes by player:")
+        for player_id, change_data in mmr_changes_by_player.items():
+            print(f"  Player {player_id}: {change_data}")
+
+        print("=== END DEBUG ===\n")
+
         # Extract MMR changes for winning team with proper global/ranked filtering
         for player in winning_team:
             player_id = player.get("id")
+
+            # Add this debug line right here:
+            print(f"Processing winner {player.get('name', 'Unknown')} (ID: {player_id})")
 
             if player_id and player_id in mmr_changes_by_player:
                 change_data = mmr_changes_by_player[player_id]
