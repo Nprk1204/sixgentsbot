@@ -1308,36 +1308,42 @@ console.log('=== JAVASCRIPT DEBUG END ===');
 // Enhanced data loading with better error handling
 console.log('Loading JavaScript data...');
 
-// Store matches data for details modal
-const matchesData = {{ recent_matches | tojsonfilter | safe }};
+// Store matches data for details modal - FIXED: Ensure data exists
+const matchesData = {% if recent_matches %}{{ recent_matches | tojsonfilter | safe }}{% else %}[]{% endif %};
 
-// Enhanced chart data and functionality
+// Enhanced chart data and functionality - FIXED: Check if data exists before converting
 const chartData = {
-    ranked: {{ ranked_matches | tojsonfilter | safe }},
-    global: {{ global_matches | tojsonfilter | safe }}
+    ranked: {% if ranked_matches %}{{ ranked_matches | tojsonfilter | safe }}{% else %}[]{% endif %},
+    global: {% if global_matches %}{{ global_matches | tojsonfilter | safe }}{% else %}[]{% endif %}
 };
 
 console.log('Loaded matchesData:', matchesData);
 console.log('Loaded chartData:', chartData);
 
-console.log('Chart data loaded:', chartData);
-console.log('Matches data loaded:', matchesData);
-
 // Chart.js configuration
-Chart.defaults.color = '#f1f1f1';
-Chart.defaults.borderColor = '#2a303c';
+if (typeof Chart !== 'undefined') {
+    Chart.defaults.color = '#f1f1f1';
+    Chart.defaults.borderColor = '#2a303c';
+} else {
+    console.error('Chart.js not loaded!');
+}
 
 // FIXED: Better date parsing for charts
 function createChart(ctx, type) {
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not available');
+        return;
+    }
+
     const datasets = [];
 
     if (type === 'combined' || type === 'ranked') {
-        if (chartData.ranked.length > 0) {
+        if (chartData.ranked && chartData.ranked.length > 0) {
             datasets.push({
                 label: 'Ranked MMR',
                 data: chartData.ranked.map((match, index) => ({
                     x: index + 1,
-                    y: match.new_mmr || 0
+                    y: match.new_mmr || match.mmr_change || 0
                 })),
                 borderColor: '#ffd700',
                 backgroundColor: 'rgba(255, 215, 0, 0.1)',
@@ -1354,12 +1360,12 @@ function createChart(ctx, type) {
     }
 
     if (type === 'combined' || type === 'global') {
-        if (chartData.global.length > 0) {
+        if (chartData.global && chartData.global.length > 0) {
             datasets.push({
                 label: 'Global MMR',
                 data: chartData.global.map((match, index) => ({
                     x: index + 1,
-                    y: match.new_mmr || 0
+                    y: match.new_mmr || match.mmr_change || 0
                 })),
                 borderColor: '#00a8ff',
                 backgroundColor: 'rgba(0, 168, 255, 0.1)',
@@ -1377,6 +1383,18 @@ function createChart(ctx, type) {
 
     if (datasets.length === 0) {
         console.log('No chart data available for type:', type);
+        // Show a message in the chart container
+        const container = ctx.parentElement;
+        if (container) {
+            container.innerHTML = `
+                <div class="d-flex align-items-center justify-content-center h-100">
+                    <div class="text-center">
+                        <i class="fas fa-chart-line fa-3x text-muted mb-3 opacity-50"></i>
+                        <p class="text-muted mb-0">No match data available for chart</p>
+                    </div>
+                </div>
+            `;
+        }
         return;
     }
 
@@ -1477,6 +1495,12 @@ function createChart(ctx, type) {
 function showMatchDetails(matchIndex) {
     console.log('Showing match details for index:', matchIndex);
     console.log('Available matches:', matchesData);
+
+    if (!matchesData || matchesData.length === 0) {
+        console.error('No matches data available');
+        alert('No match data available');
+        return;
+    }
 
     const match = matchesData[matchIndex];
     if (!match) {
@@ -1697,6 +1721,12 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Enhanced Profile Stats loaded');
     console.log('Chart data:', chartData);
     console.log('Matches data:', matchesData);
+
+    // Wait for Chart.js to be fully loaded
+    if (typeof Chart === 'undefined') {
+        console.error('Chart.js is not loaded! Make sure Chart.js is included in the page.');
+        return;
+    }
 
     // Create charts if data exists and canvas elements exist
     const mmrCtx = document.getElementById('mmrChart');

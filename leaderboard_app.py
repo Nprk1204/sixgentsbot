@@ -166,16 +166,21 @@ except Exception as e:
 @app.template_filter('tojsonfilter')
 def to_json_filter(obj):
     """Convert Python object to JSON string for safe template usage"""
+    import json
+    import datetime
 
     def json_serial(obj):
         """JSON serializer for objects not serializable by default json code"""
-        if isinstance(obj, datetime.datetime):  # Fixed: Use datetime.datetime instead of datetime
+        if isinstance(obj, datetime.datetime):
+            return obj.isoformat()
+        elif hasattr(obj, 'isoformat'):  # Handle other date-like objects
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
 
     try:
-        return json.dumps(obj, default=json_serial)
-    except (TypeError, ValueError):
+        return json.dumps(obj, default=json_serial, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        print(f"JSON serialization error: {e}")
         return '[]'  # Return empty array if conversion fails
 
 # Context processor to make current user available in all templates
@@ -583,8 +588,7 @@ def profile_stats():
             if field not in player_data:
                 player_data[field] = default_value
 
-        print(
-            f"Player data prepared: matches={player_data.get('matches')}, global_matches={player_data.get('global_matches')}")
+        print(f"Player data prepared: matches={player_data.get('matches')}, global_matches={player_data.get('global_matches')}")
 
         # Get match history for performance graphs
         ranked_matches = []
@@ -630,8 +634,7 @@ def profile_stats():
 
                     # Create match data for both charts and display
                     match_data = {
-                        'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(
-                            completed_at),
+                        'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(completed_at),
                         'won': player_won,
                         'match_id': match.get('match_id', ''),
                         'mmr_change': mmr_change_for_player,
@@ -641,8 +644,23 @@ def profile_stats():
                         'streak': streak_value,
                         'team1': match.get('team1', []),
                         'team2': match.get('team2', []),
-                        'winner': match.get('winner')
+                        'winner': match.get('winner'),
+                        'completed_at': completed_at  # Keep for sorting
                     }
+
+                    # Add streak display
+                    if streak_value > 0:
+                        if streak_value >= 3:
+                            match_data['streak_display'] = f"🔥 {streak_value}"
+                        else:
+                            match_data['streak_display'] = f"{streak_value}"
+                    elif streak_value < 0:
+                        if streak_value <= -3:
+                            match_data['streak_display'] = f"📉 {abs(streak_value)}"
+                        else:
+                            match_data['streak_display'] = f"{abs(streak_value)}"
+                    else:
+                        match_data['streak_display'] = "—"
 
                     # Add to appropriate collections
                     if match.get("is_global", False):
@@ -653,8 +671,7 @@ def profile_stats():
                     # Add to recent matches for display
                     recent_matches.append(match_data)
 
-                    print(
-                        f"Processed match {match.get('match_id')}: {match_data['player_result']}, MMR: {mmr_change_for_player}")
+                    print(f"Processed match {match.get('match_id')}: {match_data['player_result']}, MMR: {mmr_change_for_player}")
 
                 except Exception as process_error:
                     print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
@@ -664,16 +681,38 @@ def profile_stats():
             print(f"Error fetching match history: {match_error}")
 
         # Sort recent matches by date (most recent first)
-        recent_matches.sort(key=lambda x: x.get('date', ''), reverse=True)
+        recent_matches.sort(key=lambda x: x.get('completed_at') or datetime.datetime.min, reverse=True)
+
+        # Remove completed_at from matches before sending to template (not JSON serializable)
+        for match in recent_matches:
+            if 'completed_at' in match:
+                del match['completed_at']
+
+        for match in ranked_matches:
+            if 'completed_at' in match:
+                del match['completed_at']
+
+        for match in global_matches:
+            if 'completed_at' in match:
+                del match['completed_at']
 
         print(f"Final counts: {len(ranked_matches)} ranked, {len(global_matches)} global, {len(recent_matches)} total")
+
+        # Get rank data
+        rank_data = None
+        try:
+            rank_data = ranks_collection.find_one({"discord_id": user['id']})
+            print(f"Rank data found: {rank_data is not None}")
+        except Exception as rank_error:
+            print(f"Error fetching rank data: {rank_error}")
 
         return render_template('profile_stats.html',
                                user=user,
                                player_data=player_data,
                                ranked_matches=ranked_matches,
                                global_matches=global_matches,
-                               recent_matches=recent_matches)
+                               recent_matches=recent_matches,
+                               rank_data=rank_data)
 
     except Exception as e:
         print(f"Error in profile_stats route: {e}")
