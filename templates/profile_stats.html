@@ -9,6 +9,117 @@
 
 {% block content %}
 <div class="content-container">
+    <!-- Add these debug sections to your profile_stats.html template -->
+<!-- Place right after <div class="content-container"> and before <div class="content-header"> -->
+
+<!-- FIRST DEBUG SECTION - Template Data -->
+<div class="alert alert-info mb-4">
+    <h5>🔍 Profile Stats Debug (Remove when fixed)</h5>
+    <div class="row">
+        <div class="col-md-6">
+            <p><strong>Player Data:</strong> {{ "✅ Exists" if player_data else "❌ Missing" }}</p>
+            <p><strong>Recent Matches:</strong> {{ "✅ " + (recent_matches|length|string) + " found" if recent_matches else "❌ None" }}</p>
+            <p><strong>Ranked Matches:</strong> {{ "✅ " + (ranked_matches|length|string) + " found" if ranked_matches else "❌ None" }}</p>
+            <p><strong>Global Matches:</strong> {{ "✅ " + (global_matches|length|string) + " found" if global_matches else "❌ None" }}</p>
+        </div>
+        <div class="col-md-6">
+            <p><strong>Template Variables:</strong></p>
+            <p>- has_ranked_stats: {{ has_ranked_stats if has_ranked_stats is defined else "undefined" }}</p>
+            <p>- has_global_stats: {{ has_global_stats if has_global_stats is defined else "undefined" }}</p>
+            <p>- has_any_stats: {{ has_any_stats if has_any_stats is defined else "undefined" }}</p>
+            <p>- Player matches: {{ player_data.matches if player_data else "N/A" }}</p>
+            <p>- Player global_matches: {{ player_data.global_matches if player_data else "N/A" }}</p>
+        </div>
+    </div>
+
+    {% if recent_matches %}
+    <details>
+        <summary>📋 Recent Matches ({{ recent_matches|length }})</summary>
+        <pre style="font-size: 10px; background: #000; color: #0f0; padding: 10px; max-height: 150px; overflow-y: auto;">{{ recent_matches|pprint }}</pre>
+    </details>
+    {% endif %}
+</div>
+
+<!-- SECOND DEBUG SECTION - JavaScript Data -->
+<div class="alert alert-danger mb-4">
+    <h5>🔍 JavaScript Data Debug</h5>
+    <div class="row">
+        <div class="col-md-6">
+            <p><strong>matchesData length:</strong> <span id="jsMatchesLength">Loading...</span></p>
+            <p><strong>chartData.ranked length:</strong> <span id="jsRankedLength">Loading...</span></p>
+            <p><strong>chartData.global length:</strong> <span id="jsGlobalLength">Loading...</span></p>
+            <p><strong>Variables defined:</strong> <span id="jsVariableCheck">Loading...</span></p>
+        </div>
+        <div class="col-md-6">
+            <p><strong>Raw matchesData:</strong></p>
+            <pre id="jsMatchesRaw" style="font-size: 10px; max-height: 100px; overflow-y: auto; background: #000; color: #0f0; padding: 5px;">Loading...</pre>
+        </div>
+    </div>
+    <div class="mt-3">
+        <p><strong>Template JSON Output:</strong></p>
+        <details>
+            <summary>Click to see raw template data</summary>
+            <pre style="font-size: 10px; background: #000; color: #ff0; padding: 10px; max-height: 150px; overflow-y: auto;">
+recent_matches: {{ recent_matches | tojsonfilter | safe if recent_matches else "null" }}
+
+ranked_matches: {{ ranked_matches | tojsonfilter | safe if ranked_matches else "null" }}
+
+global_matches: {{ global_matches | tojsonfilter | safe if global_matches else "null" }}
+            </pre>
+        </details>
+    </div>
+</div>
+
+<script>
+// Enhanced debug logging
+console.log('=== JAVASCRIPT DEBUG START ===');
+
+// Check if variables are defined
+console.log('Variables check:');
+console.log('- typeof matchesData:', typeof matchesData);
+console.log('- typeof chartData:', typeof chartData);
+
+// Try to access the data
+try {
+    console.log('matchesData:', matchesData);
+} catch (e) {
+    console.error('Error accessing matchesData:', e);
+}
+
+try {
+    console.log('chartData:', chartData);
+} catch (e) {
+    console.error('Error accessing chartData:', e);
+}
+
+// Update debug display when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, updating debug display...');
+
+    try {
+        document.getElementById('jsMatchesLength').textContent =
+            (typeof matchesData !== 'undefined' && matchesData) ? matchesData.length : 'undefined';
+
+        document.getElementById('jsRankedLength').textContent =
+            (typeof chartData !== 'undefined' && chartData && chartData.ranked) ? chartData.ranked.length : 'undefined';
+
+        document.getElementById('jsGlobalLength').textContent =
+            (typeof chartData !== 'undefined' && chartData && chartData.global) ? chartData.global.length : 'undefined';
+
+        document.getElementById('jsVariableCheck').textContent =
+            `matchesData: ${typeof matchesData}, chartData: ${typeof chartData}`;
+
+        document.getElementById('jsMatchesRaw').textContent =
+            (typeof matchesData !== 'undefined') ? JSON.stringify(matchesData, null, 2) : 'matchesData is undefined';
+    } catch (error) {
+        console.error('Error updating debug display:', error);
+        document.getElementById('jsMatchesRaw').textContent = 'Error: ' + error.message;
+    }
+});
+
+console.log('=== JAVASCRIPT DEBUG END ===');
+</script>
+
     <!-- Enhanced Header -->
     <div class="content-header">
         <div class="d-flex justify-content-between align-items-start w-100">
