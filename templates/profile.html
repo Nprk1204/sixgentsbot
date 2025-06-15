@@ -29,7 +29,7 @@
                         <i class="fab fa-discord me-1"></i> Discord Member
                     </p>
 
-                    <!-- Enhanced Rank Badge -->
+                    <!-- Compact Rank Badge -->
                     {% if rank_data %}
                         <div class="compact-rank-card mb-3">
                             {% if rank_data.tier == 'Rank A' %}
@@ -102,6 +102,16 @@
                             </div>
                         </div>
                     {% endif %}
+
+                    {% if user.guild_member %}
+                        <div class="guild-info">
+                            <h6 class="text-primary mb-2">
+                                <i class="fas fa-server me-1"></i> Server Member
+                            </h6>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
 
             <!-- Quick Actions Card -->
             <div class="card bg-dark-medium">
@@ -409,4 +419,3 @@
         </div>
     </div>
 </div>
-{% endblock %}

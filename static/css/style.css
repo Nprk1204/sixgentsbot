@@ -4153,15 +4153,17 @@ canvas {
     }
 }
 
-/* Compact Rank Card Styles */
+/* Compact Rank Card Styles - Fixed for Sidebar */
 .compact-rank-card {
     background: var(--dark-medium);
     border-radius: 12px;
     overflow: hidden;
     border: 1px solid var(--border);
     transition: all 0.3s ease;
+    width: 100%; /* Ensure it takes full width of its container */
     max-width: 100%;
     box-sizing: border-box;
+    margin: 0 auto; /* Center it within the card */
 }
 
 .compact-rank-card:hover {
@@ -4170,21 +4172,21 @@ canvas {
 }
 
 .rank-card-header {
-    padding: 1rem;
+    padding: 0.75rem;
     text-align: center;
     position: relative;
 }
 
 .rank-letter-small {
-    width: 50px;
-    height: 50px;
+    width: 40px;
+    height: 40px;
     background: rgba(255, 255, 255, 0.2);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     margin: 0 auto;
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     font-weight: 900;
     color: white;
     text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
@@ -4192,51 +4194,55 @@ canvas {
 }
 
 .rank-card-body {
-    padding: 1rem;
+    padding: 0.75rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
     gap: 0.5rem;
 }
 
 .rank-info-compact {
     flex: 1;
     min-width: 0;
+    text-align: left;
 }
 
 .rank-title-small {
-    font-size: 1rem;
+    font-size: 0.9rem;
     font-weight: 700;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.125rem;
     font-family: var(--heading-font);
+    line-height: 1.2;
 }
 
 .rank-subtitle {
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     color: var(--text-muted);
     margin: 0;
+    line-height: 1.2;
 }
 
 .mmr-display-compact {
     text-align: center;
     flex-shrink: 0;
+    min-width: 50px;
 }
 
 .mmr-value {
-    font-size: 1.5rem;
+    font-size: 1.1rem;
     font-weight: 700;
     color: var(--text);
     line-height: 1;
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.125rem;
 }
 
 .mmr-label {
-    font-size: 0.7rem;
+    font-size: 0.6rem;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-weight: 500;
+    line-height: 1;
 }
 
 .verify-action-compact {
@@ -4244,20 +4250,21 @@ canvas {
 }
 
 .verify-action-compact .btn {
-    width: 40px;
-    height: 40px;
+    width: 35px;
+    height: 35px;
     border-radius: 50%;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-size: 0.8rem;
 }
 
 .global-mmr-compact {
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 0.75rem;
     background: rgba(0, 168, 255, 0.1);
     color: var(--primary);
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     font-weight: 500;
     text-align: center;
     border-top: 1px solid var(--border);
@@ -4280,12 +4287,16 @@ canvas {
     box-shadow: 0 8px 16px rgba(108, 117, 125, 0.3);
 }
 
+/* Ensure proper layout in profile sidebar */
+.card-body .compact-rank-card {
+    margin-left: 0;
+    margin-right: 0;
+}
+
 /* Mobile responsiveness */
-@media (max-width: 768px) {
+@media (max-width: 992px) {
     .rank-card-body {
-        flex-direction: column;
-        text-align: center;
-        gap: 1rem;
+        padding: 0.6rem;
     }
 
     .rank-info-compact {
@@ -4293,30 +4304,26 @@ canvas {
     }
 
     .mmr-display-compact {
-        order: -1;
+        min-width: 60px;
     }
 }
 
-@media (max-width: 576px) {
+@media (max-width: 768px) {
+    .compact-rank-card:hover {
+        transform: none;
+    }
+
     .rank-card-header {
-        padding: 0.75rem;
+        padding: 0.6rem;
     }
 
     .rank-letter-small {
-        width: 40px;
-        height: 40px;
-        font-size: 1.25rem;
-    }
-
-    .rank-card-body {
-        padding: 0.75rem;
+        width: 35px;
+        height: 35px;
+        font-size: 1.1rem;
     }
 
     .mmr-value {
-        font-size: 1.25rem;
-    }
-
-    .compact-rank-card:hover {
-        transform: none;
+        font-size: 1rem;
     }
 }
