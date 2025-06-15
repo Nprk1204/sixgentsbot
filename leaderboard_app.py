@@ -672,6 +672,230 @@ def profile_stats():
         return redirect(url_for('profile'))
 
 
+@app.route('/debug/my-data-fixed')
+@login_required
+def debug_my_data_fixed():
+    """Debug the current user's data - JSON serializable version"""
+    user = get_current_user()
+    if not user:
+        return {"error": "Not logged in"}
+
+    try:
+        player_id = user['id']
+        print(f"=== DEBUG: Checking data for player {player_id} ===")
+
+        # Get player data
+        player = players_collection.find_one({"id": player_id})
+
+        # Get matches
+        matches = list(matches_collection.find({
+            "$or": [
+                {"team1.id": player_id},
+                {"team2.id": player_id}
+            ]
+        }).sort("completed_at", -1))
+
+        print(f"Found {len(matches)} matches for player {player_id}")
+
+        # Process matches like the profile route does
+        recent_matches = []
+        for match in matches:
+            try:
+                # Determine if player won
+                player_in_team1 = any(p.get("id") == player_id for p in match.get("team1", []))
+                winner = match.get("winner")
+                player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+
+                # Get completed date
+                completed_at = match.get('completed_at')
+                if not completed_at:
+                    print(f"Skipping match {match.get('match_id')} - no completed_at")
+                    continue
+
+                match_data = {
+                    'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(
+                        completed_at),
+                    'player_result': 'Win' if player_won else 'Loss',
+                    'is_global': match.get("is_global", False),
+                    'mmr_change': 0,
+                    'match_id': match.get('match_id')
+                }
+
+                # Find MMR change for this player
+                mmr_changes = match.get("mmr_changes", [])
+                for mmr_change in mmr_changes:
+                    if mmr_change.get("player_id") == player_id:
+                        match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                        match_data['streak'] = mmr_change.get("streak", 0)
+                        break
+
+                recent_matches.append(match_data)
+                print(f"Processed match: {match_data}")
+
+            except Exception as process_error:
+                print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
+                continue
+
+        # Convert to JSON-safe format
+        player_safe = json.loads(json_util.dumps(player)) if player else None
+        matches_safe = json.loads(json_util.dumps(matches))
+
+        return {
+            "status": "success",
+            "player_exists": player is not None,
+            "player_stats": {
+                "name": player.get("name") if player else None,
+                "mmr": player.get("mmr") if player else None,
+                "global_mmr": player.get("global_mmr") if player else None,
+                "matches": player.get("matches") if player else None,
+                "global_matches": player.get("global_matches") if player else None,
+                "wins": player.get("wins") if player else None,
+                "global_wins": player.get("global_wins") if player else None
+            },
+            "total_matches_found": len(matches),
+            "processed_matches": len(recent_matches),
+            "recent_matches": recent_matches,
+            "issue_diagnosis": {
+                "matches_have_completed_at": all(m.get("completed_at") for m in matches),
+                "matches_have_status_completed": all(m.get("status") == "completed" for m in matches),
+                "player_found_in_teams": all(
+                    any(p.get("id") == player_id for p in m.get("team1", [])) or
+                    any(p.get("id") == player_id for p in m.get("team2", []))
+                    for m in matches
+                ),
+                "matches_have_mmr_changes": all(m.get("mmr_changes") for m in matches)
+            }
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+@app.route('/debug/profile-match-query')
+@login_required
+def debug_profile_match_query():
+    """Debug exactly what the profile route queries"""
+    user = get_current_user()
+    if not user:
+        return {"error": "Not logged in"}
+
+    player_id = user['id']
+
+    try:
+        # This is the EXACT query from your profile route
+        match_history = list(matches_collection.find({
+            "$or": [
+                {"team1.id": player_id},
+                {"team2.id": player_id}
+            ],
+            "status": "completed"  # THIS might be the issue!
+        }).sort("completed_at", -1).limit(10))
+
+        print(f"Profile route query found {len(match_history)} matches")
+
+        # Also check without the status filter
+        all_matches = list(matches_collection.find({
+            "$or": [
+                {"team1.id": player_id},
+                {"team2.id": player_id}
+            ]
+        }).sort("completed_at", -1).limit(10))
+
+        print(f"Query without status filter found {len(all_matches)} matches")
+
+        return {
+            "query_with_status_completed": len(match_history),
+            "query_without_status_filter": len(all_matches),
+            "status_values_in_db": [m.get("status") for m in all_matches],
+            "issue_found": len(match_history) != len(all_matches)
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# Check if your profile route has the right data
+@app.route('/debug/simulate-profile')
+@login_required
+def debug_simulate_profile():
+    """Simulate exactly what the profile route should return"""
+    user = get_current_user()
+    if not user:
+        return {"error": "Not logged in"}
+
+    try:
+        # Get player data from database - EXACT same query as profile route
+        player_data = players_collection.find_one({"id": user['id']})
+        print(f"Player data found: {player_data is not None}")
+
+        # Get recent matches for the player - EXACT same query as profile route
+        recent_matches = []
+        if player_data:
+            print("Fetching recent matches...")
+            match_history = list(matches_collection.find({
+                "$or": [
+                    {"team1.id": user['id']},
+                    {"team2.id": user['id']}
+                ],
+                "status": "completed"
+            }).sort("completed_at", -1).limit(10))
+
+            print(f"Found {len(match_history)} recent matches")
+
+            # Process match history - EXACT same logic as profile route
+            for match in match_history:
+                try:
+                    # Determine if player won
+                    player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
+                    winner = match.get("winner")
+                    player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
+
+                    # Get completed date
+                    completed_at = match.get('completed_at')
+                    if not completed_at:
+                        continue
+
+                    match_data = {
+                        'date': completed_at.strftime("%Y-%m-%d") if hasattr(completed_at, 'strftime') else str(
+                            completed_at),
+                        'player_result': 'Win' if player_won else 'Loss',
+                        'is_global': match.get("is_global", False),
+                        'mmr_change': 0
+                    }
+
+                    # Find MMR change for this player
+                    mmr_changes = match.get("mmr_changes", [])
+                    for mmr_change in mmr_changes:
+                        if mmr_change.get("player_id") == user['id']:
+                            match_data['mmr_change'] = mmr_change.get("mmr_change", 0)
+                            break
+
+                    recent_matches.append(match_data)
+
+                except Exception as process_error:
+                    print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
+                    continue
+
+        return {
+            "player_data_exists": player_data is not None,
+            "recent_matches_count": len(recent_matches),
+            "recent_matches": recent_matches,
+            "player_has_matches": (player_data.get('matches', 0) > 0 or player_data.get('global_matches',
+                                                                                        0) > 0) if player_data else False,
+            "template_would_show_matches": len(recent_matches) > 0
+        }
+
+    except Exception as e:
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @app.route('/debug/player-data/<player_id>')
 def debug_player_data(player_id):
     """Debug route to check what data exists for a player"""
