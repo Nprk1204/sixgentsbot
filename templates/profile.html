@@ -122,6 +122,52 @@
     margin: 1rem 0;
 }
 
+/* MMR Progress Section */
+.mmr-progress-section {
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.mmr-progress-info {
+    text-align: center;
+}
+
+.mmr-progress-info small {
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.progress {
+    background-color: rgba(0, 0, 0, 0.3);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    transition: width 0.6s ease;
+    border-radius: 2px;
+}
+
+/* Dynamic rank change animations */
+.enhanced-rank-card.rank-changed {
+    animation: rankChanged 0.6s ease-out;
+}
+
+@keyframes rankChanged {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    50% {
+        transform: scale(1.02);
+        box-shadow: 0 8px 24px rgba(0, 168, 255, 0.3);
+    }
+    100% {
+        transform: scale(1);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+}
+
 /* Hover effects for different ranks */
 .enhanced-rank-card:has(.bg-danger):hover {
     box-shadow: 0 8px 16px rgba(220, 53, 69, 0.3);
@@ -229,86 +275,95 @@
 
             <!-- Separate Rank Card -->
             {% if rank_data %}
+                {% set current_mmr = player_data.mmr if player_data and player_data.mmr else rank_data.mmr %}
+                {% if current_mmr >= 1600 %}
+                    {% set dynamic_rank = 'A' %}
+                    {% set dynamic_tier = 'Rank A' %}
+                    {% set dynamic_color = 'danger' %}
+                    {% set dynamic_icon = 'fas fa-trophy' %}
+                    {% set dynamic_description = 'Grand Champion I & Above' %}
+                {% elif current_mmr >= 1100 %}
+                    {% set dynamic_rank = 'B' %}
+                    {% set dynamic_tier = 'Rank B' %}
+                    {% set dynamic_color = 'primary' %}
+                    {% set dynamic_icon = 'fas fa-award' %}
+                    {% set dynamic_description = 'Champion I - Champion III' %}
+                {% else %}
+                    {% set dynamic_rank = 'C' %}
+                    {% set dynamic_tier = 'Rank C' %}
+                    {% set dynamic_color = 'success' %}
+                    {% set dynamic_icon = 'fas fa-medal' %}
+                    {% set dynamic_description = 'Bronze I - Diamond III' %}
+                {% endif %}
+
                 <div class="enhanced-rank-card mb-4">
-                    {% if rank_data.tier == 'Rank A' %}
-                        <div class="rank-card-header bg-danger">
-                            <div class="rank-letter-circle">
-                                <span class="rank-letter">A</span>
-                            </div>
+                    <div class="rank-card-header bg-{{ dynamic_color }}">
+                        <div class="rank-letter-circle">
+                            <span class="rank-letter">{{ dynamic_rank }}</span>
                         </div>
-                        <div class="rank-card-content">
-                            <div class="rank-icon-section">
-                                <i class="fas fa-trophy text-danger"></i>
-                            </div>
-                            <h6 class="rank-title">Ranks: Grand Champion I & Above</h6>
+                    </div>
+                    <div class="rank-card-content">
+                        <div class="rank-icon-section">
+                            <i class="{{ dynamic_icon }} text-{{ dynamic_color }}"></i>
+                        </div>
+                        <h6 class="rank-title">Ranks: {{ dynamic_description }}</h6>
 
-                            <div class="rank-stats-section">
-                                <div class="rank-stat-row">
-                                    <span class="stat-label">CURRENT MMR</span>
-                                    <span class="stat-value text-danger">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
-                                </div>
+                        <div class="rank-stats-section">
+                            <div class="rank-stat-row">
+                                <span class="stat-label">CURRENT MMR</span>
+                                <span class="stat-value text-{{ dynamic_color }}">{{ current_mmr }}</span>
                             </div>
-
-                            {% if player_data and player_data.global_mmr %}
-                            <div class="global-mmr-section">
-                                <i class="fas fa-globe me-1"></i>
-                                <span>{{ player_data.global_mmr }} Current Global MMR</span>
+                            {% if current_mmr != (player_data.mmr if player_data and player_data.mmr else rank_data.mmr) %}
+                            <div class="rank-stat-row">
+                                <span class="stat-label">VERIFIED RANK</span>
+                                <span class="badge bg-secondary">{{ rank_data.tier }}</span>
                             </div>
                             {% endif %}
                         </div>
-                    {% elif rank_data.tier == 'Rank B' %}
-                        <div class="rank-card-header bg-primary">
-                            <div class="rank-letter-circle">
-                                <span class="rank-letter">B</span>
-                            </div>
+
+                        {% if player_data and player_data.global_mmr %}
+                        <div class="global-mmr-section">
+                            <i class="fas fa-globe me-1"></i>
+                            <span>{{ player_data.global_mmr }} Current Global MMR</span>
                         </div>
-                        <div class="rank-card-content">
-                            <div class="rank-icon-section">
-                                <i class="fas fa-award text-primary"></i>
-                            </div>
-                            <h6 class="rank-title">Ranks: Champion I - Champion III</h6>
+                        {% endif %}
 
-                            <div class="rank-stats-section">
-                                <div class="rank-stat-row">
-                                    <span class="stat-label">CURRENT MMR</span>
-                                    <span class="stat-value text-primary">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
+                        <!-- MMR Progress Indicators -->
+                        <div class="mmr-progress-section mt-3">
+                            {% if dynamic_rank == 'C' and current_mmr < 1100 %}
+                                {% set next_threshold = 1100 %}
+                                {% set progress_percent = (current_mmr / next_threshold * 100) %}
+                                <div class="mmr-progress-info mb-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-arrow-up me-1"></i>
+                                        {{ next_threshold - current_mmr }} MMR to Rank B
+                                    </small>
                                 </div>
-                            </div>
-
-                            {% if player_data and player_data.global_mmr %}
-                            <div class="global-mmr-section">
-                                <i class="fas fa-globe me-1"></i>
-                                <span>{{ player_data.global_mmr }} Current Global MMR</span>
-                            </div>
+                                <div class="progress" style="height: 4px;">
+                                    <div class="progress-bar bg-primary" style="width: {{ progress_percent }}%"></div>
+                                </div>
+                            {% elif dynamic_rank == 'B' and current_mmr < 1600 %}
+                                {% set next_threshold = 1600 %}
+                                {% set progress_percent = ((current_mmr - 1100) / (next_threshold - 1100) * 100) %}
+                                <div class="mmr-progress-info mb-2">
+                                    <small class="text-muted">
+                                        <i class="fas fa-arrow-up me-1"></i>
+                                        {{ next_threshold - current_mmr }} MMR to Rank A
+                                    </small>
+                                </div>
+                                <div class="progress" style="height: 4px;">
+                                    <div class="progress-bar bg-danger" style="width: {{ progress_percent }}%"></div>
+                                </div>
+                            {% elif dynamic_rank == 'A' %}
+                                <div class="mmr-progress-info">
+                                    <small class="text-success">
+                                        <i class="fas fa-star me-1"></i>
+                                        Highest Rank Achieved!
+                                    </small>
+                                </div>
                             {% endif %}
                         </div>
-                    {% else %}
-                        <div class="rank-card-header bg-success">
-                            <div class="rank-letter-circle">
-                                <span class="rank-letter">C</span>
-                            </div>
-                        </div>
-                        <div class="rank-card-content">
-                            <div class="rank-icon-section">
-                                <i class="fas fa-medal text-success"></i>
-                            </div>
-                            <h6 class="rank-title">Ranks: Bronze I - Diamond III</h6>
-
-                            <div class="rank-stats-section">
-                                <div class="rank-stat-row">
-                                    <span class="stat-label">CURRENT MMR</span>
-                                    <span class="stat-value text-success">{{ player_data.mmr if player_data and player_data.mmr else rank_data.mmr }}</span>
-                                </div>
-                            </div>
-
-                            {% if player_data and player_data.global_mmr %}
-                            <div class="global-mmr-section">
-                                <i class="fas fa-globe me-1"></i>
-                                <span>{{ player_data.global_mmr }} Current Global MMR</span>
-                            </div>
-                            {% endif %}
-                        </div>
-                    {% endif %}
+                    </div>
                 </div>
             {% else %}
                 <!-- Unverified Rank Card -->
