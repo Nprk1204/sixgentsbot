@@ -605,24 +605,53 @@ def profile_stats():
             # Process match history for graphs
             for match in match_history:
                 try:
-                    # Determine if player won
-                    player_in_team1 = any(p.get("id") == user['id'] for p in match.get("team1", []))
-                    winner = match.get("winner")
-                    player_won = (player_in_team1 and winner == 1) or (not player_in_team1 and winner == 2)
-
                     # Get completed date
                     completed_at = match.get('completed_at')
                     if not completed_at:
                         print(f"Skipping match {match.get('match_id')} - no completed_at timestamp")
                         continue
 
+                    # Find MMR change for this player first
+                    mmr_change_for_player = 0
+                    mmr_changes = match.get("mmr_changes", [])
+                    for mmr_change in mmr_changes:
+                        if mmr_change.get("player_id") == user['id']:
+                            mmr_change_for_player = mmr_change.get("mmr_change", 0)
+                            break
+
+                    # Simple logic: if MMR went up, it's a win
+                    player_won = mmr_change_for_player > 0
+
                     match_data = {
                         'date': completed_at.isoformat() if hasattr(completed_at, 'isoformat') else str(completed_at),
                         'won': player_won,
                         'match_id': match.get('match_id', ''),
-                        'mmr_change': 0,
-                        'new_mmr': 0
+                        'mmr_change': mmr_change_for_player,
+                        'new_mmr': 0,
+                        'player_result': 'Win' if player_won else 'Loss',  # Add this for template
+                        'is_global': match.get("is_global", False)  # Add this for template
                     }
+
+                    # Get new MMR if available
+                    for mmr_change in mmr_changes:
+                        if mmr_change.get("player_id") == user['id']:
+                            match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
+                            break
+
+                    # Sort into ranked vs global based on match type
+                    if match.get("is_global", False):
+                        # Only include if this was a global MMR change
+                        global_matches.append(match_data)
+                    else:
+                        # Only include if this was a ranked MMR change
+                        ranked_matches.append(match_data)
+
+                    print(
+                        f"Processed match {match.get('match_id')}: {match_data['player_result']}, MMR: {mmr_change_for_player}")
+
+                except Exception as process_error:
+                    print(f"Error processing match {match.get('match_id', 'unknown')}: {process_error}")
+                    continue
 
                     # Find MMR change for this player
                     mmr_changes = match.get("mmr_changes", [])
