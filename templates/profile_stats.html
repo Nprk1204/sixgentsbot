@@ -1200,336 +1200,17 @@ const chartData = {
     global: {{ global_matches | tojsonfilter | safe if global_matches else [] }}
 };
 
-// Store matches data for details modal
+// Store matches data for details modal - FIXED VERSION
 const matchesData = {{ recent_matches | tojsonfilter | safe if recent_matches else [] }};
+
+console.log('Chart data loaded:', chartData);
+console.log('Matches data loaded:', matchesData);
 
 // Chart.js configuration
 Chart.defaults.color = '#f1f1f1';
 Chart.defaults.borderColor = '#2a303c';
 
-// Enhanced helper functions
-function refreshStats() {
-    const refreshBtns = document.querySelectorAll('[onclick="refreshStats()"]');
-
-    refreshBtns.forEach(btn => {
-        if (btn) {
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing...';
-            btn.disabled = true;
-        }
-    });
-
-    setTimeout(() => {
-        window.location.reload();
-    }, 500);
-}
-
-function switchToMatchHistoryTab() {
-    const matchHistoryTab = document.getElementById('match-history-tab');
-    const matchHistoryTabPane = document.getElementById('match-history');
-
-    if (matchHistoryTab && matchHistoryTabPane) {
-        document.querySelectorAll('#statsTabsNav .nav-link').forEach(tab => {
-            tab.classList.remove('active');
-        });
-        document.querySelectorAll('.tab-pane').forEach(pane => {
-            pane.classList.remove('show', 'active');
-        });
-
-        matchHistoryTab.classList.add('active');
-        matchHistoryTabPane.classList.add('show', 'active');
-    }
-}
-
-function filterMatches(type) {
-    const rows = document.querySelectorAll('.match-row');
-
-    rows.forEach(row => {
-        if (type === 'all' || row.dataset.type === type) {
-            row.style.display = '';
-            row.classList.remove('hidden');
-        } else {
-            row.classList.add('hidden');
-            setTimeout(() => {
-                if (row.classList.contains('hidden')) {
-                    row.style.display = 'none';
-                }
-            }, 300);
-        }
-    });
-
-    // Update stats summary based on filter
-    updateFilteredStats(type);
-}
-
-function updateFilteredStats(type) {
-    const rows = document.querySelectorAll('.match-row');
-    let totalMatches = 0;
-    let wins = 0;
-    let losses = 0;
-
-    rows.forEach(row => {
-        if (type === 'all' || row.dataset.type === type) {
-            totalMatches++;
-            const resultBadge = row.querySelector('.badge');
-            if (resultBadge && resultBadge.textContent.includes('Win')) {
-                wins++;
-            } else if (resultBadge && resultBadge.textContent.includes('Loss')) {
-                losses++;
-            }
-        }
-    });
-
-    // Update the summary cards if they exist
-    const totalMatchesEl = document.getElementById('totalMatchesCount');
-    const totalWinsEl = document.getElementById('totalWinsCount');
-    const totalLossesEl = document.getElementById('totalLossesCount');
-
-    if (totalMatchesEl) totalMatchesEl.textContent = totalMatches;
-    if (totalWinsEl) totalWinsEl.textContent = wins;
-    if (totalLossesEl) totalLossesEl.textContent = losses;
-}
-
-function showMatchDetails(matchIndex) {
-    const match = matchesData[matchIndex];
-    if (!match) {
-        console.error('Match not found:', matchIndex);
-        return;
-    }
-
-    const modal = document.getElementById('matchDetailsModal');
-    const modalContent = document.getElementById('matchDetailsContent');
-
-    if (!modal || !modalContent) {
-        console.error('Modal elements not found');
-        return;
-    }
-
-    // Format the date properly
-    let formattedDate = match.date;
-    try {
-        // If the date is in ISO format, parse and format it nicely
-        if (match.date && match.date.includes('T')) {
-            const dateObj = new Date(match.date);
-            formattedDate = dateObj.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        } else if (match.date && match.date.includes('-')) {
-            // If it's in YYYY-MM-DD format
-            const dateObj = new Date(match.date);
-            formattedDate = dateObj.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            });
-        }
-    } catch (e) {
-        console.log('Date formatting error:', e);
-        formattedDate = match.date; // Fallback to original
-    }
-
-    // Format match details
-    const matchType = match.is_global ? 'Global' : 'Ranked';
-    const result = match.player_result || 'Unknown';
-    const mmrChange = match.mmr_change || 0;
-
-    // Get streak information
-    let streakInfo = 'No streak data';
-    let streakClass = 'text-muted';
-
-    if (match.streak !== undefined && match.streak !== null) {
-        const streakValue = Math.abs(match.streak);
-        if (match.streak > 0) {
-            streakInfo = `${streakValue} Win Streak`;
-            streakClass = 'text-success';
-            if (streakValue >= 3) {
-                streakInfo = `🔥 ${streakInfo}`;
-            }
-        } else if (match.streak < 0) {
-            streakInfo = `${streakValue} Loss Streak`;
-            streakClass = 'text-danger';
-            if (streakValue >= 3) {
-                streakInfo = `📉 ${streakInfo}`;
-            }
-        } else {
-            streakInfo = 'No active streak';
-        }
-    }
-
-    modalContent.innerHTML = `
-        <div class="row">
-            <div class="col-md-6">
-                <div class="card bg-dark border-0 mb-3">
-                    <div class="card-header bg-primary">
-                        <h6 class="mb-0">
-                            <i class="fas fa-info-circle me-2"></i> Match Information
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">Date & Time</label>
-                            <div class="fw-bold">${formattedDate}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">Match Type</label>
-                            <div>
-                                <span class="badge bg-${match.is_global ? 'primary' : 'warning'}">
-                                    <i class="fas fa-${match.is_global ? 'globe' : 'trophy'} me-1"></i> ${matchType}
-                                </span>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">Result</label>
-                            <div>
-                                <span class="badge bg-${result === 'Win' ? 'success' : 'danger'} fs-6">
-                                    <i class="fas fa-${result === 'Win' ? 'trophy' : 'times'} me-1"></i> ${result}
-                                </span>
-                            </div>
-                        </div>
-                        ${match.match_id ? `
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">Match ID</label>
-                            <div class="font-monospace small text-info">${match.match_id}</div>
-                        </div>
-                        ` : ''}
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-6">
-                <div class="card bg-dark border-0 mb-3">
-                    <div class="card-header bg-success">
-                        <h6 class="mb-0">
-                            <i class="fas fa-chart-line me-2"></i> Performance Impact
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">MMR Change</label>
-                            <div class="fw-bold fs-5 ${mmrChange > 0 ? 'text-success' : mmrChange < 0 ? 'text-danger' : 'text-muted'}">
-                                <i class="fas fa-arrow-${mmrChange > 0 ? 'up' : mmrChange < 0 ? 'down' : 'right'} me-1"></i>
-                                ${mmrChange > 0 ? '+' : ''}${mmrChange}
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">Streak Status</label>
-                            <div class="fw-bold ${streakClass}">${streakInfo}</div>
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">Performance Impact</label>
-                            <div class="small">
-                                ${result === 'Win' ?
-                                    '<i class="fas fa-arrow-up text-success me-1"></i> Positive momentum - keep it up!' :
-                                    '<i class="fas fa-arrow-down text-danger me-1"></i> Learning opportunity - analyze and improve'
-                                }
-                            </div>
-                        </div>
-                        ${match.new_mmr ? `
-                        <div class="mb-3">
-                            <label class="form-label small text-muted">New MMR</label>
-                            <div class="fw-bold text-primary">${match.new_mmr}</div>
-                        </div>
-                        ` : ''}
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        ${match.team1 && match.team2 ? `
-        <div class="card bg-dark border-0">
-            <div class="card-header bg-warning">
-                <h6 class="mb-0">
-                    <i class="fas fa-users me-2"></i> Team Composition
-                </h6>
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6 class="text-primary mb-2">
-                            <i class="fas fa-shield-alt me-1"></i> Team 1
-                            ${match.winner === 1 ? '<i class="fas fa-crown text-warning ms-1" title="Winners"></i>' : ''}
-                        </h6>
-                        <div class="team-players">
-                            ${match.team1.map(player => `
-                                <div class="d-flex align-items-center mb-2 p-2 rounded ${match.winner === 1 ? 'bg-success bg-opacity-10' : 'bg-dark bg-opacity-50'}">
-                                    <i class="fas fa-user-circle me-2 text-muted"></i>
-                                    <span>${player.name || 'Unknown Player'}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <h6 class="text-secondary mb-2">
-                            <i class="fas fa-shield-alt me-1"></i> Team 2
-                            ${match.winner === 2 ? '<i class="fas fa-crown text-warning ms-1" title="Winners"></i>' : ''}
-                        </h6>
-                        <div class="team-players">
-                            ${match.team2.map(player => `
-                                <div class="d-flex align-items-center mb-2 p-2 rounded ${match.winner === 2 ? 'bg-success bg-opacity-10' : 'bg-dark bg-opacity-50'}">
-                                    <i class="fas fa-user-circle me-2 text-muted"></i>
-                                    <span>${player.name || 'Unknown Player'}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        ` : `
-        <div class="card bg-dark border-0">
-            <div class="card-body text-center text-muted">
-                <i class="fas fa-info-circle me-2"></i>
-                Team composition data not available for this match
-            </div>
-        </div>
-        `}
-    `;
-
-    // Show modal
-    const bootstrapModal = new bootstrap.Modal(modal);
-    bootstrapModal.show();
-}
-
-// Chart creation
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Enhanced Profile Stats loaded');
-    console.log('Chart data:', chartData);
-    console.log('Matches data:', matchesData);
-
-    // Create charts if data exists
-    const mmrCtx = document.getElementById('mmrChart');
-    if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {
-        createChart(mmrCtx, 'combined');
-    }
-
-    const rankedCtx = document.getElementById('rankedChart');
-    if (rankedCtx && chartData.ranked.length > 0) {
-        createChart(rankedCtx, 'ranked');
-    }
-
-    const globalCtx = document.getElementById('globalChart');
-    if (globalCtx && chartData.global.length > 0) {
-        createChart(globalCtx, 'global');
-    }
-
-    // Initialize tooltips
-    const tooltipElements = document.querySelectorAll('[title]');
-    tooltipElements.forEach(element => {
-        new bootstrap.Tooltip(element);
-    });
-
-    // Initialize filter buttons
-    const filterButtons = document.querySelectorAll('input[name="matchFilter"]');
-    filterButtons.forEach(button => {
-        button.addEventListener('change', function() {
-            const filterType = this.id.replace('filter-', '');
-            filterMatches(filterType);
-        });
-    });
-});
-
+// FIXED: Better date parsing for charts
 function createChart(ctx, type) {
     const datasets = [];
 
@@ -1578,7 +1259,7 @@ function createChart(ctx, type) {
     }
 
     if (datasets.length === 0) {
-        ctx.getContext('2d').fillText('No data available', 10, 50);
+        console.log('No chart data available for type:', type);
         return;
     }
 
@@ -1675,13 +1356,257 @@ function createChart(ctx, type) {
     });
 }
 
-// Enhanced error handling
-window.addEventListener('error', function(event) {
-    console.error('Enhanced Profile Stats - JavaScript error:', event.error);
-});
+// FIXED: Better match details function
+function showMatchDetails(matchIndex) {
+    console.log('Showing match details for index:', matchIndex);
+    console.log('Available matches:', matchesData);
 
-window.addEventListener('unhandledrejection', function(event) {
-    console.error('Enhanced Profile Stats - Unhandled promise rejection:', event.reason);
+    const match = matchesData[matchIndex];
+    if (!match) {
+        console.error('Match not found:', matchIndex);
+        alert('Match data not available');
+        return;
+    }
+
+    const modal = document.getElementById('matchDetailsModal');
+    const modalContent = document.getElementById('matchDetailsContent');
+
+    if (!modal || !modalContent) {
+        console.error('Modal elements not found');
+        return;
+    }
+
+    // Format the date properly
+    let formattedDate = match.date;
+    try {
+        if (match.date && typeof match.date === 'string') {
+            const dateObj = new Date(match.date);
+            if (!isNaN(dateObj.getTime())) {
+                formattedDate = dateObj.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+            }
+        }
+    } catch (e) {
+        console.log('Date formatting error:', e);
+    }
+
+    const matchType = match.is_global ? 'Global' : 'Ranked';
+    const result = match.player_result || 'Unknown';
+    const mmrChange = match.mmr_change || 0;
+
+    // Get streak information
+    let streakInfo = 'No streak data';
+    let streakClass = 'text-muted';
+
+    if (match.streak !== undefined && match.streak !== null && match.streak !== 0) {
+        const streakValue = Math.abs(match.streak);
+        if (match.streak > 0) {
+            streakInfo = `${streakValue} Win Streak`;
+            streakClass = 'text-success';
+            if (streakValue >= 3) {
+                streakInfo = `🔥 ${streakInfo}`;
+            }
+        } else if (match.streak < 0) {
+            streakInfo = `${streakValue} Loss Streak`;
+            streakClass = 'text-danger';
+            if (streakValue >= 3) {
+                streakInfo = `📉 ${streakInfo}`;
+            }
+        }
+    }
+
+    modalContent.innerHTML = `
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card bg-dark border-0 mb-3">
+                    <div class="card-header bg-primary">
+                        <h6 class="mb-0">
+                            <i class="fas fa-info-circle me-2"></i> Match Information
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Date</label>
+                            <div class="fw-bold">${formattedDate}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Match Type</label>
+                            <div>
+                                <span class="badge bg-${match.is_global ? 'primary' : 'warning'}">
+                                    <i class="fas fa-${match.is_global ? 'globe' : 'trophy'} me-1"></i> ${matchType}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Result</label>
+                            <div>
+                                <span class="badge bg-${result === 'Win' ? 'success' : 'danger'} fs-6">
+                                    <i class="fas fa-${result === 'Win' ? 'trophy' : 'times'} me-1"></i> ${result}
+                                </span>
+                            </div>
+                        </div>
+                        ${match.match_id ? `
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Match ID</label>
+                            <div class="font-monospace small text-info">${match.match_id}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card bg-dark border-0 mb-3">
+                    <div class="card-header bg-success">
+                        <h6 class="mb-0">
+                            <i class="fas fa-chart-line me-2"></i> Performance Impact
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">MMR Change</label>
+                            <div class="fw-bold fs-5 ${mmrChange > 0 ? 'text-success' : mmrChange < 0 ? 'text-danger' : 'text-muted'}">
+                                <i class="fas fa-arrow-${mmrChange > 0 ? 'up' : mmrChange < 0 ? 'down' : 'right'} me-1"></i>
+                                ${mmrChange > 0 ? '+' : ''}${mmrChange}
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Streak Status</label>
+                            <div class="fw-bold ${streakClass}">${streakInfo}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Impact</label>
+                            <div class="small">
+                                ${result === 'Win' ?
+                                    '<i class="fas fa-arrow-up text-success me-1"></i> Positive momentum!' :
+                                    '<i class="fas fa-arrow-down text-danger me-1"></i> Learning opportunity'
+                                }
+                            </div>
+                        </div>
+                        ${match.new_mmr ? `
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">New MMR</label>
+                            <div class="fw-bold text-primary">${match.new_mmr}</div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Show modal
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+}
+
+// Enhanced helper functions
+function refreshStats() {
+    const refreshBtns = document.querySelectorAll('[onclick="refreshStats()"]');
+    refreshBtns.forEach(btn => {
+        if (btn) {
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing...';
+            btn.disabled = true;
+        }
+    });
+    setTimeout(() => {
+        window.location.reload();
+    }, 500);
+}
+
+function switchToMatchHistoryTab() {
+    const matchHistoryTab = document.getElementById('match-history-tab');
+    const matchHistoryTabPane = document.getElementById('match-history');
+
+    if (matchHistoryTab && matchHistoryTabPane) {
+        document.querySelectorAll('#statsTabsNav .nav-link').forEach(tab => {
+            tab.classList.remove('active');
+        });
+        document.querySelectorAll('.tab-pane').forEach(pane => {
+            pane.classList.remove('show', 'active');
+        });
+
+        matchHistoryTab.classList.add('active');
+        matchHistoryTabPane.classList.add('show', 'active');
+    }
+}
+
+function filterMatches(type) {
+    const rows = document.querySelectorAll('.match-row');
+    rows.forEach(row => {
+        if (type === 'all' || row.dataset.type === type) {
+            row.style.display = '';
+            row.classList.remove('hidden');
+        } else {
+            row.classList.add('hidden');
+            setTimeout(() => {
+                if (row.classList.contains('hidden')) {
+                    row.style.display = 'none';
+                }
+            }, 300);
+        }
+    });
+    updateFilteredStats(type);
+}
+
+function updateFilteredStats(type) {
+    const rows = document.querySelectorAll('.match-row');
+    let totalMatches = 0;
+    let wins = 0;
+
+    rows.forEach(row => {
+        if (type === 'all' || row.dataset.type === type) {
+            totalMatches++;
+            const resultBadge = row.querySelector('.badge');
+            if (resultBadge && resultBadge.textContent.includes('Win')) {
+                wins++;
+            }
+        }
+    });
+
+    const totalMatchesEl = document.getElementById('totalMatchesCount');
+    const totalWinsEl = document.getElementById('totalWinsCount');
+    const totalLossesEl = document.getElementById('totalLossesCount');
+
+    if (totalMatchesEl) totalMatchesEl.textContent = totalMatches;
+    if (totalWinsEl) totalWinsEl.textContent = wins;
+    if (totalLossesEl) totalLossesEl.textContent = totalMatches - wins;
+}
+
+// Chart creation
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('Enhanced Profile Stats loaded');
+    console.log('Chart data:', chartData);
+    console.log('Matches data:', matchesData);
+
+    // Create charts if data exists and canvas elements exist
+    const mmrCtx = document.getElementById('mmrChart');
+    if (mmrCtx && (chartData.ranked.length > 0 || chartData.global.length > 0)) {
+        console.log('Creating combined MMR chart');
+        createChart(mmrCtx, 'combined');
+    }
+
+    const rankedCtx = document.getElementById('rankedChart');
+    if (rankedCtx && chartData.ranked.length > 0) {
+        console.log('Creating ranked chart');
+        createChart(rankedCtx, 'ranked');
+    }
+
+    const globalCtx = document.getElementById('globalChart');
+    if (globalCtx && chartData.global.length > 0) {
+        console.log('Creating global chart');
+        createChart(globalCtx, 'global');
+    }
+
+    // Initialize tooltips
+    const tooltipElements = document.querySelectorAll('[title]');
+    tooltipElements.forEach(element => {
+        new bootstrap.Tooltip(element);
+    });
+
+    console.log('Profile stats initialization complete');
 });
 
 console.log('Enhanced Profile Stats JavaScript loaded successfully');
