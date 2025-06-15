@@ -9,35 +9,6 @@
 
 {% block content %}
 <div class="content-container">
-    <!-- 🐛 DEBUG SECTION FOR PROFILE_STATS -->
-    <div class="alert alert-info mb-4">
-        <h5>🔍 Profile Stats Debug (Remove when fixed)</h5>
-        <div class="row">
-            <div class="col-md-6">
-                <p><strong>Player Data:</strong> {{ "✅ Exists" if player_data else "❌ Missing" }}</p>
-                <p><strong>Recent Matches:</strong> {{ "✅ " + (recent_matches|length|string) + " found" if recent_matches else "❌ None" }}</p>
-                <p><strong>Ranked Matches:</strong> {{ "✅ " + (ranked_matches|length|string) + " found" if ranked_matches else "❌ None" }}</p>
-                <p><strong>Global Matches:</strong> {{ "✅ " + (global_matches|length|string) + " found" if global_matches else "❌ None" }}</p>
-            </div>
-            <div class="col-md-6">
-                <p><strong>Template Variables:</strong></p>
-                <p>- has_ranked_stats: {{ has_ranked_stats }}</p>
-                <p>- has_global_stats: {{ has_global_stats }}</p>
-                <p>- has_any_stats: {{ has_any_stats }}</p>
-                <p>- Player matches: {{ player_data.matches if player_data else "N/A" }}</p>
-                <p>- Player global_matches: {{ player_data.global_matches if player_data else "N/A" }}</p>
-            </div>
-        </div>
-
-        {% if recent_matches %}
-        <details>
-            <summary>📋 Recent Matches ({{ recent_matches|length }})</summary>
-            <pre style="font-size: 10px; background: #000; color: #0f0; padding: 10px; max-height: 150px; overflow-y: auto;">{{ recent_matches|pprint }}</pre>
-        </details>
-        {% endif %}
-    </div>
-    <!-- 🐛 END DEBUG SECTION -->
-
     <!-- Enhanced Header -->
     <div class="content-header">
         <div class="d-flex justify-content-between align-items-start w-100">
@@ -1333,11 +1304,60 @@ function showMatchDetails(matchIndex) {
         return;
     }
 
+    // Format the date properly
+    let formattedDate = match.date;
+    try {
+        // If the date is in ISO format, parse and format it nicely
+        if (match.date && match.date.includes('T')) {
+            const dateObj = new Date(match.date);
+            formattedDate = dateObj.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        } else if (match.date && match.date.includes('-')) {
+            // If it's in YYYY-MM-DD format
+            const dateObj = new Date(match.date);
+            formattedDate = dateObj.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+        }
+    } catch (e) {
+        console.log('Date formatting error:', e);
+        formattedDate = match.date; // Fallback to original
+    }
+
     // Format match details
     const matchType = match.is_global ? 'Global' : 'Ranked';
     const result = match.player_result || 'Unknown';
     const mmrChange = match.mmr_change || 0;
-    const streak = match.streak_display || 'No streak data';
+
+    // Get streak information
+    let streakInfo = 'No streak data';
+    let streakClass = 'text-muted';
+
+    if (match.streak !== undefined && match.streak !== null) {
+        const streakValue = Math.abs(match.streak);
+        if (match.streak > 0) {
+            streakInfo = `${streakValue} Win Streak`;
+            streakClass = 'text-success';
+            if (streakValue >= 3) {
+                streakInfo = `🔥 ${streakInfo}`;
+            }
+        } else if (match.streak < 0) {
+            streakInfo = `${streakValue} Loss Streak`;
+            streakClass = 'text-danger';
+            if (streakValue >= 3) {
+                streakInfo = `📉 ${streakInfo}`;
+            }
+        } else {
+            streakInfo = 'No active streak';
+        }
+    }
 
     modalContent.innerHTML = `
         <div class="row">
@@ -1350,8 +1370,8 @@ function showMatchDetails(matchIndex) {
                     </div>
                     <div class="card-body">
                         <div class="mb-3">
-                            <label class="form-label small text-muted">Date</label>
-                            <div class="fw-bold">${match.date}</div>
+                            <label class="form-label small text-muted">Date & Time</label>
+                            <div class="fw-bold">${formattedDate}</div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small text-muted">Match Type</label>
@@ -1369,6 +1389,12 @@ function showMatchDetails(matchIndex) {
                                 </span>
                             </div>
                         </div>
+                        ${match.match_id ? `
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">Match ID</label>
+                            <div class="font-monospace small text-info">${match.match_id}</div>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             </div>
@@ -1382,29 +1408,36 @@ function showMatchDetails(matchIndex) {
                     <div class="card-body">
                         <div class="mb-3">
                             <label class="form-label small text-muted">MMR Change</label>
-                            <div class="fw-bold ${mmrChange > 0 ? 'text-success' : mmrChange < 0 ? 'text-danger' : 'text-muted'}">
+                            <div class="fw-bold fs-5 ${mmrChange > 0 ? 'text-success' : mmrChange < 0 ? 'text-danger' : 'text-muted'}">
+                                <i class="fas fa-arrow-${mmrChange > 0 ? 'up' : mmrChange < 0 ? 'down' : 'right'} me-1"></i>
                                 ${mmrChange > 0 ? '+' : ''}${mmrChange}
                             </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label small text-muted">Streak Status</label>
-                            <div class="fw-bold">${streak}</div>
+                            <div class="fw-bold ${streakClass}">${streakInfo}</div>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label small text-muted">Impact</label>
+                            <label class="form-label small text-muted">Performance Impact</label>
                             <div class="small">
                                 ${result === 'Win' ?
-                                    '<i class="fas fa-arrow-up text-success me-1"></i> Positive momentum' :
-                                    '<i class="fas fa-arrow-down text-danger me-1"></i> Learning opportunity'
+                                    '<i class="fas fa-arrow-up text-success me-1"></i> Positive momentum - keep it up!' :
+                                    '<i class="fas fa-arrow-down text-danger me-1"></i> Learning opportunity - analyze and improve'
                                 }
                             </div>
                         </div>
+                        ${match.new_mmr ? `
+                        <div class="mb-3">
+                            <label class="form-label small text-muted">New MMR</label>
+                            <div class="fw-bold text-primary">${match.new_mmr}</div>
+                        </div>
+                        ` : ''}
                     </div>
                 </div>
             </div>
         </div>
 
-        ${match.teams ? `
+        ${match.team1 && match.team2 ? `
         <div class="card bg-dark border-0">
             <div class="card-header bg-warning">
                 <h6 class="mb-0">
@@ -1414,31 +1447,44 @@ function showMatchDetails(matchIndex) {
             <div class="card-body">
                 <div class="row">
                     <div class="col-md-6">
-                        <h6 class="text-primary mb-2">Team 1</h6>
+                        <h6 class="text-primary mb-2">
+                            <i class="fas fa-shield-alt me-1"></i> Team 1
+                            ${match.winner === 1 ? '<i class="fas fa-crown text-warning ms-1" title="Winners"></i>' : ''}
+                        </h6>
                         <div class="team-players">
-                            ${match.team1 ? match.team1.map(player => `
-                                <div class="d-flex align-items-center mb-2">
+                            ${match.team1.map(player => `
+                                <div class="d-flex align-items-center mb-2 p-2 rounded ${match.winner === 1 ? 'bg-success bg-opacity-10' : 'bg-dark bg-opacity-50'}">
                                     <i class="fas fa-user-circle me-2 text-muted"></i>
                                     <span>${player.name || 'Unknown Player'}</span>
                                 </div>
-                            `).join('') : '<p class="text-muted">No team data available</p>'}
+                            `).join('')}
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <h6 class="text-secondary mb-2">Team 2</h6>
+                        <h6 class="text-secondary mb-2">
+                            <i class="fas fa-shield-alt me-1"></i> Team 2
+                            ${match.winner === 2 ? '<i class="fas fa-crown text-warning ms-1" title="Winners"></i>' : ''}
+                        </h6>
                         <div class="team-players">
-                            ${match.team2 ? match.team2.map(player => `
-                                <div class="d-flex align-items-center mb-2">
+                            ${match.team2.map(player => `
+                                <div class="d-flex align-items-center mb-2 p-2 rounded ${match.winner === 2 ? 'bg-success bg-opacity-10' : 'bg-dark bg-opacity-50'}">
                                     <i class="fas fa-user-circle me-2 text-muted"></i>
                                     <span>${player.name || 'Unknown Player'}</span>
                                 </div>
-                            `).join('') : '<p class="text-muted">No team data available</p>'}
+                            `).join('')}
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-        ` : ''}
+        ` : `
+        <div class="card bg-dark border-0">
+            <div class="card-body text-center text-muted">
+                <i class="fas fa-info-circle me-2"></i>
+                Team composition data not available for this match
+            </div>
+        </div>
+        `}
     `;
 
     // Show modal

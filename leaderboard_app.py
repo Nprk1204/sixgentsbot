@@ -628,14 +628,19 @@ def profile_stats():
                         'match_id': match.get('match_id', ''),
                         'mmr_change': mmr_change_for_player,
                         'new_mmr': 0,
-                        'player_result': 'Win' if player_won else 'Loss',  # Add this for template
-                        'is_global': match.get("is_global", False)  # Add this for template
+                        'player_result': 'Win' if player_won else 'Loss',
+                        'is_global': match.get("is_global", False),
+                        'streak': 0,  # We'll get this from MMR changes
+                        'team1': match.get('team1', []),
+                        'team2': match.get('team2', []),
+                        'winner': match.get('winner')
                     }
 
-                    # Get new MMR if available
+                    # Get new MMR and streak if available
                     for mmr_change in mmr_changes:
                         if mmr_change.get("player_id") == user['id']:
                             match_data['new_mmr'] = mmr_change.get("new_mmr", 0)
+                            match_data['streak'] = mmr_change.get("streak", 0)  # Add streak data
                             break
 
                     # Sort into ranked vs global based on match type
