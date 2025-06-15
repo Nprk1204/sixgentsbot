@@ -168,11 +168,14 @@ def to_json_filter(obj):
     """Convert Python object to JSON string for safe template usage"""
     import json
     import datetime
+    from bson import ObjectId
 
     def json_serial(obj):
         """JSON serializer for objects not serializable by default json code"""
         if isinstance(obj, datetime.datetime):
             return obj.isoformat()
+        elif isinstance(obj, ObjectId):
+            return str(obj)  # Convert ObjectId to string
         elif hasattr(obj, 'isoformat'):  # Handle other date-like objects
             return obj.isoformat()
         raise TypeError(f"Type {type(obj)} not serializable")
