@@ -626,8 +626,6 @@
                 {% endif %}
             </div>
             {% endif %}
-            </div>
-            {% endif %}
 
             <!-- Enhanced Match History Tab -->
             <div class="tab-pane fade" id="match-history" role="tabpanel">
@@ -776,113 +774,6 @@
                                 </div>
                                 {% else %}
                                 <!-- No Match History Available -->
-                                <div class="text-center py-5">
-                                    <i class="fas fa-history fa-4x text-muted mb-3 empty-state-icon"></i>
-                                    <h6>No Match History</h6>
-                                    <p class="text-muted">Start playing to see your matches here!</p>
-                                    <a href="{{ url_for('home') }}" class="btn btn-primary">
-                                        <i class="fas fa-gamepad me-1"></i> Learn How to Play
-                                    </a>
-                                </div>
-                                {% endif %}d>
-                                        <tbody id="matchHistoryTableBody">
-                                            {% for match in recent_matches %}
-                                            <tr class="match-row" data-type="{{ 'global' if match.is_global else 'ranked' }}">
-                                                <td class="match-date-display">{{ match.date }}</td>
-                                                <td>
-                                                    {% if match.is_global %}
-                                                        <span class="badge bg-primary rounded-pill">
-                                                            <i class="fas fa-globe me-1"></i> Global
-                                                        </span>
-                                                    {% else %}
-                                                        <span class="badge bg-warning rounded-pill">
-                                                            <i class="fas fa-trophy me-1"></i> Ranked
-                                                        </span>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {% if match.player_result == 'Win' %}
-                                                        <span class="badge bg-success rounded-pill">
-                                                            <i class="fas fa-trophy me-1"></i> Win
-                                                        </span>
-                                                    {% else %}
-                                                        <span class="badge bg-danger rounded-pill">
-                                                            <i class="fas fa-times me-1"></i> Loss
-                                                        </span>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {% if match.mmr_change %}
-                                                        {% if match.mmr_change > 0 %}
-                                                            <span class="text-success fw-bold">
-                                                                <i class="fas fa-arrow-up me-1"></i> +{{ match.mmr_change }}
-                                                            </span>
-                                                        {% else %}
-                                                            <span class="text-danger fw-bold">
-                                                                <i class="fas fa-arrow-down me-1"></i> {{ match.mmr_change }}
-                                                            </span>
-                                                        {% endif %}
-                                                    {% else %}
-                                                        <span class="text-muted">—</span>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    {% if match.streak_display %}
-                                                        <span class="streak-indicator">{{ match.streak_display }}</span>
-                                                    {% else %}
-                                                        <span class="text-muted">—</span>
-                                                    {% endif %}
-                                                </td>
-                                                <td>
-                                                    <button class="btn btn-sm btn-outline-primary" onclick="showMatchDetails('{{ loop.index0 }}')">
-                                                        <i class="fas fa-eye"></i>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                            {% endfor %}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                <!-- Match Statistics Summary -->
-                                <div class="row mt-4">
-                                    <div class="col-md-4">
-                                        <div class="stat-summary-card">
-                                            <div class="d-flex align-items-center">
-                                                <i class="fas fa-gamepad fa-2x text-info me-3"></i>
-                                                <div>
-                                                    <div class="h4 mb-0">{{ recent_matches|length }}</div>
-                                                    <small class="text-muted">Total Matches</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="stat-summary-card">
-                                            <div class="d-flex align-items-center">
-                                                {% set match_wins = recent_matches | selectattr("player_result", "equalto", "Win") | list | length %}
-                                                <i class="fas fa-trophy fa-2x text-success me-3"></i>
-                                                <div>
-                                                    <div class="h4 mb-0 text-success">{{ match_wins }}</div>
-                                                    <small class="text-muted">Wins</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <div class="stat-summary-card">
-                                            <div class="d-flex align-items-center">
-                                                {% set match_losses = recent_matches | selectattr("player_result", "equalto", "Loss") | list | length %}
-                                                <i class="fas fa-times fa-2x text-danger me-3"></i>
-                                                <div>
-                                                    <div class="h4 mb-0 text-danger">{{ match_losses }}</div>
-                                                    <small class="text-muted">Losses</small>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                {% else %}
                                 <div class="text-center py-5">
                                     <i class="fas fa-history fa-4x text-muted mb-3 empty-state-icon"></i>
                                     <h6>No Match History</h6>
