@@ -281,7 +281,7 @@ def discord_callback_enhanced():
             flash(f'Successfully logged in as {user_info["username"]}!', 'success')
             return redirect(url_for('profile'))
 
-        # If we get here, all attempts failed due to rate limiting
+        # If we end up here, all attempts failed due to rate limiting
         flash('Discord is temporarily limiting access. Please wait 5-10 minutes and try again.', 'warning')
         return redirect(url_for('home'))
 
