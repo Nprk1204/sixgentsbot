@@ -1,4 +1,4 @@
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, session, abort
 from pymongo import MongoClient
 from pymongo.server_api import ServerApi
 import os
@@ -13,8 +13,6 @@ import functools
 import re
 import json
 import threading
-from flask_socketio import SocketIO, emit, join_room, leave_room, disconnect
-import eventlet
 
 # Import our Discord OAuth integration
 from discord_oauth import DiscordOAuth, login_required, get_current_user
@@ -310,6 +308,24 @@ def oauth_test():
         'api_endpoint': 'https://discord.com/api/v10',
         'oauth_url_test': discord_oauth.get_oauth_url() if discord_oauth else 'No OAuth instance'
     }
+
+@app.route('/wp-admin/<path:subpath>')
+@app.route('/wordpress/<path:subpath>')
+@app.route('/wp/<path:subpath>')
+@app.route('/blog/<path:subpath>')
+@app.route('/cms/<path:subpath>')
+@app.route('/xmlrpc.php')
+@app.route('/<path:subpath>/wp-includes/wlwmanifest.xml')
+def block_wordpress_bots(subpath=None):
+    """Silently reject common WordPress bot requests"""
+    # Return 404 without logging
+    abort(404)
+
+# Alternative: Return 403 Forbidden to be more explicit
+@app.route('/wp-admin/<path:subpath>')
+def block_wp_admin(subpath=None):
+    """Block WordPress admin access attempts"""
+    abort(403)  # Forbidden - more explicit than 404
 
 # Main Routes
 @app.route('/')
