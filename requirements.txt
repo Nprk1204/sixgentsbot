@@ -7,3 +7,7 @@ python-dateutil==2.8.2
 requests~=2.32.3
 selenium~=4.32.0
 webdriver-manager~=4.0.2
+
+# WebSocket Support
+flask-socketio==5.3.6
+eventlet==0.33.3

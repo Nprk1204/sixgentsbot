@@ -388,6 +388,544 @@
                 </div>
             {% endif %}
 
+            <!-- Queue Status Card -->
+            <div class="card bg-dark-medium mb-4" id="queueStatusCard">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="fas fa-clock me-2"></i>
+                        <span id="queueStatusTitle">Current Status</span>
+                    </h5>
+                </div>
+                <div class="card-body" id="queueStatusContent">
+                    <!-- Loading state -->
+                    <div class="text-center py-3">
+                        <div class="spinner-border spinner-border-sm text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="text-muted mb-0 mt-2">Connecting...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add SocketIO script and queue status script -->
+            <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+            <script>
+            class QueueStatusManager {
+                constructor(userId) {
+                    this.userId = userId;
+                    this.socket = null;
+                    this.reconnectAttempts = 0;
+                    this.maxReconnectAttempts = 5;
+                    this.reconnectDelay = 1000; // Start with 1 second
+                    this.isConnected = false;
+
+                    this.init();
+                }
+
+                init() {
+                    this.connectSocket();
+                    this.setupEventListeners();
+                }
+
+                connectSocket() {
+                    try {
+                        console.log('🔌 Connecting to WebSocket...');
+
+                        // Initialize Socket.IO connection
+                        this.socket = io({
+                            autoConnect: true,
+                            reconnection: true,
+                            reconnectionDelay: this.reconnectDelay,
+                            reconnectionAttempts: this.maxReconnectAttempts,
+                            timeout: 10000
+                        });
+
+                        this.setupSocketEvents();
+
+                    } catch (error) {
+                        console.error('❌ Socket connection error:', error);
+                        this.showConnectionError();
+                    }
+                }
+
+                setupSocketEvents() {
+                    this.socket.on('connect', () => {
+                        console.log('✅ Connected to WebSocket');
+                        this.isConnected = true;
+                        this.reconnectAttempts = 0;
+                        this.reconnectDelay = 1000; // Reset delay
+
+                        // Join user room for personal updates
+                        this.socket.emit('join_user_room', { user_id: this.userId });
+
+                        this.showConnecting();
+                    });
+
+                    this.socket.on('disconnect', (reason) => {
+                        console.log('❌ Disconnected from WebSocket:', reason);
+                        this.isConnected = false;
+                        this.showConnectionError();
+                    });
+
+                    this.socket.on('connect_error', (error) => {
+                        console.error('🔥 Connection error:', error);
+                        this.reconnectAttempts++;
+
+                        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+                            this.showConnectionError();
+                        } else {
+                            this.showReconnecting();
+                            // Exponential backoff
+                            this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+                        }
+                    });
+
+                    this.socket.on('queue_status_update', (data) => {
+                        console.log('📡 Queue status update:', data);
+                        this.updateQueueStatus(data);
+                    });
+
+                    this.socket.on('error', (error) => {
+                        console.error('⚠️ Socket error:', error);
+                        this.showError(error.message || 'Unknown error');
+                    });
+                }
+
+                setupEventListeners() {
+                    // Retry connection button
+                    document.addEventListener('click', (e) => {
+                        if (e.target.id === 'retryConnection') {
+                            this.retryConnection();
+                        }
+                    });
+
+                    // Page visibility change - reconnect when page becomes visible
+                    document.addEventListener('visibilitychange', () => {
+                        if (!document.hidden && !this.isConnected) {
+                            setTimeout(() => this.retryConnection(), 1000);
+                        }
+                    });
+                }
+
+                retryConnection() {
+                    console.log('🔄 Retrying connection...');
+                    this.reconnectAttempts = 0;
+                    this.reconnectDelay = 1000;
+
+                    if (this.socket) {
+                        this.socket.disconnect();
+                    }
+
+                    setTimeout(() => {
+                        this.connectSocket();
+                    }, 500);
+                }
+
+                updateQueueStatus(data) {
+                    const card = document.getElementById('queueStatusCard');
+                    const content = document.getElementById('queueStatusContent');
+                    const title = document.getElementById('queueStatusTitle');
+
+                    if (!card || !content) return;
+
+                    // Remove all status classes
+                    card.className = 'card bg-dark-medium mb-4 queue-status-card';
+
+                    // Add appropriate status class
+                    card.classList.add(`status-${data.status}`);
+
+                    // Update title and content based on status
+                    switch (data.status) {
+                        case 'available':
+                            this.showAvailableStatus(title, content);
+                            break;
+                        case 'in_queue':
+                            this.showQueueStatus(title, content, data);
+                            break;
+                        case 'in_match':
+                            this.showMatchStatus(title, content, data);
+                            break;
+                        case 'error':
+                            this.showError(data.error || 'Unknown error');
+                            break;
+                        default:
+                            this.showUnknownStatus(title, content);
+                    }
+                }
+
+                showAvailableStatus(title, content) {
+                    title.innerHTML = '<i class="fas fa-check-circle me-2"></i> Available';
+                    content.innerHTML = `
+                        <div class="text-center py-2">
+                            <div class="status-indicator status-available mb-3">
+                                <i class="fas fa-check-circle"></i>
+                                <span>Ready to Queue</span>
+                            </div>
+                            <p class="text-muted mb-0">You can join a queue anytime!</p>
+                            <small class="text-muted">
+                                <i class="fas fa-gamepad me-1"></i>
+                                Use Discord commands to join
+                            </small>
+                        </div>
+                    `;
+                }
+
+                showQueueStatus(title, content, data) {
+                    const queueType = data.queue_type === 'global' ? 'Global' : 'Ranked';
+                    title.innerHTML = `<i class="fas fa-clock me-2"></i> In ${queueType} Queue`;
+
+                    const progressPercent = Math.min((data.total_in_queue / 6) * 100, 100);
+
+                    content.innerHTML = `
+                        <div class="text-center py-2">
+                            <div class="status-indicator status-in-queue mb-3">
+                                <i class="fas fa-clock"></i>
+                                <span>Position ${data.position}/${data.total_in_queue}</span>
+                            </div>
+
+                            <div class="queue-details">
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Queue Type</span>
+                                    <span class="queue-stat-value">${queueType}</span>
+                                </div>
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Your Position</span>
+                                    <span class="queue-stat-value">${data.position} / ${data.total_in_queue}</span>
+                                </div>
+                                ${data.time_in_queue ? `
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Time in Queue</span>
+                                    <span class="queue-stat-value">${data.time_in_queue}</span>
+                                </div>
+                                ` : ''}
+                                ${data.players_needed > 0 ? `
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Players Needed</span>
+                                    <span class="queue-stat-value text-warning">${data.players_needed}</span>
+                                </div>
+                                ` : ''}
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Estimate</span>
+                                    <span class="queue-stat-value">${data.estimated_wait}</span>
+                                </div>
+                            </div>
+
+                            <div class="progress mt-3 mb-2" style="height: 6px;">
+                                <div class="progress-bar bg-warning" style="width: ${progressPercent}%"></div>
+                            </div>
+                            <small class="text-muted">${data.total_in_queue}/6 players</small>
+                        </div>
+                    `;
+                }
+
+                showMatchStatus(title, content, data) {
+                    title.innerHTML = `<i class="fas fa-gamepad me-2"></i> ${data.phase}`;
+
+                    const matchType = data.is_global ? 'Global' : 'Ranked';
+
+                    content.innerHTML = `
+                        <div class="text-center py-2">
+                            <div class="status-indicator status-in-match mb-3">
+                                <div class="live-indicator">
+                                    <span class="live-dot"></span>
+                                    <span>LIVE</span>
+                                </div>
+                                <span>${data.phase}</span>
+                            </div>
+
+                            <div class="queue-details">
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Match Type</span>
+                                    <span class="queue-stat-value">${matchType}</span>
+                                </div>
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Match ID</span>
+                                    <span class="match-id-display">${data.match_id}</span>
+                                </div>
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Status</span>
+                                    <span class="queue-stat-value">${data.description}</span>
+                                </div>
+                                ${data.created_at ? `
+                                <div class="queue-stat">
+                                    <span class="queue-stat-label">Started</span>
+                                    <span class="queue-stat-value">${this.formatTime(data.created_at)}</span>
+                                </div>
+                                ` : ''}
+                            </div>
+
+                            <div class="mt-3">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Use <code>/report ${data.match_id}</code> when finished
+                                </small>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                showConnecting() {
+                    const content = document.getElementById('queueStatusContent');
+                    if (content) {
+                        content.innerHTML = `
+                            <div class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <p class="text-muted mb-0 mt-2">Loading status...</p>
+                            </div>
+                        `;
+                    }
+                }
+
+                showReconnecting() {
+                    const content = document.getElementById('queueStatusContent');
+                    if (content) {
+                        content.innerHTML = `
+                            <div class="text-center py-3">
+                                <div class="spinner-border spinner-border-sm text-warning" role="status">
+                                    <span class="visually-hidden">Reconnecting...</span>
+                                </div>
+                                <p class="text-muted mb-0 mt-2">Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})</p>
+                            </div>
+                        `;
+                    }
+                }
+
+                showConnectionError() {
+                    const content = document.getElementById('queueStatusContent');
+                    if (content) {
+                        content.innerHTML = `
+                            <div class="text-center py-3">
+                                <i class="fas fa-exclamation-triangle fa-2x text-warning mb-3"></i>
+                                <p class="text-muted mb-2">Connection lost</p>
+                                <button id="retryConnection" class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-sync-alt me-1"></i> Retry
+                                </button>
+                            </div>
+                        `;
+                    }
+                }
+
+                showError(message) {
+                    const content = document.getElementById('queueStatusContent');
+                    if (content) {
+                        content.innerHTML = `
+                            <div class="text-center py-3">
+                                <i class="fas fa-exclamation-circle fa-2x text-danger mb-3"></i>
+                                <p class="text-danger mb-2">Error</p>
+                                <small class="text-muted">${message}</small>
+                            </div>
+                        `;
+                    }
+                }
+
+                showUnknownStatus(title, content) {
+                    title.innerHTML = '<i class="fas fa-question-circle me-2"></i> Unknown Status';
+                    content.innerHTML = `
+                        <div class="text-center py-3">
+                            <i class="fas fa-question-circle fa-2x text-muted mb-3"></i>
+                            <p class="text-muted mb-0">Status unavailable</p>
+                            <small class="text-muted">Check back in a moment</small>
+                        </div>
+                    `;
+                }
+
+                formatTime(isoString) {
+                    try {
+                        const date = new Date(isoString);
+                        const now = new Date();
+                        const diffMs = now - date;
+                        const diffMins = Math.floor(diffMs / 60000);
+
+                        if (diffMins < 1) return 'Just now';
+                        if (diffMins < 60) return `${diffMins}m ago`;
+
+                        const diffHours = Math.floor(diffMins / 60);
+                        if (diffHours < 24) return `${diffHours}h ago`;
+
+                        return date.toLocaleDateString();
+                    } catch (e) {
+                        return 'Unknown';
+                    }
+                }
+
+                destroy() {
+                    if (this.socket) {
+                        this.socket.disconnect();
+                        this.socket = null;
+                    }
+                }
+            }
+
+            // Initialize queue status manager when page loads
+            document.addEventListener('DOMContentLoaded', function() {
+                // Only initialize if user is logged in and we have their ID
+                {% if user %}
+                const userId = '{{ user.id }}';
+                console.log('🚀 Initializing Queue Status Manager for user:', userId);
+
+                // Create global instance
+                window.queueStatusManager = new QueueStatusManager(userId);
+
+                // Cleanup on page unload
+                window.addEventListener('beforeunload', () => {
+                    if (window.queueStatusManager) {
+                        window.queueStatusManager.destroy();
+                    }
+                });
+                {% else %}
+                console.log('⚠️ User not logged in - queue status not available');
+                {% endif %}
+            });
+            </script>
+
+            <!-- Enhanced CSS for queue status -->
+            <style>
+            .queue-status-card {
+                border-radius: 12px;
+                overflow: hidden;
+                transition: all 0.3s ease;
+                position: relative;
+            }
+
+            .queue-status-card.status-available {
+                border-left: 4px solid var(--success);
+            }
+
+            .queue-status-card.status-in-queue {
+                border-left: 4px solid var(--warning);
+                animation: pulse-queue 2s infinite;
+            }
+
+            .queue-status-card.status-in-match {
+                border-left: 4px solid var(--danger);
+                animation: pulse-match 1.5s infinite;
+            }
+
+            @keyframes pulse-queue {
+                0%, 100% {
+                    box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.4);
+                }
+                50% {
+                    box-shadow: 0 0 0 8px rgba(255, 193, 7, 0);
+                }
+            }
+
+            @keyframes pulse-match {
+                0%, 100% {
+                    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+                }
+                50% {
+                    box-shadow: 0 0 0 8px rgba(220, 53, 69, 0);
+                }
+            }
+
+            .status-indicator {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 0.5rem 1rem;
+                border-radius: 20px;
+                font-weight: 500;
+                font-size: 0.9rem;
+            }
+
+            .status-available {
+                background: rgba(67, 181, 129, 0.15);
+                color: var(--success);
+                border: 1px solid rgba(67, 181, 129, 0.3);
+            }
+
+            .status-in-queue {
+                background: rgba(255, 193, 7, 0.15);
+                color: var(--warning);
+                border: 1px solid rgba(255, 193, 7, 0.3);
+            }
+
+            .status-in-match {
+                background: rgba(220, 53, 69, 0.15);
+                color: var(--danger);
+                border: 1px solid rgba(220, 53, 69, 0.3);
+            }
+
+            .queue-details {
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 8px;
+                padding: 1rem;
+                margin-top: 1rem;
+            }
+
+            .queue-stat {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 0.5rem;
+            }
+
+            .queue-stat:last-child {
+                margin-bottom: 0;
+            }
+
+            .queue-stat-label {
+                font-size: 0.85rem;
+                color: var(--text-muted);
+            }
+
+            .queue-stat-value {
+                font-weight: 600;
+                color: var(--text);
+            }
+
+            .match-id-display {
+                font-family: 'Roboto Mono', monospace;
+                background: rgba(0, 0, 0, 0.3);
+                padding: 0.25rem 0.5rem;
+                border-radius: 4px;
+                font-size: 0.8rem;
+                color: var(--primary);
+            }
+
+            .live-indicator {
+                display: inline-flex;
+                align-items: center;
+                gap: 0.25rem;
+                color: var(--danger);
+                font-size: 0.8rem;
+                font-weight: 500;
+            }
+
+            .live-dot {
+                width: 8px;
+                height: 8px;
+                background: var(--danger);
+                border-radius: 50%;
+                animation: pulse-dot 1s infinite;
+            }
+
+            @keyframes pulse-dot {
+                0%, 100% { opacity: 1; }
+                50% { opacity: 0.3; }
+            }
+
+            /* Mobile responsiveness */
+            @media (max-width: 768px) {
+                .queue-details {
+                    padding: 0.75rem;
+                }
+
+                .queue-stat {
+                    font-size: 0.9rem;
+                }
+
+                .status-indicator {
+                    padding: 0.4rem 0.8rem;
+                    font-size: 0.8rem;
+                }
+            }
+            </style>
+
             <!-- Quick Actions Card -->
             <div class="card bg-dark-medium">
                 <div class="card-header">
