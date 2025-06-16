@@ -309,24 +309,6 @@ def oauth_test():
         'oauth_url_test': discord_oauth.get_oauth_url() if discord_oauth else 'No OAuth instance'
     }
 
-@app.route('/wp-admin/<path:subpath>')
-@app.route('/wordpress/<path:subpath>')
-@app.route('/wp/<path:subpath>')
-@app.route('/blog/<path:subpath>')
-@app.route('/cms/<path:subpath>')
-@app.route('/xmlrpc.php')
-@app.route('/<path:subpath>/wp-includes/wlwmanifest.xml')
-def block_wordpress_bots(subpath=None):
-    """Silently reject common WordPress bot requests"""
-    # Return 404 without logging
-    abort(404)
-
-# Alternative: Return 403 Forbidden to be more explicit
-@app.route('/wp-admin/<path:subpath>')
-def block_wp_admin(subpath=None):
-    """Block WordPress admin access attempts"""
-    abort(403)  # Forbidden - more explicit than 404
-
 # Main Routes
 @app.route('/')
 def home():
@@ -2476,6 +2458,47 @@ def debug_database():
             "database_status": "error",
             "error": str(e)
         }), 500
+
+# Bot blocking routes - silently reject common WordPress/bot requests
+@app.route('/wp-login.php')
+@app.route('/wp-admin')
+@app.route('/wp-admin/')
+@app.route('/wp-admin/<path:subpath>')
+@app.route('/wordpress/')
+@app.route('/wordpress/<path:subpath>')
+@app.route('/wp/')
+@app.route('/wp/<path:subpath>')
+@app.route('/blog/')
+@app.route('/blog/<path:subpath>')
+@app.route('/cms/')
+@app.route('/cms/<path:subpath>')
+@app.route('/xmlrpc.php')
+@app.route('/wp-includes/<path:subpath>')
+@app.route('/wp-content/<path:subpath>')
+@app.route('/<path:subpath>/wp-includes/wlwmanifest.xml')
+def block_bot_requests(subpath=None):
+    """Silently block common bot/scanner requests"""
+    # Return empty response with 404 status (no logging by default)
+    return '', 404
+
+# Alternative: More aggressive blocking with 403 Forbidden
+@app.route('/admin')
+@app.route('/administrator')
+@app.route('/phpmyadmin')
+@app.route('/phpMyAdmin')
+def block_admin_requests():
+    """Block admin panel scanning attempts"""
+    return '', 403
+
+# Block common vulnerability scanners
+@app.route('/.env')
+@app.route('/config.php')
+@app.route('/configuration.php')
+@app.route('/database.php')
+@app.route('/db.php')
+def block_config_requests():
+    """Block configuration file scanning"""
+    return '', 404
 
 if __name__ == '__main__':
     import platform
