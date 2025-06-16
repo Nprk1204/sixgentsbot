@@ -1001,6 +1001,19 @@ class MatchSystem:
                             "last_updated": datetime.datetime.utcnow()
                         }}
                     )
+
+                    # FIXED: Track MMR change for global (THIS WAS MISSING!)
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": mmr_gain,
+                        "is_win": True,
+                        "is_global": True,
+                        "streak": new_global_streak
+                    })
+                    print(f"Added global MMR change for {player.get('name', 'Unknown')}: +{mmr_gain}")
+
                 else:
                     # Regular ranked match win handling
                     matches_played = player_data.get("matches", 0) + 1
