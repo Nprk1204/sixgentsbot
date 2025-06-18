@@ -3240,41 +3240,6 @@ async def show_match_details(interaction: discord.Interaction, match_id: str, ma
 
     await interaction.response.edit_message(embed=detail_embed, view=BackView())
 
-@bot.tree.command(name="purgechat", description="Clear chat messages")
-@app_commands.describe(amount_to_delete="Number of messages to delete (1-100)")
-async def purgechat_slash(interaction: discord.Interaction, amount_to_delete: int = 10):
-    # Check if command is used in an allowed channel
-    if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
-            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-            ephemeral=True
-        )
-        return
-
-    if interaction.user.guild_permissions.manage_messages:
-        if 1 <= amount_to_delete <= 100:
-            await interaction.response.defer(ephemeral=True)
-            await interaction.channel.purge(limit=amount_to_delete)
-            await interaction.followup.send(f"Cleared {amount_to_delete} messages.", ephemeral=True)
-        else:
-            await interaction.response.send_message("Please enter a number between 1 and 100", ephemeral=True)
-    else:
-        await interaction.response.send_message("You don't have permission to use this command.", ephemeral=True)
-
-
-@bot.tree.command(name="ping", description="Check if the bot is connected")
-async def ping_slash(interaction: discord.Interaction):
-    # Check if command is used in an allowed channel
-    if not is_command_channel(interaction.channel):
-        await interaction.response.send_message(
-            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
-            ephemeral=True
-        )
-        return
-
-    await interaction.response.send_message("Pong! Bot is connected to Discord.")
-
-
 @bot.tree.command(name="help", description="Shows command information")
 @app_commands.describe(command_name="Get details about a specific command")
 async def help_slash(interaction: discord.Interaction, command_name: str = None):
