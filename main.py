@@ -4003,25 +4003,23 @@ async def resetleaderboard_slash(interaction: discord.Interaction, confirmation:
 
     await set_reset_status(True, interaction)
 
-    # IMMEDIATE response to prevent timeout - make it public so others know reset is happening
+    # IMMEDIATE response to prevent timeout
     await interaction.response.send_message(
-        f"🔄 Starting {reset_type} leaderboard reset... This will take several minutes. Check this channel for updates.",
-        ephemeral=False
+        f"🔄 Starting {reset_type} leaderboard reset... This will take several minutes. Please wait.",
+        ephemeral=True
     )
 
-    # Run the actual reset in a background task with channel reference instead of interaction
-    asyncio.create_task(perform_reset_background_enhanced_fixed(
-        channel=interaction.channel,
-        user=interaction.user,
-        guild=interaction.guild,
-        reset_type=reset_type
-    ))
+    # Run the actual reset in a background task to avoid interaction timeouts
+    asyncio.create_task(perform_reset_background_enhanced(interaction, reset_type))
 
 
-# 2. FIXED background reset function
-async def perform_reset_background_enhanced_fixed(channel, user, guild, reset_type):
-    """FIXED reset with proper channel messaging instead of interaction"""
+async def perform_reset_background_enhanced(interaction: discord.Interaction, reset_type: str):
+    """ENHANCED reset with ULTRA-SAFE rate limiting for Discord roles"""
     try:
+        channel = interaction.channel
+        user = interaction.user
+        guild = interaction.guild
+
         # Create backup collection name with timestamp
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_collection_name = f"players_backup_{timestamp}"
@@ -4200,17 +4198,18 @@ async def perform_reset_background_enhanced_fixed(channel, user, guild, reset_ty
                 inline=False
             )
 
-            embed.add_field(
-                name="Discord Role Removal",
-                value=f"✅ Success: **{roles_removed_count}** members\n❌ Errors: **{len(role_removal_errors)}** members",
-                inline=False
-            )
+            if reset_type == "all":
+                embed.add_field(
+                    name="Discord Role Removal",
+                    value=f"✅ Success: **{roles_removed_count}** members\n❌ Errors: **{len(role_removal_errors)}** members",
+                    inline=False
+                )
 
-            embed.add_field(
-                name="Important",
-                value="**All players must re-verify their ranks** before joining queues again.",
-                inline=False
-            )
+                embed.add_field(
+                    name="Important",
+                    value="**All players must re-verify their ranks** before joining queues again.",
+                    inline=False
+                )
 
         else:
             # NEW: Soft reset embed
@@ -4271,21 +4270,21 @@ async def perform_reset_background_enhanced_fixed(channel, user, guild, reset_ty
 
         await safe_send_message(channel, embed=embed)
 
-        await set_reset_status(False, None)  # Pass None since we don't have interaction anymore
+        await set_reset_status(False, interaction)
 
     except Exception as e:
         print(f"Error in background reset: {e}")
         import traceback
         traceback.print_exc()
 
-        await set_reset_status(False, None)  # Pass None since we don't have interaction anymore
+        await set_reset_status(False, interaction)
 
         error_embed = discord.Embed(
             title="❌ Reset Error",
             description=f"An error occurred during the reset: {str(e)}",
             color=0xff0000
         )
-        await safe_send_message(channel, embed=error_embed)
+        await safe_send_message(interaction.channel, embed=error_embed)
 
 
 async def safe_send_message(channel, content=None, embed=None, max_retries=3):
