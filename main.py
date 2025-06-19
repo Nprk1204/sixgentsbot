@@ -4996,6 +4996,72 @@ async def handle_swap(interaction, match_id, match, player1, player2):
     await interaction.response.send_message(embed=embed)
 
 
+@bot.tree.command(name="clearreset", description="Clear stuck reset status (Emergency Admin only)")
+async def clearreset_slash(interaction: discord.Interaction):
+    # Check if command is used in an allowed channel
+    if not is_command_channel(interaction.channel):
+        await interaction.response.send_message(
+            f"{interaction.user.mention}, this command can only be used in the rank-a, rank-b, rank-c, global, or sixgents channels.",
+            ephemeral=True
+        )
+        return
+
+    # Check if user has admin permissions
+    if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
+        await interaction.response.send_message(
+            "You need administrator permissions or the 6mod role to use this command.",
+            ephemeral=True
+        )
+        return
+
+    global RESET_IN_PROGRESS, RESET_START_TIME
+
+    # Store previous state for logging
+    was_in_progress = RESET_IN_PROGRESS
+
+    # Clear the reset state
+    RESET_IN_PROGRESS = False
+    RESET_START_TIME = None
+
+    embed = discord.Embed(
+        title="🔧 Reset Status Cleared",
+        description="Emergency reset status clearance completed.",
+        color=0x00ff00
+    )
+
+    embed.add_field(
+        name="Previous State",
+        value=f"Reset in progress: {'Yes' if was_in_progress else 'No'}",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Current State",
+        value="Reset in progress: No",
+        inline=False
+    )
+
+    embed.add_field(
+        name="What This Does",
+        value="• Clears the stuck reset flag\n• Re-enables all reset commands\n• Re-enables queue commands\n• Allows normal bot operation",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Next Steps",
+        value="• Test with `/status` command\n• Try reset commands again\n• Use `/debugserver` to check setup",
+        inline=False
+    )
+
+    embed.set_footer(text=f"Cleared by {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed)
+
+    # Log the action
+    print(f"🔧 RESET STATUS CLEARED by {interaction.user.display_name} (ID: {interaction.user.id})")
+    print(f"   Previous state: RESET_IN_PROGRESS = {was_in_progress}")
+    print(f"   New state: RESET_IN_PROGRESS = False")
+
 @bot.tree.command(name="streak", description="Check your current streak or another player's streak")
 @app_commands.describe(member="The member whose streak you want to check (optional)")
 async def streak_slash(interaction: discord.Interaction, member: discord.Member = None):
