@@ -149,7 +149,7 @@ class VoteSystem:
                     "**🎲 Random Teams** - Completely random teams\n"
                     "**👑 Captains Pick** - Captains draft players\n\n"
                     "Match players: " + ", ".join(player_mentions) + "\n"
-                                                                     "All 6 players must vote! (30 second timeout)"
+                                                                     "All 6 players must vote! (2 Minute timeout)"
             ),
             color=0x3498db
         )
@@ -161,8 +161,8 @@ class VoteSystem:
         captains_button = Button(style=discord.ButtonStyle.primary, custom_id="captains", label="Captains Pick",
                                  emoji="👑")
 
-        # Create View with 30 second timeout
-        view = View(timeout=30)
+        # Create View with 2 minute timeout
+        view = View(timeout=120)
         view.add_item(balanced_button)
         view.add_item(random_button)
         view.add_item(captains_button)
