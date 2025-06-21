@@ -217,7 +217,7 @@ function loadStats() {
 function loadVerifications(page = 1) {
     currentPage = page;
 
-    // Build query parameters
+    // Build query parameters for the API
     const params = new URLSearchParams({
         page: page,
         ...currentFilters
@@ -371,8 +371,6 @@ function getTierBadge(tier) {
     return badges[tier] || '<span class="badge bg-secondary">Unknown</span>';
 }
 
-// Removed getPlatformIcon since we don't need platform info anymore
-
 function applyFilters() {
     const searchUser = document.getElementById('searchUser').value.trim();
     const filterRank = document.getElementById('filterRank').value;
@@ -412,10 +410,6 @@ function refreshData() {
     // Reload both stats and verifications
     loadStats();
     loadVerifications(currentPage);
-}
-
-function exportData() {
-    // Removed export functionality
 }
 
 function viewPlayerDetails(playerId) {
@@ -492,18 +486,22 @@ function showLocalPlayerDetails(playerId) {
 
     playerModal.show();
 
-    // Try to get player data, but also handle case where player doesn't exist yet
+    // Try to get player data, but handle 404 properly
     fetch(`/api/player/${playerId}`)
         .then(response => {
             if (response.status === 404) {
-                // Player not found in players collection, show verification info only
-                return showVerificationInfo(playerId);
+                // Player not found, show verification info instead
+                showVerificationInfo(playerId);
+                return null; // Don't try to parse JSON
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
             }
             return response.json();
         })
         .then(player => {
-            if (typeof player === 'string') {
-                // This means showVerificationInfo was called
+            // Skip if we already showed verification info
+            if (player === null) {
                 return;
             }
 
@@ -549,7 +547,7 @@ function showLocalPlayerDetails(playerId) {
         })
         .catch(error => {
             console.error('Error fetching player details:', error);
-            // Fallback to verification info
+            // On any error, show verification info
             showVerificationInfo(playerId);
         });
 
@@ -608,13 +606,11 @@ function showLocalPlayerDetails(playerId) {
                 ` : `
                 <div class="alert alert-warning">
                     <i class="fas fa-exclamation-triangle me-2"></i>
-                    Unable to load player information.
+                    Player information not available.
                 </div>
                 `}
             </div>
         `;
-
-        return 'verification_info_shown';
     }
 }
 
