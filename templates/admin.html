@@ -492,10 +492,21 @@ function showLocalPlayerDetails(playerId) {
 
     playerModal.show();
 
-    // Fetch and display player data
+    // Try to get player data, but also handle case where player doesn't exist yet
     fetch(`/api/player/${playerId}`)
-        .then(response => response.json())
+        .then(response => {
+            if (response.status === 404) {
+                // Player not found in players collection, show verification info only
+                return showVerificationInfo(playerId);
+            }
+            return response.json();
+        })
         .then(player => {
+            if (typeof player === 'string') {
+                // This means showVerificationInfo was called
+                return;
+            }
+
             if (player.error) {
                 modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
                 return;
@@ -507,7 +518,7 @@ function showLocalPlayerDetails(playerId) {
                 modalTitle.textContent = player.name || 'Player Details';
             }
 
-            // Simple player info display
+            // Display full player info
             modalContent.innerHTML = `
                 <div class="row mb-4">
                     <div class="col-md-6">
@@ -538,12 +549,73 @@ function showLocalPlayerDetails(playerId) {
         })
         .catch(error => {
             console.error('Error fetching player details:', error);
-            modalContent.innerHTML = `
-                <div class="alert alert-danger">
-                    Error loading player data. Please try again later.
-                </div>
-            `;
+            // Fallback to verification info
+            showVerificationInfo(playerId);
         });
+
+    function showVerificationInfo(playerId) {
+        // Find the verification data from the current table data
+        const currentVerifications = document.querySelectorAll('#verificationsTableBody tr');
+        let verificationData = null;
+
+        currentVerifications.forEach(row => {
+            const actionButtons = row.querySelector('[onclick*="' + playerId + '"]');
+            if (actionButtons) {
+                const cells = row.querySelectorAll('td');
+                verificationData = {
+                    username: cells[0].textContent.trim(),
+                    rank: cells[1].textContent.trim(),
+                    date: cells[2].textContent.trim()
+                };
+            }
+        });
+
+        // Update modal title
+        const modalTitle = document.getElementById('playerModalLabel');
+        if (modalTitle) {
+            modalTitle.textContent = verificationData ? verificationData.username : 'Player Details';
+        }
+
+        modalContent.innerHTML = `
+            <div class="text-center">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle me-2"></i>
+                    This player has verified their rank but hasn't played any matches yet.
+                </div>
+
+                ${verificationData ? `
+                <div class="card bg-dark">
+                    <div class="card-body">
+                        <h5><i class="fas fa-user me-2"></i>${verificationData.username}</h5>
+                        <div class="row mt-3">
+                            <div class="col-md-6">
+                                <p><strong>Verified Rank:</strong></p>
+                                <div>${verificationData.rank}</div>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Verification Date:</strong></p>
+                                <p>${verificationData.date}</p>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <p class="text-muted mb-0">
+                                <i class="fas fa-gamepad me-1"></i>
+                                This player will appear in the players collection once they play their first match.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                ` : `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Unable to load player information.
+                </div>
+                `}
+            </div>
+        `;
+
+        return 'verification_info_shown';
+    }
 }
 
 function confirmDeleteVerification(discordId, username) {
