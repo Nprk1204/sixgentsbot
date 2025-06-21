@@ -415,53 +415,59 @@ def admin_dashboard():
 @app.route('/api/admin/rank-verifications')
 @admin_required
 def get_rank_verifications():
-    """API endpoint to get paginated rank verification data"""
+    """API endpoint to get paginated rank verification data with filtering"""
     try:
         page = request.args.get('page', 1, type=int)
         per_page = 10
         skip = (page - 1) * per_page
 
-        # Get total count
-        total_verifications = ranks_collection.count_documents({})
+        # Build query based on filters
+        query = {}
 
-        # Get paginated results
+        # Search filter
+        search = request.args.get('search', '').strip()
+        if search:
+            query['$or'] = [
+                {'discord_username': {'$regex': search, '$options': 'i'}},
+                {'discord_id': {'$regex': search, '$options': 'i'}}
+            ]
+
+        # Rank filter
+        rank_filter = request.args.get('rank', '').strip()
+        if rank_filter:
+            query['tier'] = rank_filter
+
+        # Get total count with filters
+        total_verifications = ranks_collection.count_documents(query)
+
+        # Determine sort order
+        sort_by = request.args.get('sort', 'timestamp')
+        if sort_by == 'mmr':
+            sort_field = [("mmr", -1)]
+        elif sort_by == 'username':
+            sort_field = [("discord_username", 1)]
+        else:  # default to timestamp (recent first)
+            sort_field = [("timestamp", -1)]
+
+        # Get paginated results with filtering and sorting
         verifications = list(ranks_collection.find(
-            {},
+            query,
             {
                 "_id": 0,
                 "discord_username": 1,
                 "discord_id": 1,
-                "game_username": 1,
-                "platform": 1,
                 "rank": 1,
                 "tier": 1,
                 "mmr": 1,
-                "global_mmr": 1,
                 "timestamp": 1
             }
-        ).sort("timestamp", -1).skip(skip).limit(per_page))
+        ).sort(sort_field).skip(skip).limit(per_page))
 
-        # Format timestamps and add additional info
+        # Format timestamps
         for verification in verifications:
             if "timestamp" in verification:
-                verification["verified_date"] = verification["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+                verification["verified_date"] = verification["timestamp"].strftime("%Y-%m-%d")
                 del verification["timestamp"]
-
-            # Add player stats if they exist
-            player_data = players_collection.find_one({"id": verification.get("discord_id")})
-            if player_data:
-                verification["current_mmr"] = player_data.get("mmr", verification.get("mmr", 0))
-                verification["current_global_mmr"] = player_data.get("global_mmr", verification.get("global_mmr", 300))
-                verification["matches_played"] = player_data.get("matches", 0)
-                verification["global_matches_played"] = player_data.get("global_matches", 0)
-                verification["win_rate"] = round(
-                    (player_data.get("wins", 0) / max(player_data.get("matches", 1), 1)) * 100, 2)
-            else:
-                verification["current_mmr"] = verification.get("mmr", 0)
-                verification["current_global_mmr"] = verification.get("global_mmr", 300)
-                verification["matches_played"] = 0
-                verification["global_matches_played"] = 0
-                verification["win_rate"] = 0
 
         return jsonify({
             "verifications": verifications,

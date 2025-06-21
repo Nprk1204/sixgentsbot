@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}Admin Dashboard - SixGents{% endblock %}
+{% block title %}Admin Dashboard - SixGents 6-Mans{% endblock %}
 
 {% block content %}
 <div class="container">
@@ -11,9 +11,6 @@
             <div class="d-flex gap-2">
                 <button class="btn btn-outline-primary btn-sm" onclick="refreshData()">
                     <i class="fas fa-sync-alt me-1"></i> Refresh
-                </button>
-                <button class="btn btn-outline-secondary btn-sm" onclick="exportData()">
-                    <i class="fas fa-download me-1"></i> Export
                 </button>
             </div>
         </div>
@@ -243,7 +240,6 @@ function displayVerifications(verifications) {
                     <div class="d-flex align-items-center">
                         <div>
                             <div class="fw-semibold">${verification.discord_username || 'Unknown'}</div>
-                            <small class="text-muted">ID: ${verification.discord_id || ''}</small>
                         </div>
                     </div>
                 </td>
@@ -254,7 +250,7 @@ function displayVerifications(verifications) {
                     </div>
                 </td>
                 <td>
-                    <small class="text-muted">${verification.verified_date || 'Unknown'}</small>
+                    <small class="text-muted">${verification.verified_date ? verification.verified_date.split(' ')[0] : 'Unknown'}</small>
                 </td>
                 <td>
                     <div class="dropdown">
@@ -355,15 +351,22 @@ function getTierBadge(tier) {
 // Removed getPlatformIcon since we don't need platform info anymore
 
 function applyFilters() {
-    currentFilters = {};
-
     const searchUser = document.getElementById('searchUser').value.trim();
     const filterRank = document.getElementById('filterRank').value;
     const sortBy = document.getElementById('sortBy').value;
 
-    if (searchUser) currentFilters.search = searchUser;
-    if (filterRank) currentFilters.rank = filterRank;
-    if (sortBy) currentFilters.sort = sortBy;
+    // Build query parameters for the API
+    const params = new URLSearchParams({
+        page: 1 // Reset to page 1 when applying filters
+    });
+
+    if (searchUser) params.append('search', searchUser);
+    if (filterRank) params.append('rank', filterRank);
+    if (sortBy) params.append('sort', sortBy);
+
+    // Update current filters and load data
+    currentFilters = Object.fromEntries(params.entries());
+    delete currentFilters.page; // Remove page from stored filters
 
     loadVerifications(1);
 }
@@ -374,39 +377,16 @@ function refreshData() {
 }
 
 function exportData() {
-    // Create CSV data from current table
-    const rows = document.querySelectorAll('#verificationsTableBody tr');
-    let csvContent = "Discord Username,Verified Rank,Tier,Verified Date\n";
-
-    rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length > 1) { // Skip loading/empty rows
-            const rowData = [
-                cells[0].textContent.trim().split('\n')[0], // Discord username
-                cells[1].textContent.trim().split('\n')[1] || '', // Rank text
-                cells[1].textContent.trim().split('\n')[0] || '', // Tier from badge
-                cells[2].textContent.trim()
-            ];
-            csvContent += rowData.map(field => `"${field}"`).join(',') + '\n';
-        }
-    });
-
-    // Download CSV
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `rank_verifications_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+    // Removed export functionality
 }
 
 function viewPlayerDetails(playerId) {
-    // Use the existing player modal function
+    // Use the existing player modal function from main.js
     if (typeof showPlayerDetails === 'function') {
         showPlayerDetails(playerId);
     } else {
         console.error('Player details function not available');
+        alert('Player details view is not available on this page.');
     }
 }
 
