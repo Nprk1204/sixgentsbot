@@ -154,6 +154,30 @@
     </div>
 </div>
 
+<!-- Player Details Modal -->
+<div class="modal fade" id="playerModal" tabindex="-1" aria-labelledby="playerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="playerModalLabel">Player Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="playerModalContent">
+                <!-- Player details will be loaded here -->
+                <div class="text-center">
+                    <div class="spinner-border text-light" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <p>Loading player data...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let currentPage = 1;
 let currentFilters = {};
@@ -395,13 +419,131 @@ function exportData() {
 }
 
 function viewPlayerDetails(playerId) {
-    // Use the existing player modal function from main.js
+    // Check if the modal element exists
+    const modalElement = document.getElementById('playerModal');
+    if (!modalElement) {
+        // Create a simple modal if the main player modal doesn't exist
+        showSimplePlayerInfo(playerId);
+        return;
+    }
+
+    // Try to use the global function first
     if (typeof showPlayerDetails === 'function') {
         showPlayerDetails(playerId);
-    } else {
-        console.error('Player details function not available');
-        alert('Player details view is not available on this page.');
+        return;
     }
+
+    // Fallback: implement a local version
+    showLocalPlayerDetails(playerId);
+}
+
+function showSimplePlayerInfo(playerId) {
+    // Simple alert with player info for now
+    fetch(`/api/player/${playerId}`)
+        .then(response => response.json())
+        .then(player => {
+            if (player.error) {
+                alert('Error loading player data: ' + player.error);
+                return;
+            }
+
+            const info = `
+Player: ${player.name}
+MMR: ${player.mmr || 0}
+Global MMR: ${player.global_mmr || 300}
+Matches: ${player.matches || 0}
+Win Rate: ${player.win_rate || 0}%
+            `;
+            alert(info);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to load player details');
+        });
+}
+
+function showLocalPlayerDetails(playerId) {
+    // Implement the player modal locally for admin page
+    const modalElement = document.getElementById('playerModal');
+    let playerModal;
+
+    if (typeof bootstrap !== 'undefined') {
+        playerModal = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+    } else {
+        alert('Bootstrap not available for modal');
+        return;
+    }
+
+    const modalContent = document.getElementById('playerModalContent');
+    if (!modalContent) {
+        alert('Modal content element not found');
+        return;
+    }
+
+    // Show loading
+    modalContent.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border text-light" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>Loading player data...</p>
+        </div>
+    `;
+
+    playerModal.show();
+
+    // Fetch and display player data
+    fetch(`/api/player/${playerId}`)
+        .then(response => response.json())
+        .then(player => {
+            if (player.error) {
+                modalContent.innerHTML = `<div class="alert alert-danger">${player.error}</div>`;
+                return;
+            }
+
+            // Update modal title
+            const modalTitle = document.getElementById('playerModalLabel');
+            if (modalTitle) {
+                modalTitle.textContent = player.name || 'Player Details';
+            }
+
+            // Simple player info display
+            modalContent.innerHTML = `
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <h4>${player.name}</h4>
+                        <div class="card bg-dark mb-3">
+                            <div class="card-body">
+                                <h6>Ranked Stats</h6>
+                                <p><strong>MMR:</strong> ${player.mmr || 0}</p>
+                                <p><strong>Matches:</strong> ${player.matches || 0}</p>
+                                <p><strong>Win Rate:</strong> ${player.win_rate || 0}%</p>
+                                <p><strong>Record:</strong> ${player.wins || 0}-${player.losses || 0}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-dark mb-3">
+                            <div class="card-body">
+                                <h6>Global Stats</h6>
+                                <p><strong>Global MMR:</strong> ${player.global_mmr || 300}</p>
+                                <p><strong>Global Matches:</strong> ${player.global_matches || 0}</p>
+                                <p><strong>Global Win Rate:</strong> ${player.global_win_rate || 0}%</p>
+                                <p><strong>Global Record:</strong> ${player.global_wins || 0}-${player.global_losses || 0}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        })
+        .catch(error => {
+            console.error('Error fetching player details:', error);
+            modalContent.innerHTML = `
+                <div class="alert alert-danger">
+                    Error loading player data. Please try again later.
+                </div>
+            `;
+        });
 }
 
 function confirmDeleteVerification(discordId, username) {
