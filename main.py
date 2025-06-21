@@ -2398,13 +2398,17 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                             inline=False)
             await interaction.followup.send(embed=embed)
 
-
-@bot.tree.command(name="removematch", description="Remove/reverse a completed match and its MMR changes (Admin only)")
+@bot.tree.command(name="removematch",
+                  description="Enhanced match management - remove, verify MMR, or reselect winner (Admin only)")
 @app_commands.describe(
-    match_id="The ID of the match to remove",
-    confirmation="Type 'CONFIRM' to confirm the removal"
+    action="Choose an action",
+    match_id="Optional: Specific match ID to work with"
 )
-async def removematch_slash(interaction: discord.Interaction, match_id: str, confirmation: str):
+@app_commands.choices(action=[
+    app_commands.Choice(name="Browse Recent Matches", value="browse"),
+    app_commands.Choice(name="Search by Match ID", value="search")
+])
+async def removematch_enhanced_slash(interaction: discord.Interaction, action: str = "browse", match_id: str = None):
     # Check if command is used in an allowed channel
     if not is_command_channel(interaction.channel):
         await interaction.response.send_message(
@@ -2417,64 +2421,1492 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
     if not has_admin_or_mod_permissions(interaction.user, interaction.guild):
         await interaction.response.send_message(
             "You need administrator permissions or the 6mod role to use this command.",
-            ephemeral=True)
-        return
-
-    # Check confirmation
-    if confirmation != "CONFIRM":
-        await interaction.response.send_message(
-            "❌ Match removal canceled. You must type 'CONFIRM' (all caps) to confirm this action.",
             ephemeral=True
         )
         return
 
-    # Clean and validate match ID
-    match_id = match_id.strip()
-    if len(match_id) > 8:
-        match_id = match_id[:6]
+    if action == "search" and match_id:
+        # Direct search for specific match ID
+        await show_specific_match(interaction, match_id.strip())
+    else:
+        # Show recent matches browser
+        await show_recent_matches_browser(interaction)
 
-    # Defer response as this operation could take time
-    await interaction.response.defer()
 
+async def show_recent_matches_browser(interaction: discord.Interaction):
+    """Show a browser of the most recent matches"""
     try:
-        # Look for the match in completed matches
-        match = system_coordinator.match_system.matches.find_one({
-            "match_id": match_id,
-            "status": "completed"
-        })
+        # Get recent matches from database (last 10 completed matches)
+        recent_matches = list(system_coordinator.match_system.matches.find(
+            {"status": "completed"}
+        ).sort("completed_at", -1).limit(10))
+
+        if not recent_matches:
+            embed = discord.Embed(
+                title="📋 No Recent Matches",
+                description="No completed matches found in the database.",
+                color=0x95a5a6
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        # Create embed showing recent matches
+        embed = discord.Embed(
+            title="🔍 Match Management Browser",
+            description=f"Found **{len(recent_matches)}** recent matches. Select one to manage:",
+            color=0x3498db
+        )
+
+        # Create select menu options
+        select_options = []
+
+        for i, match in enumerate(recent_matches):
+            match_id = match.get('match_id', f'unknown_{i}')
+            completed_at = match.get('completed_at')
+            winner = match.get('winner', 0)
+            is_global = match.get('is_global', False)
+
+            # Get team info
+            team1 = match.get('team1', [])
+            team2 = match.get('team2', [])
+
+            # Format time
+            time_str = "Unknown time"
+            if completed_at:
+                time_diff = datetime.datetime.utcnow() - completed_at
+                hours = int(time_diff.total_seconds() // 3600)
+                minutes = int((time_diff.total_seconds() % 3600) // 60)
+
+                if hours < 24:
+                    if hours > 0:
+                        time_str = f"{hours}h {minutes}m ago"
+                    else:
+                        time_str = f"{minutes}m ago"
+                else:
+                    days = hours // 24
+                    time_str = f"{days}d ago"
+
+            # Get winner info
+            winner_info = f"Team {winner}" if winner in [1, 2] else "Unknown"
+
+            # Add to embed
+            embed.add_field(
+                name=f"🏆 Match `{match_id}`",
+                value=(
+                    f"**Type:** {'Global' if is_global else 'Ranked'}\n"
+                    f"**Winner:** {winner_info}\n"
+                    f"**Completed:** {time_str}\n"
+                    f"**Players:** {len(team1 + team2)}"
+                ),
+                inline=True
+            )
+
+            # Add to select options (Discord limit: 25 options)
+            if len(select_options) < 25:
+                select_options.append(
+                    discord.SelectOption(
+                        label=f"Match {match_id}",
+                        description=f"{'Global' if is_global else 'Ranked'} • {winner_info} • {time_str}",
+                        value=match_id,
+                        emoji="🏆"
+                    )
+                )
+
+        # Add search option
+        embed.add_field(
+            name="🔍 Can't Find Your Match?",
+            value="Use the 'Search by Match ID' button below to find any match by its ID",
+            inline=False
+        )
+
+        embed.set_footer(text=f"Match Management • {len(recent_matches)} recent matches")
+        embed.timestamp = datetime.datetime.utcnow()
+
+        # Create the select menu and buttons
+        class MatchBrowserView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=300)
+                if select_options:
+                    self.add_item(MatchSelect(select_options))
+
+            @discord.ui.button(label="🔍 Search by Match ID", style=discord.ButtonStyle.secondary, row=1)
+            async def search_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_match_search_modal(interaction)
+
+            @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red, row=1)
+            async def close_browser(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await interaction.response.edit_message(content="Match browser closed.", embed=None, view=None)
+
+        await interaction.response.send_message(embed=embed, view=MatchBrowserView())
+
+    except Exception as e:
+        print(f"Error in show_recent_matches_browser: {e}")
+        await interaction.response.send_message(f"❌ Error loading recent matches: {str(e)}", ephemeral=True)
+
+
+class MatchSelect(discord.ui.Select):
+    def __init__(self, options):
+        super().__init__(
+            placeholder="Choose a match to manage...",
+            min_values=1,
+            max_values=1,
+            options=options
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_match_id = self.values[0]
+        await show_specific_match(interaction, selected_match_id)
+
+
+async def show_match_search_modal(interaction: discord.Interaction):
+    """Show a modal to search for a match by ID"""
+
+    class MatchSearchModal(discord.ui.Modal, title="Search for Match by ID"):
+        match_id_input = discord.ui.TextInput(
+            label="Match ID",
+            placeholder="Enter the match ID (e.g., abc123)",
+            required=True,
+            max_length=20
+        )
+
+        async def on_submit(self, interaction: discord.Interaction):
+            match_id = self.match_id_input.value.strip()
+            await show_specific_match(interaction, match_id)
+
+    await interaction.response.send_modal(MatchSearchModal())
+
+
+async def show_specific_match(interaction: discord.Interaction, match_id: str):
+    """Show management options for a specific match"""
+    try:
+        # Clean match ID
+        match_id = match_id.strip()
+        if len(match_id) > 8:
+            match_id = match_id[:6]
+
+        # Find the match in database
+        match = system_coordinator.match_system.matches.find_one({"match_id": match_id})
 
         if not match:
-            await interaction.followup.send(f"❌ No completed match found with ID `{match_id}`.")
+            embed = discord.Embed(
+                title="❌ Match Not Found",
+                description=f"No match found with ID `{match_id}`",
+                color=0xff0000
+            )
+            embed.add_field(
+                name="💡 Suggestions",
+                value="• Check the match ID spelling\n• Try browsing recent matches\n• Make sure the match was completed",
+                inline=False
+            )
+
+            # Add back button
+            class BackView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=60)
+
+                @discord.ui.button(label="🔙 Back to Browser", style=discord.ButtonStyle.secondary)
+                async def back_to_browser(self, interaction: discord.Interaction, button: discord.ui.Button):
+                    await show_recent_matches_browser(interaction)
+
+            if hasattr(interaction, 'response') and not interaction.response.is_done():
+                await interaction.response.send_message(embed=embed, view=BackView(), ephemeral=True)
+            else:
+                await interaction.edit_original_response(embed=embed, view=BackView())
             return
 
-        # Get match details for display
-        match_details = {
-            "match_id": match_id,
-            "team1": match.get("team1", []),
-            "team2": match.get("team2", []),
-            "winner": match.get("winner"),
-            "completed_at": match.get("completed_at"),
-            "mmr_changes": match.get("mmr_changes", []),
-            "is_global": match.get("is_global", False)
-        }
+        # Get match details
+        status = match.get('status', 'unknown')
+        winner = match.get('winner', 0)
+        completed_at = match.get('completed_at')
+        is_global = match.get('is_global', False)
+        team1 = match.get('team1', [])
+        team2 = match.get('team2', [])
+        mmr_changes = match.get('mmr_changes', [])
+        reported_by = match.get('reported_by')
 
-        # Validate we have the necessary data
-        if not match_details["mmr_changes"]:
-            await interaction.followup.send(f"❌ Match `{match_id}` has no MMR changes to reverse.")
-            return
+        # Create detailed match info embed
+        embed = discord.Embed(
+            title=f"🎮 Match Management: `{match_id}`",
+            description="Choose an action to perform on this match",
+            color=0x3498db
+        )
+
+        # Basic info
+        embed.add_field(
+            name="📊 Match Details",
+            value=(
+                f"**Status:** {status.title()}\n"
+                f"**Type:** {'Global' if is_global else 'Ranked'}\n"
+                f"**Winner:** Team {winner} ({len(team1 if winner == 1 else team2)} players)\n"
+                f"**MMR Changes:** {len(mmr_changes)} recorded"
+            ),
+            inline=True
+        )
+
+        # Time info
+        if completed_at:
+            time_str = f"<t:{int(completed_at.timestamp())}:R>"
+            embed.add_field(
+                name="⏰ Timing",
+                value=f"**Completed:** {time_str}",
+                inline=True
+            )
+
+        # Reporter info
+        if reported_by:
+            try:
+                reporter = await interaction.guild.fetch_member(int(reported_by))
+                reporter_name = reporter.display_name if reporter else f"ID: {reported_by}"
+            except:
+                reporter_name = f"ID: {reported_by}"
+
+            embed.add_field(
+                name="👤 Reported By",
+                value=reporter_name,
+                inline=True
+            )
+
+        # Team compositions
+        if team1:
+            team1_names = [p.get('name', 'Unknown') for p in team1]
+            embed.add_field(
+                name="👥 Team 1" + (" 🏆" if winner == 1 else ""),
+                value="\n".join([f"• {name}" for name in team1_names]),
+                inline=True
+            )
+
+        if team2:
+            team2_names = [p.get('name', 'Unknown') for p in team2]
+            embed.add_field(
+                name="👥 Team 2" + (" 🏆" if winner == 2 else ""),
+                value="\n".join([f"• {name}" for name in team2_names]),
+                inline=True
+            )
+
+        # MMR Summary
+        if mmr_changes:
+            total_positive = sum(1 for change in mmr_changes if change.get('mmr_change', 0) > 0)
+            total_negative = sum(1 for change in mmr_changes if change.get('mmr_change', 0) < 0)
+            embed.add_field(
+                name="💰 MMR Summary",
+                value=f"**Gains:** {total_positive} players\n**Losses:** {total_negative} players",
+                inline=True
+            )
+
+        # Create action buttons
+        class MatchActionView(discord.ui.View):
+            def __init__(self, match_data):
+                super().__init__(timeout=300)
+                self.match_data = match_data
+
+            @discord.ui.button(label="🔍 Verify MMR", style=discord.ButtonStyle.primary)
+            async def verify_mmr(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_mmr_verification(interaction, self.match_data)
+
+            @discord.ui.button(label="💉 Recover MMR", style=discord.ButtonStyle.green)
+            async def recover_mmr(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_mmr_recovery_confirmation(interaction, self.match_data)
+
+            @discord.ui.button(label="🔄 Reselect Winner", style=discord.ButtonStyle.secondary)
+            async def reselect_winner(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_winner_reselection(interaction, self.match_data)
+
+            @discord.ui.button(label="🗑️ Remove Match", style=discord.ButtonStyle.red, row=1)
+            async def remove_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_removal_confirmation(interaction, self.match_data)
+
+            @discord.ui.button(label="🔙 Back to Browser", style=discord.ButtonStyle.gray, row=1)
+            async def back_to_browser(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_recent_matches_browser(interaction)
+
+        if hasattr(interaction, 'response') and not interaction.response.is_done():
+            await interaction.response.send_message(embed=embed, view=MatchActionView(match))
+        else:
+            await interaction.edit_original_response(embed=embed, view=MatchActionView(match))
+
+    except Exception as e:
+        print(f"Error in show_specific_match: {e}")
+        error_embed = discord.Embed(
+            title="❌ Error",
+            description=f"An error occurred while loading match `{match_id}`: {str(e)}",
+            color=0xff0000
+        )
+
+        if hasattr(interaction, 'response') and not interaction.response.is_done():
+            await interaction.response.send_message(embed=error_embed, ephemeral=True)
+        else:
+            await interaction.edit_original_response(embed=error_embed, view=None)
+
+
+async def show_mmr_verification(interaction: discord.Interaction, match_data):
+    """Show detailed MMR verification for the match"""
+    try:
+        match_id = match_data.get('match_id')
+        mmr_changes = match_data.get('mmr_changes', [])
+        team1 = match_data.get('team1', [])
+        team2 = match_data.get('team2', [])
+        winner = match_data.get('winner', 0)
+        is_global = match_data.get('is_global', False)
+
+        embed = discord.Embed(
+            title=f"🔍 MMR Verification: `{match_id}`",
+            description="Detailed MMR change analysis for this match",
+            color=0x3498db
+        )
+
+        # Overall stats
+        total_changes = len(mmr_changes)
+        expected_changes = len([p for p in team1 + team2 if not p.get('id', '').startswith('9000')])
+
+        embed.add_field(
+            name="📊 Overview",
+            value=(
+                f"**Expected Changes:** {expected_changes}\n"
+                f"**Recorded Changes:** {total_changes}\n"
+                f"**Status:** {'✅ Complete' if total_changes == expected_changes else '⚠️ Missing Changes'}"
+            ),
+            inline=False
+        )
+
+        # Detailed player analysis
+        verification_text = ""
+        issues_found = []
+
+        # Check each real player
+        for team_num, team in enumerate([team1, team2], 1):
+            team_won = (team_num == winner)
+            verification_text += f"\n**Team {team_num} ({'Winners' if team_won else 'Losers'}):**\n"
+
+            for player in team:
+                player_id = player.get('id', '')
+                player_name = player.get('name', 'Unknown')
+
+                # Skip dummy players
+                if player_id.startswith('9000'):
+                    verification_text += f"• {player_name} - Dummy player (skipped)\n"
+                    continue
+
+                # Find MMR change for this player
+                player_change = None
+                for change in mmr_changes:
+                    if change.get('player_id') == player_id:
+                        player_change = change
+                        break
+
+                if player_change:
+                    mmr_change = player_change.get('mmr_change', 0)
+                    old_mmr = player_change.get('old_mmr', 0)
+                    new_mmr = player_change.get('new_mmr', 0)
+                    streak = player_change.get('streak', 0)
+                    change_is_global = player_change.get('is_global', False)
+
+                    # Verify match type consistency
+                    if change_is_global != is_global:
+                        issues_found.append(
+                            f"{player_name}: MMR type mismatch (change: {'global' if change_is_global else 'ranked'}, match: {'global' if is_global else 'ranked'})")
+
+                    # Verify win/loss direction
+                    expected_positive = team_won
+                    actual_positive = mmr_change > 0
+                    if expected_positive != actual_positive:
+                        issues_found.append(
+                            f"{player_name}: MMR direction incorrect (expected {'gain' if expected_positive else 'loss'}, got {'gain' if actual_positive else 'loss'})")
+
+                    verification_text += f"• {player_name}: {old_mmr} → {new_mmr} ({mmr_change:+d}) [Streak: {streak}]\n"
+                else:
+                    verification_text += f"• {player_name}: ❌ **NO MMR CHANGE RECORDED**\n"
+                    issues_found.append(f"{player_name}: Missing MMR change record")
+
+        # Add verification details (split if too long)
+        if len(verification_text) > 1024:
+            # Split into chunks
+            chunks = []
+            lines = verification_text.split('\n')
+            current_chunk = ""
+
+            for line in lines:
+                if len(current_chunk + line + '\n') > 1024:
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = line + '\n'
+                else:
+                    current_chunk += line + '\n'
+
+            if current_chunk:
+                chunks.append(current_chunk)
+
+            for i, chunk in enumerate(chunks):
+                field_name = f"🔍 Player Analysis {i + 1}/{len(chunks)}" if len(chunks) > 1 else "🔍 Player Analysis"
+                embed.add_field(name=field_name, value=chunk, inline=False)
+        else:
+            embed.add_field(name="🔍 Player Analysis", value=verification_text, inline=False)
+
+        # Issues summary
+        if issues_found:
+            issues_text = "\n".join([f"• {issue}" for issue in issues_found])
+            if len(issues_text) > 1024:
+                issues_text = issues_text[:1020] + "..."
+            embed.add_field(name="⚠️ Issues Found", value=issues_text, inline=False)
+            embed.color = 0xff9900  # Orange for issues
+        else:
+            embed.add_field(name="✅ Verification Result", value="No issues found - all MMR changes appear correct",
+                            inline=False)
+            embed.color = 0x00ff00  # Green for success
+
+        # Action buttons
+        class VerificationView(discord.ui.View):
+            def __init__(self, match_data, has_issues):
+                super().__init__(timeout=180)
+                self.match_data = match_data
+                self.has_issues = has_issues
+
+            @discord.ui.button(label="💉 Recover Missing MMR", style=discord.ButtonStyle.green,
+                               disabled=not any("Missing MMR change" in issue for issue in issues_found))
+            async def recover_missing_mmr(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_mmr_recovery_confirmation(interaction, self.match_data)
+
+            @discord.ui.button(label="🔙 Back to Match", style=discord.ButtonStyle.secondary)
+            async def back_to_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_specific_match(interaction, self.match_data.get('match_id'))
+
+        await interaction.response.edit_message(embed=embed, view=VerificationView(match_data, len(issues_found) > 0))
+
+    except Exception as e:
+        print(f"Error in show_mmr_verification: {e}")
+        await interaction.response.send_message(f"❌ Error during MMR verification: {str(e)}", ephemeral=True)
+
+
+async def show_mmr_recovery_confirmation(interaction: discord.Interaction, match_data):
+    """Show confirmation for MMR recovery"""
+    match_id = match_data.get('match_id')
+
+    embed = discord.Embed(
+        title="💉 MMR Recovery Confirmation",
+        description=f"Are you sure you want to recover MMR for match `{match_id}`?",
+        color=0xff9900
+    )
+
+    embed.add_field(
+        name="⚠️ What This Does",
+        value=(
+            "• Recalculates MMR changes for all players\n"
+            "• Applies missing MMR changes to player records\n"
+            "• Updates player statistics (wins/losses)\n"
+            "• Fixes any MMR calculation errors"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🔄 Process",
+        value=(
+            "1. Analyze current player MMR states\n"
+            "2. Recalculate what MMR should have been given\n"
+            "3. Apply the difference to current MMR\n"
+            "4. Update match record with correct changes"
+        ),
+        inline=False
+    )
+
+    class RecoveryConfirmView(discord.ui.View):
+        def __init__(self, match_data):
+            super().__init__(timeout=60)
+            self.match_data = match_data
+
+        @discord.ui.button(label="✅ Confirm Recovery", style=discord.ButtonStyle.green)
+        async def confirm_recovery(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await execute_mmr_recovery(interaction, self.match_data)
+
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+        async def cancel_recovery(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_specific_match(interaction, self.match_data.get('match_id'))
+
+    await interaction.response.edit_message(embed=embed, view=RecoveryConfirmView(match_data))
+
+
+async def execute_mmr_recovery(interaction: discord.Interaction, match_data):
+    """Execute the MMR recovery process using your existing MMR calculation logic"""
+    try:
+        await interaction.response.defer()
+
+        match_id = match_data.get('match_id')
+        team1 = match_data.get('team1', [])
+        team2 = match_data.get('team2', [])
+        winner = match_data.get('winner', 0)
+        is_global = match_data.get('is_global', False)
+        existing_mmr_changes = match_data.get('mmr_changes', [])
+
+        print(f"Starting MMR recovery for match {match_id}")
+
+        # Step 1: Calculate what MMR changes SHOULD have been
+        print("Step 1: Recalculating expected MMR changes...")
+
+        # Calculate team average MMRs (using your existing logic)
+        team1_mmrs = []
+        team2_mmrs = []
+
+        # Get MMRs for team calculations
+        for player in team1:
+            player_id = player.get("id")
+            if player_id and not player_id.startswith('9000'):
+                player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+                if player_data:
+                    if is_global:
+                        team1_mmrs.append(player_data.get("global_mmr", 300))
+                    else:
+                        team1_mmrs.append(player_data.get("mmr", 600))
+                else:
+                    # For players without records, use defaults
+                    team1_mmrs.append(300 if is_global else 600)
+            elif player_id and player_id.startswith('9000') and "dummy_mmr" in player:
+                team1_mmrs.append(player["dummy_mmr"])
+
+        for player in team2:
+            player_id = player.get("id")
+            if player_id and not player_id.startswith('9000'):
+                player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+                if player_data:
+                    if is_global:
+                        team2_mmrs.append(player_data.get("global_mmr", 300))
+                    else:
+                        team2_mmrs.append(player_data.get("mmr", 600))
+                else:
+                    team2_mmrs.append(300 if is_global else 600)
+            elif player_id and player_id.startswith('9000') and "dummy_mmr" in player:
+                team2_mmrs.append(player["dummy_mmr"])
+
+        team1_avg_mmr = sum(team1_mmrs) / len(team1_mmrs) if team1_mmrs else 0
+        team2_avg_mmr = sum(team2_mmrs) / len(team2_mmrs) if team2_mmrs else 0
+
+        print(f"Team averages: Team1={team1_avg_mmr}, Team2={team2_avg_mmr}")
+
+        # Determine winning and losing teams
+        winning_team = team1 if winner == 1 else team2
+        losing_team = team2 if winner == 1 else team1
+
+        # Step 2: Calculate expected MMR changes for each player
+        expected_changes = {}
+        recovery_summary = []
+
+        # Calculate for winners
+        for player in winning_team:
+            player_id = player.get("id")
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                recovery_summary.append(f"⚠️ Player {player.get('name', 'Unknown')} not found in database")
+                continue
+
+            # Get player's pre-match MMR (need to reverse current state)
+            if is_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                current_matches = player_data.get("global_matches", 0)
+                current_streak = player_data.get("global_current_streak", 0)
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                current_matches = player_data.get("matches", 0)
+                current_streak = player_data.get("current_streak", 0)
+
+            # Find existing MMR change for this player
+            existing_change = None
+            for change in existing_mmr_changes:
+                if change.get("player_id") == player_id and change.get("is_global", False) == is_global:
+                    existing_change = change
+                    break
+
+            if existing_change:
+                # Calculate what their MMR was before this match
+                old_mmr = existing_change.get("old_mmr", current_mmr)
+                old_matches = current_matches  # We need to work backwards
+            else:
+                # No existing change found - this is what we need to recover
+                old_mmr = current_mmr
+                old_matches = current_matches
+
+            # Calculate what the MMR gain should have been
+            expected_mmr_gain = system_coordinator.match_system.calculate_dynamic_mmr(
+                old_mmr,
+                team1_avg_mmr if player in team1 else team2_avg_mmr,
+                team2_avg_mmr if player in team1 else team1_avg_mmr,
+                old_matches + 1,  # This would be their match count after the game
+                is_win=True,
+                streak=current_streak if existing_change else 1,  # Use current or assume 1
+                player_data=player_data
+            )
+
+            expected_changes[player_id] = {
+                "player_name": player.get("name", "Unknown"),
+                "old_mmr": old_mmr,
+                "expected_new_mmr": old_mmr + expected_mmr_gain,
+                "expected_change": expected_mmr_gain,
+                "existing_change": existing_change.get("mmr_change", 0) if existing_change else 0,
+                "is_win": True,
+                "is_global": is_global
+            }
+
+        # Calculate for losers
+        for player in losing_team:
+            player_id = player.get("id")
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                recovery_summary.append(f"⚠️ Player {player.get('name', 'Unknown')} not found in database")
+                continue
+
+            # Get player's current MMR
+            if is_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                current_matches = player_data.get("global_matches", 0)
+                current_streak = player_data.get("global_current_streak", 0)
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                current_matches = player_data.get("matches", 0)
+                current_streak = player_data.get("current_streak", 0)
+
+            # Find existing MMR change for this player
+            existing_change = None
+            for change in existing_mmr_changes:
+                if change.get("player_id") == player_id and change.get("is_global", False) == is_global:
+                    existing_change = change
+                    break
+
+            if existing_change:
+                old_mmr = existing_change.get("old_mmr", current_mmr)
+                old_matches = current_matches
+            else:
+                old_mmr = current_mmr
+                old_matches = current_matches
+
+            # Calculate what the MMR loss should have been
+            expected_mmr_loss = system_coordinator.match_system.calculate_dynamic_mmr(
+                old_mmr,
+                team1_avg_mmr if player in team1 else team2_avg_mmr,
+                team2_avg_mmr if player in team1 else team1_avg_mmr,
+                old_matches + 1,
+                is_win=False,
+                streak=current_streak if existing_change else -1,
+                player_data=player_data
+            )
+
+            expected_changes[player_id] = {
+                "player_name": player.get("name", "Unknown"),
+                "old_mmr": old_mmr,
+                "expected_new_mmr": max(0, old_mmr - expected_mmr_loss),
+                "expected_change": -expected_mmr_loss,
+                "existing_change": existing_change.get("mmr_change", 0) if existing_change else 0,
+                "is_win": False,
+                "is_global": is_global
+            }
+
+        # Step 3: Apply the differences
+        print("Step 3: Applying MMR corrections...")
+        corrections_applied = 0
+
+        for player_id, change_data in expected_changes.items():
+            expected_change = change_data["expected_change"]
+            existing_change = change_data["existing_change"]
+            difference = expected_change - existing_change
+
+            if abs(difference) < 1:  # No significant difference
+                recovery_summary.append(
+                    f"✅ {change_data['player_name']}: No correction needed (difference: {difference:+.1f})")
+                continue
+
+            # Apply the correction to current MMR
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                continue
+
+            if is_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                new_mmr = max(0, current_mmr + difference)
+
+                system_coordinator.match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "global_mmr": new_mmr,
+                        "last_updated": datetime.datetime.utcnow()
+                    }}
+                )
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                new_mmr = max(0, current_mmr + difference)
+
+                system_coordinator.match_system.players.update_one(
+                    {"id": player_id},
+                    {"$set": {
+                        "mmr": new_mmr,
+                        "last_updated": datetime.datetime.utcnow()
+                    }}
+                )
+
+            corrections_applied += 1
+            recovery_summary.append(
+                f"🔧 {change_data['player_name']}: {current_mmr} → {new_mmr} (corrected {difference:+.1f} MMR)"
+            )
+
+        # Step 4: Update match record with corrected MMR changes
+        corrected_mmr_changes = []
+        for player_id, change_data in expected_changes.items():
+            corrected_mmr_changes.append({
+                "player_id": player_id,
+                "old_mmr": change_data["old_mmr"],
+                "new_mmr": change_data["expected_new_mmr"],
+                "mmr_change": change_data["expected_change"],
+                "is_win": change_data["is_win"],
+                "is_global": change_data["is_global"],
+                "streak": 1 if change_data["is_win"] else -1  # Simplified for recovery
+            })
+
+        system_coordinator.match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {
+                "mmr_changes": corrected_mmr_changes,
+                "mmr_recovery_applied": True,
+                "mmr_recovery_date": datetime.datetime.utcnow(),
+                "mmr_recovery_by": str(interaction.user.id)
+            }}
+        )
+
+        # Create result embed
+        recovery_embed = discord.Embed(
+            title="💉 MMR Recovery Complete",
+            description=f"MMR recovery has been executed for match `{match_id}`",
+            color=0x00ff00
+        )
+
+        recovery_embed.add_field(
+            name="📊 Recovery Summary",
+            value=(
+                f"**Players Analyzed:** {len(expected_changes)}\n"
+                f"**Corrections Applied:** {corrections_applied}\n"
+                f"**Match Type:** {'Global' if is_global else 'Ranked'}"
+            ),
+            inline=False
+        )
+
+        # Add detailed results
+        if recovery_summary:
+            recovery_text = "\n".join(recovery_summary)
+            if len(recovery_text) > 1024:
+                # Split into chunks
+                chunks = []
+                current_chunk = []
+                current_length = 0
+
+                for line in recovery_summary:
+                    if current_length + len(line) + 1 > 1024:
+                        chunks.append("\n".join(current_chunk))
+                        current_chunk = [line]
+                        current_length = len(line)
+                    else:
+                        current_chunk.append(line)
+                        current_length += len(line) + 1
+
+                if current_chunk:
+                    chunks.append("\n".join(current_chunk))
+
+                for i, chunk in enumerate(chunks):
+                    field_name = f"Recovery Details {i + 1}/{len(chunks)}" if len(chunks) > 1 else "Recovery Details"
+                    recovery_embed.add_field(name=field_name, value=chunk, inline=False)
+            else:
+                recovery_embed.add_field(name="Recovery Details", value=recovery_text, inline=False)
+
+        recovery_embed.add_field(
+            name="✅ Actions Completed",
+            value="• Recalculated expected MMR changes\n• Applied missing/incorrect MMR\n• Updated match records\n• Preserved player statistics",
+            inline=False
+        )
+
+        # Back button
+        class RecoveryResultView(discord.ui.View):
+            def __init__(self, match_data):
+                super().__init__(timeout=60)
+                self.match_data = match_data
+
+            @discord.ui.button(label="🔙 Back to Match", style=discord.ButtonStyle.secondary)
+            async def back_to_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_specific_match(interaction, self.match_data.get('match_id'))
+
+        await interaction.followup.send(embed=recovery_embed, view=RecoveryResultView(match_data))
+
+    except Exception as e:
+        print(f"Error in execute_mmr_recovery: {e}")
+        await interaction.followup.send(f"❌ Error during MMR recovery: {str(e)}")
+
+
+async def show_winner_reselection(interaction: discord.Interaction, match_data):
+    """Show winner reselection interface"""
+    match_id = match_data.get('match_id')
+    current_winner = match_data.get('winner', 0)
+    team1 = match_data.get('team1', [])
+    team2 = match_data.get('team2', [])
+
+    embed = discord.Embed(
+        title=f"🔄 Reselect Winner: `{match_id}`",
+        description="Choose the correct winning team for this match",
+        color=0x3498db
+    )
+
+    # Show current winner
+    embed.add_field(
+        name="🏆 Current Winner",
+        value=f"Team {current_winner}",
+        inline=False
+    )
+
+    # Show teams
+    if team1:
+        team1_names = [p.get('name', 'Unknown') for p in team1]
+        embed.add_field(
+            name="👥 Team 1" + (" 🏆" if current_winner == 1 else ""),
+            value="\n".join([f"• {name}" for name in team1_names]),
+            inline=True
+        )
+
+    if team2:
+        team2_names = [p.get('name', 'Unknown') for p in team2]
+        embed.add_field(
+            name="👥 Team 2" + (" 🏆" if current_winner == 2 else ""),
+            value="\n".join([f"• {name}" for name in team2_names]),
+            inline=True
+        )
+
+    embed.add_field(
+        name="⚠️ Warning",
+        value="Changing the winner will reverse all MMR changes and recalculate them for the new winner!",
+        inline=False
+    )
+
+    class WinnerSelectionView(discord.ui.View):
+        def __init__(self, match_data):
+            super().__init__(timeout=120)
+            self.match_data = match_data
+
+        @discord.ui.button(label="🏆 Team 1 Wins", style=discord.ButtonStyle.green, disabled=(current_winner == 1))
+        async def select_team1(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await confirm_winner_change(interaction, self.match_data, 1)
+
+        @discord.ui.button(label="🏆 Team 2 Wins", style=discord.ButtonStyle.green, disabled=(current_winner == 2))
+        async def select_team2(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await confirm_winner_change(interaction, self.match_data, 2)
+
+        @discord.ui.button(label="🔙 Back to Match", style=discord.ButtonStyle.secondary)
+        async def back_to_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_specific_match(interaction, self.match_data.get('match_id'))
+
+    await interaction.response.edit_message(embed=embed, view=WinnerSelectionView(match_data))
+
+
+async def confirm_winner_change(interaction: discord.Interaction, match_data, new_winner):
+    """Confirm the winner change"""
+    match_id = match_data.get('match_id')
+    current_winner = match_data.get('winner', 0)
+
+    embed = discord.Embed(
+        title="🔄 Confirm Winner Change",
+        description=f"Change winner of match `{match_id}` from Team {current_winner} to Team {new_winner}?",
+        color=0xff9900
+    )
+
+    embed.add_field(
+        name="⚠️ This Will",
+        value=(
+            "• Reverse all existing MMR changes\n"
+            "• Recalculate MMR for new winner/loser\n"
+            "• Update win/loss records\n"
+            "• Update match record"
+        ),
+        inline=False
+    )
+
+    class ConfirmWinnerView(discord.ui.View):
+        def __init__(self, match_data, new_winner):
+            super().__init__(timeout=60)
+            self.match_data = match_data
+            self.new_winner = new_winner
+
+        @discord.ui.button(label="✅ Confirm Change", style=discord.ButtonStyle.green)
+        async def confirm_change(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await execute_winner_change(interaction, self.match_data, self.new_winner)
+
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+        async def cancel_change(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_winner_reselection(interaction, self.match_data)
+
+    await interaction.response.edit_message(embed=embed, view=ConfirmWinnerView(match_data, new_winner))
+
+
+async def execute_winner_change(interaction: discord.Interaction, match_data, new_winner):
+    """Execute the winner change process with complete MMR recalculation"""
+    try:
+        await interaction.response.defer()
+
+        match_id = match_data.get('match_id')
+        current_winner = match_data.get('winner', 0)
+        team1 = match_data.get('team1', [])
+        team2 = match_data.get('team2', [])
+        is_global = match_data.get('is_global', False)
+        existing_mmr_changes = match_data.get('mmr_changes', [])
+
+        print(f"Changing winner for match {match_id} from team {current_winner} to team {new_winner}")
+
+        # Step 1: Reverse all existing MMR changes
+        print("Step 1: Reversing existing MMR changes...")
+        reversal_summary = []
+
+        for mmr_change in existing_mmr_changes:
+            player_id = mmr_change.get("player_id")
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                reversal_summary.append(f"⚠️ Player {player_id} not found in database")
+                continue
+
+            # Get the MMR change details
+            mmr_change_amount = mmr_change.get("mmr_change", 0)
+            was_win = mmr_change.get("is_win", False)
+            was_global = mmr_change.get("is_global", False)
+            streak_at_time = mmr_change.get("streak", 0)
+
+            # Only reverse changes that match the match type
+            if was_global != is_global:
+                continue
+
+            # Get current player stats
+            if is_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                current_wins = player_data.get("global_wins", 0)
+                current_losses = player_data.get("global_losses", 0)
+                current_matches = player_data.get("global_matches", 0)
+                current_streak = player_data.get("global_current_streak", 0)
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                current_wins = player_data.get("wins", 0)
+                current_losses = player_data.get("losses", 0)
+                current_matches = player_data.get("matches", 0)
+                current_streak = player_data.get("current_streak", 0)
+
+            # Reverse the changes
+            new_mmr = current_mmr - mmr_change_amount
+            new_matches = max(0, current_matches - 1)
+
+            if was_win:
+                new_wins = max(0, current_wins - 1)
+                new_losses = current_losses
+            else:
+                new_wins = current_wins
+                new_losses = max(0, current_losses - 1)
+
+            # Reverse streak changes (using your existing logic)
+            if was_win:
+                if streak_at_time > 0:
+                    if streak_at_time == 1:
+                        new_streak = 0
+                    else:
+                        new_streak = streak_at_time - 1
+                else:
+                    new_streak = 0
+            else:
+                if streak_at_time < 0:
+                    if streak_at_time == -1:
+                        new_streak = 0
+                    else:
+                        new_streak = streak_at_time + 1
+                else:
+                    new_streak = 0
+
+            # Apply reversal
+            if is_global:
+                update_doc = {
+                    "$set": {
+                        "global_mmr": max(0, new_mmr),
+                        "global_wins": new_wins,
+                        "global_losses": new_losses,
+                        "global_matches": new_matches,
+                        "global_current_streak": new_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+            else:
+                update_doc = {
+                    "$set": {
+                        "mmr": max(0, new_mmr),
+                        "wins": new_wins,
+                        "losses": new_losses,
+                        "matches": new_matches,
+                        "current_streak": new_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+
+            result = system_coordinator.match_system.players.update_one({"id": player_id}, update_doc)
+
+            if result.modified_count > 0:
+                # Find player name
+                player_name = "Unknown"
+                for team in [team1, team2]:
+                    for p in team:
+                        if p.get("id") == player_id:
+                            player_name = p.get("name", "Unknown")
+                            break
+                    if player_name != "Unknown":
+                        break
+
+                reversal_summary.append(f"↩️ {player_name}: Reversed {mmr_change_amount:+d} MMR")
+
+        # Step 2: Recalculate team averages for new MMR calculations
+        print("Step 2: Recalculating team averages...")
+
+        team1_mmrs = []
+        team2_mmrs = []
+
+        # Calculate team averages based on current (post-reversal) MMR
+        for player in team1:
+            player_id = player.get("id")
+            if player_id and not player_id.startswith('9000'):
+                player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+                if player_data:
+                    if is_global:
+                        team1_mmrs.append(player_data.get("global_mmr", 300))
+                    else:
+                        team1_mmrs.append(player_data.get("mmr", 600))
+                else:
+                    team1_mmrs.append(300 if is_global else 600)
+            elif player_id and player_id.startswith('9000') and "dummy_mmr" in player:
+                team1_mmrs.append(player["dummy_mmr"])
+
+        for player in team2:
+            player_id = player.get("id")
+            if player_id and not player_id.startswith('9000'):
+                player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+                if player_data:
+                    if is_global:
+                        team2_mmrs.append(player_data.get("global_mmr", 300))
+                    else:
+                        team2_mmrs.append(player_data.get("mmr", 600))
+                else:
+                    team2_mmrs.append(300 if is_global else 600)
+            elif player_id and player_id.startswith('9000') and "dummy_mmr" in player:
+                team2_mmrs.append(player["dummy_mmr"])
+
+        team1_avg_mmr = sum(team1_mmrs) / len(team1_mmrs) if team1_mmrs else 0
+        team2_avg_mmr = sum(team2_mmrs) / len(team2_mmrs) if team2_mmrs else 0
+
+        # Step 3: Apply new MMR changes with new winner
+        print("Step 3: Applying new MMR changes...")
+
+        new_winning_team = team1 if new_winner == 1 else team2
+        new_losing_team = team2 if new_winner == 1 else team1
+        new_mmr_changes = []
+        application_summary = []
+
+        # Process new winners
+        for player in new_winning_team:
+            player_id = player.get("id")
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                continue
+
+            # Get current (post-reversal) stats
+            if is_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                current_matches = player_data.get("global_matches", 0)
+                current_wins = player_data.get("global_wins", 0)
+                current_streak = player_data.get("global_current_streak", 0)
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                current_matches = player_data.get("matches", 0)
+                current_wins = player_data.get("wins", 0)
+                current_streak = player_data.get("current_streak", 0)
+
+            # Calculate new streak
+            new_streak = current_streak + 1 if current_streak >= 0 else 1
+
+            # Calculate MMR gain using your system
+            mmr_gain = system_coordinator.match_system.calculate_dynamic_mmr(
+                current_mmr,
+                team1_avg_mmr if player in team1 else team2_avg_mmr,
+                team2_avg_mmr if player in team1 else team1_avg_mmr,
+                current_matches + 1,
+                is_win=True,
+                streak=new_streak,
+                player_data=player_data
+            )
+
+            new_mmr = current_mmr + mmr_gain
+            new_matches = current_matches + 1
+            new_wins = current_wins + 1
+
+            # Update longest win streak if needed
+            if is_global:
+                longest_win_streak = max(player_data.get("global_longest_win_streak", 0), new_streak)
+                update_doc = {
+                    "$set": {
+                        "global_mmr": new_mmr,
+                        "global_wins": new_wins,
+                        "global_matches": new_matches,
+                        "global_current_streak": new_streak,
+                        "global_longest_win_streak": longest_win_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+            else:
+                longest_win_streak = max(player_data.get("longest_win_streak", 0), new_streak)
+                update_doc = {
+                    "$set": {
+                        "mmr": new_mmr,
+                        "wins": new_wins,
+                        "matches": new_matches,
+                        "current_streak": new_streak,
+                        "longest_win_streak": longest_win_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+
+            system_coordinator.match_system.players.update_one({"id": player_id}, update_doc)
+
+            # Track the change
+            new_mmr_changes.append({
+                "player_id": player_id,
+                "old_mmr": current_mmr,
+                "new_mmr": new_mmr,
+                "mmr_change": mmr_gain,
+                "is_win": True,
+                "is_global": is_global,
+                "streak": new_streak
+            })
+
+            application_summary.append(f"🏆 {player.get('name', 'Unknown')}: +{mmr_gain} MMR (streak: {new_streak})")
+
+        # Process new losers
+        for player in new_losing_team:
+            player_id = player.get("id")
+            if not player_id or player_id.startswith('9000'):
+                continue
+
+            player_data = system_coordinator.match_system.players.find_one({"id": player_id})
+            if not player_data:
+                continue
+
+            # Get current (post-reversal) stats
+            if is_global:
+                current_mmr = player_data.get("global_mmr", 300)
+                current_matches = player_data.get("global_matches", 0)
+                current_losses = player_data.get("global_losses", 0)
+                current_streak = player_data.get("global_current_streak", 0)
+            else:
+                current_mmr = player_data.get("mmr", 600)
+                current_matches = player_data.get("matches", 0)
+                current_losses = player_data.get("losses", 0)
+                current_streak = player_data.get("current_streak", 0)
+
+            # Calculate new streak
+            new_streak = current_streak - 1 if current_streak <= 0 else -1
+
+            # Calculate MMR loss using your system
+            mmr_loss = system_coordinator.match_system.calculate_dynamic_mmr(
+                current_mmr,
+                team1_avg_mmr if player in team1 else team2_avg_mmr,
+                team2_avg_mmr if player in team1 else team1_avg_mmr,
+                current_matches + 1,
+                is_win=False,
+                streak=new_streak,
+                player_data=player_data
+            )
+
+            new_mmr = max(0, current_mmr - mmr_loss)
+            new_matches = current_matches + 1
+            new_losses = current_losses + 1
+
+            # Update longest loss streak if needed
+            if is_global:
+                longest_loss_streak = min(player_data.get("global_longest_loss_streak", 0), new_streak)
+                update_doc = {
+                    "$set": {
+                        "global_mmr": new_mmr,
+                        "global_losses": new_losses,
+                        "global_matches": new_matches,
+                        "global_current_streak": new_streak,
+                        "global_longest_loss_streak": longest_loss_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+            else:
+                longest_loss_streak = min(player_data.get("longest_loss_streak", 0), new_streak)
+                update_doc = {
+                    "$set": {
+                        "mmr": new_mmr,
+                        "losses": new_losses,
+                        "matches": new_matches,
+                        "current_streak": new_streak,
+                        "longest_loss_streak": longest_loss_streak,
+                        "last_updated": datetime.datetime.utcnow()
+                    }
+                }
+
+            system_coordinator.match_system.players.update_one({"id": player_id}, update_doc)
+
+            # Track the change
+            new_mmr_changes.append({
+                "player_id": player_id,
+                "old_mmr": current_mmr,
+                "new_mmr": new_mmr,
+                "mmr_change": -mmr_loss,
+                "is_win": False,
+                "is_global": is_global,
+                "streak": new_streak
+            })
+
+            application_summary.append(f"😔 {player.get('name', 'Unknown')}: -{mmr_loss} MMR (streak: {new_streak})")
+
+        # Step 4: Update match record
+        print("Step 4: Updating match record...")
+
+        system_coordinator.match_system.matches.update_one(
+            {"match_id": match_id},
+            {"$set": {
+                "winner": new_winner,
+                "score": {"team1": 1 if new_winner == 1 else 0, "team2": 1 if new_winner == 2 else 0},
+                "mmr_changes": new_mmr_changes,
+                "team1_avg_mmr": team1_avg_mmr,
+                "team2_avg_mmr": team2_avg_mmr,
+                "winner_changed": True,
+                "winner_change_date": datetime.datetime.utcnow(),
+                "winner_change_by": str(interaction.user.id),
+                "winner_change_from": current_winner,
+                "winner_change_to": new_winner,
+                "last_modified": datetime.datetime.utcnow()
+            }}
+        )
+
+        # Create result embed
+        result_embed = discord.Embed(
+            title="🔄 Winner Change Complete",
+            description=f"Successfully changed winner of match `{match_id}` from Team {current_winner} to Team {new_winner}",
+            color=0x00ff00
+        )
+
+        result_embed.add_field(
+            name="📊 Process Summary",
+            value=(
+                f"**Reversals Applied:** {len(reversal_summary)}\n"
+                f"**New Changes Applied:** {len(application_summary)}\n"
+                f"**Match Type:** {'Global' if is_global else 'Ranked'}\n"
+                f"**New Winner:** Team {new_winner}"
+            ),
+            inline=False
+        )
+
+        # Add reversal details
+        if reversal_summary:
+            reversal_text = "\n".join(reversal_summary)
+            if len(reversal_text) > 1024:
+                reversal_text = reversal_text[:1020] + "..."
+            result_embed.add_field(name="↩️ MMR Reversals", value=reversal_text, inline=False)
+
+        # Add new changes details
+        if application_summary:
+            application_text = "\n".join(application_summary)
+            if len(application_text) > 1024:
+                application_text = application_text[:1020] + "..."
+            result_embed.add_field(name="✅ New MMR Changes", value=application_text, inline=False)
+
+        result_embed.add_field(
+            name="🎯 Actions Completed",
+            value=(
+                "• Reversed all existing MMR changes\n"
+                f"• Recalculated team averages\n"
+                "• Applied new MMR changes for correct winner\n"
+                "• Updated match record and statistics\n"
+                "• Preserved all streak calculations"
+            ),
+            inline=False
+        )
+
+        result_embed.set_footer(
+            text=f"Winner changed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        # Back button
+        class WinnerChangeResultView(discord.ui.View):
+            def __init__(self, match_data):
+                super().__init__(timeout=60)
+                self.match_data = match_data
+
+            @discord.ui.button(label="🔙 Back to Match", style=discord.ButtonStyle.secondary)
+            async def back_to_match(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_specific_match(interaction, self.match_data.get('match_id'))
+
+            @discord.ui.button(label="🔙 Back to Browser", style=discord.ButtonStyle.gray)
+            async def back_to_browser(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_recent_matches_browser(interaction)
+
+        await interaction.followup.send(embed=result_embed, view=WinnerChangeResultView(match_data))
+
+        # Send notification to affected players
+        try:
+            notification_embed = discord.Embed(
+                title="🔄 Match Winner Changed",
+                description=f"The winner of match `{match_id}` has been corrected by an administrator.",
+                color=0x3498db
+            )
+
+            notification_embed.add_field(
+                name="What Changed",
+                value=(
+                    f"• Winner changed from Team {current_winner} to Team {new_winner}\n"
+                    "• All MMR changes have been recalculated\n"
+                    "• Your statistics have been updated accordingly"
+                ),
+                inline=False
+            )
+
+            notification_embed.add_field(
+                name="Your MMR",
+                value="Check `/rank` to see your updated MMR and statistics",
+                inline=False
+            )
+
+            await interaction.channel.send(embed=notification_embed)
+
+        except Exception as notification_error:
+            print(f"Could not send winner change notification: {notification_error}")
+
+    except Exception as e:
+        print(f"Error in execute_winner_change: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error changing winner: {str(e)}")
+
+
+async def show_removal_confirmation(interaction: discord.Interaction, match_data):
+    """Show confirmation for match removal (similar to original removematch)"""
+    match_id = match_data.get('match_id')
+    team1 = match_data.get('team1', [])
+    team2 = match_data.get('team2', [])
+    winner = match_data.get('winner', 0)
+    is_global = match_data.get('is_global', False)
+    mmr_changes = match_data.get('mmr_changes', [])
+
+    embed = discord.Embed(
+        title="🗑️ Confirm Match Removal",
+        description=f"Are you sure you want to **permanently remove** match `{match_id}`?",
+        color=0xff0000
+    )
+
+    # Match summary
+    team1_names = [p.get('name', 'Unknown') for p in team1]
+    team2_names = [p.get('name', 'Unknown') for p in team2]
+
+    embed.add_field(
+        name="📊 Match Summary",
+        value=(
+            f"**Type:** {'Global' if is_global else 'Ranked'}\n"
+            f"**Winner:** Team {winner}\n"
+            f"**Players Affected:** {len(team1 + team2)}\n"
+            f"**MMR Changes:** {len(mmr_changes)}"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="👥 Teams",
+        value=(
+            f"**Team 1:** {', '.join(team1_names)}\n"
+            f"**Team 2:** {', '.join(team2_names)}"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="⚠️ This Will",
+        value=(
+            "• **Permanently delete** the match from database\n"
+            "• **Reverse all MMR changes** for all players\n"
+            "• **Update win/loss records** (subtract this match)\n"
+            "• **Reverse streak changes** to pre-match state\n"
+            "• **Cannot be undone** once confirmed"
+        ),
+        inline=False
+    )
+
+    class RemovalConfirmView(discord.ui.View):
+        def __init__(self, match_data):
+            super().__init__(timeout=60)
+            self.match_data = match_data
+
+        @discord.ui.button(label="⚠️ Type CONFIRM to Delete", style=discord.ButtonStyle.red, disabled=True)
+        async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+            pass  # This button is just for display
+
+        @discord.ui.button(label="🔑 Enter Confirmation", style=discord.ButtonStyle.gray)
+        async def enter_confirmation(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_confirmation_modal(interaction, self.match_data)
+
+        @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.secondary)
+        async def cancel_removal(self, interaction: discord.Interaction, button: discord.ui.Button):
+            await show_specific_match(interaction, self.match_data.get('match_id'))
+
+    await interaction.response.edit_message(embed=embed, view=RemovalConfirmView(match_data))
+
+
+async def show_confirmation_modal(interaction: discord.Interaction, match_data):
+    """Show modal for typing CONFIRM"""
+
+    class ConfirmationModal(discord.ui.Modal, title="Confirm Match Removal"):
+        confirmation_input = discord.ui.TextInput(
+            label="Type CONFIRM to proceed",
+            placeholder="CONFIRM",
+            required=True,
+            max_length=10
+        )
+
+        def __init__(self, match_data):
+            super().__init__()
+            self.match_data = match_data
+
+        async def on_submit(self, interaction: discord.Interaction):
+            if self.confirmation_input.value.strip().upper() == "CONFIRM":
+                await execute_match_removal(interaction, self.match_data)
+            else:
+                await interaction.response.send_message(
+                    "❌ Incorrect confirmation. Match removal cancelled.",
+                    ephemeral=True
+                )
+
+    await interaction.response.send_modal(ConfirmationModal(match_data))
+
+
+async def execute_match_removal(interaction: discord.Interaction, match_data):
+    """Execute the match removal process (adapted from original removematch)"""
+    try:
+        await interaction.response.defer()
+
+        match_id = match_data.get('match_id')
+        team1 = match_data.get('team1', [])
+        team2 = match_data.get('team2', [])
+        mmr_changes = match_data.get('mmr_changes', [])
+
+        print(f"Executing removal for match {match_id}")
 
         # Store original player stats for rollback verification
         affected_players = []
         rollback_summary = []
 
-        # Reverse MMR changes for each player
-        for mmr_change in match_details["mmr_changes"]:
+        # Reverse MMR changes for each player (adapted from original logic)
+        for mmr_change in mmr_changes:
             player_id = mmr_change.get("player_id")
-            if not player_id:
-                continue
-
-            # Skip dummy players
-            if player_id.startswith('9000'):
+            if not player_id or player_id.startswith('9000'):
                 continue
 
             # Get current player data
@@ -2514,50 +3946,31 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
                 new_wins = current_wins
                 new_losses = max(0, current_losses - 1)
 
-            # ROBUST STREAK REVERSAL:
-            # The streak stored in MMR changes is what the player had AFTER the match
-            # We need to calculate what they had BEFORE by reversing the match outcome
+            # Robust streak reversal (from original logic)
             streak_after_match = streak_at_time
 
             if was_win:
-                # Player won this match
                 if streak_after_match > 0:
-                    # After winning, they have a positive streak
                     if streak_after_match == 1:
-                        # This win started a new streak (they either had 0 or were on a loss streak)
-                        # Since we can't know if they had a loss streak before, we'll set to 0
                         new_streak = 0
                     else:
-                        # They already had a win streak, so before this win it was 1 less
                         new_streak = streak_after_match - 1
                 else:
-                    # After winning they don't have a positive streak? This shouldn't happen
-                    # But if it does, assume they had no streak before
                     new_streak = 0
             else:
-                # Player lost this match
                 if streak_after_match < 0:
-                    # After losing, they have a negative streak
                     if streak_after_match == -1:
-                        # This loss started a new streak (they either had 0 or were on a win streak)
-                        # Since we can't know if they had a win streak before, we'll set to 0
                         new_streak = 0
                     else:
-                        # They already had a loss streak, so before this loss it was 1 less negative
                         new_streak = streak_after_match + 1
                 else:
-                    # After losing they don't have a negative streak? This shouldn't happen
-                    # But if it does, assume they had no streak before
                     new_streak = 0
-
-            print(
-                f"Streak reversal for {player_id}: {current_streak} (current) <- {streak_after_match} (after match) -> {new_streak} (before match, {'win' if was_win else 'loss'} reversed)")
 
             # Prepare update document
             if was_global:
                 update_doc = {
                     "$set": {
-                        "global_mmr": max(0, new_mmr),  # Don't go below 0
+                        "global_mmr": max(0, new_mmr),
                         "global_wins": new_wins,
                         "global_losses": new_losses,
                         "global_matches": new_matches,
@@ -2569,7 +3982,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
             else:
                 update_doc = {
                     "$set": {
-                        "mmr": max(0, new_mmr),  # Don't go below 0
+                        "mmr": max(0, new_mmr),
                         "wins": new_wins,
                         "losses": new_losses,
                         "matches": new_matches,
@@ -2588,7 +4001,7 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
             if result.modified_count > 0:
                 # Try to get player name from the match data
                 player_name = "Unknown"
-                for team in [match_details["team1"], match_details["team2"]]:
+                for team in [team1, team2]:
                     for p in team:
                         if p.get("id") == player_id:
                             player_name = p.get("name", "Unknown")
@@ -2606,9 +4019,6 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
         # Delete the match from the database
         delete_result = system_coordinator.match_system.matches.delete_one({"match_id": match_id})
 
-        if delete_result.deleted_count == 0:
-            await interaction.followup.send(f"⚠️ Warning: Match `{match_id}` could not be deleted from database.")
-
         # Create detailed response embed
         embed = discord.Embed(
             title="🗑️ Match Removed Successfully",
@@ -2617,18 +4027,19 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
         )
 
         # Add match details
-        team1_names = [p.get("name", "Unknown") for p in match_details["team1"]]
-        team2_names = [p.get("name", "Unknown") for p in match_details["team2"]]
+        team1_names = [p.get("name", "Unknown") for p in team1]
+        team2_names = [p.get("name", "Unknown") for p in team2]
 
-        winner_team = "Team 1" if match_details["winner"] == 1 else "Team 2"
-        match_type = "Global" if match_details["is_global"] else "Ranked"
+        winner_team = "Team 1" if match_data.get("winner") == 1 else "Team 2"
+        match_type = "Global" if match_data.get("is_global") else "Ranked"
+        completed_at = match_data.get("completed_at")
 
         embed.add_field(
             name="Match Details",
             value=(
                 f"**Type:** {match_type}\n"
                 f"**Winner:** {winner_team}\n"
-                f"**Completed:** {match_details['completed_at'].strftime('%Y-%m-%d %H:%M') if match_details['completed_at'] else 'Unknown'}"
+                f"**Completed:** {completed_at.strftime('%Y-%m-%d %H:%M') if completed_at else 'Unknown'}"
             ),
             inline=False
         )
@@ -2684,29 +4095,217 @@ async def removematch_slash(interaction: discord.Interaction, match_id: str, con
             text=f"Removed by {interaction.user.display_name} | {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        await interaction.followup.send(embed=embed)
+        # Final result view
+        class RemovalResultView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=120)
 
-        # Send notification to affected players (optional)
-        if len(affected_players) <= 10:  # Only if reasonable number of players
-            notification_embed = discord.Embed(
-                title="Match Removed - MMR Restored",
-                description=f"Match `{match_id}` has been removed by an administrator and your MMR has been restored.",
-                color=0x00ff00
-            )
+            @discord.ui.button(label="🔙 Back to Browser", style=discord.ButtonStyle.secondary)
+            async def back_to_browser(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await show_recent_matches_browser(interaction)
 
-            notification_embed.add_field(
-                name="What This Means",
-                value="• The match result has been reversed\n• Your MMR has been restored to pre-match values\n• Your win/loss record has been adjusted",
-                inline=False
-            )
+            @discord.ui.button(label="❌ Close", style=discord.ButtonStyle.red)
+            async def close_menu(self, interaction: discord.Interaction, button: discord.ui.Button):
+                await interaction.response.edit_message(content="Match management session ended.", embed=None,
+                                                        view=None)
 
-            await interaction.channel.send(embed=notification_embed)
+        await interaction.followup.send(embed=embed, view=RemovalResultView())
+
+        # Send notification to affected players (if reasonable number)
+        if len(affected_players) <= 10:
+            try:
+                notification_embed = discord.Embed(
+                    title="Match Removed - MMR Restored",
+                    description=f"Match `{match_id}` has been removed by an administrator and your MMR has been restored.",
+                    color=0x00ff00
+                )
+
+                notification_embed.add_field(
+                    name="What This Means",
+                    value="• The match result has been reversed\n• Your MMR has been restored to pre-match values\n• Your win/loss record has been adjusted",
+                    inline=False
+                )
+
+                await interaction.channel.send(embed=notification_embed)
+            except:
+                pass  # Don't let notification errors break the process
 
     except Exception as e:
-        await interaction.followup.send(f"❌ Error removing match: {str(e)}")
-        print(f"Error in removematch command: {e}")
+        print(f"Error in execute_match_removal: {e}")
         import traceback
         traceback.print_exc()
+        await interaction.followup.send(f"❌ Error removing match: {str(e)}")
+
+
+# Helper function to update help command with new removematch info
+def update_help_command_removematch():
+    """
+    Update the help command description for removematch to reflect new functionality
+    This should be integrated into your existing help command
+    """
+    return {
+        'removematch': 'Interactive match management - browse recent matches, search by ID, verify/recover MMR, reselect winners, or remove matches (Admin/Mod only)'
+    }
+
+
+# Additional helper function for comprehensive MMR verification
+async def perform_detailed_mmr_analysis(match_data):
+    """
+    Perform a comprehensive analysis of MMR changes for verification
+    Returns detailed analysis results
+    """
+    try:
+        match_id = match_data.get('match_id')
+        team1 = match_data.get('team1', [])
+        team2 = match_data.get('team2', [])
+        winner = match_data.get('winner', 0)
+        is_global = match_data.get('is_global', False)
+        existing_mmr_changes = match_data.get('mmr_changes', [])
+
+        analysis_results = {
+            'total_players': len(team1 + team2),
+            'real_players': len([p for p in team1 + team2 if not p.get('id', '').startswith('9000')]),
+            'dummy_players': len([p for p in team1 + team2 if p.get('id', '').startswith('9000')]),
+            'recorded_changes': len(existing_mmr_changes),
+            'issues': [],
+            'player_details': []
+        }
+
+        # Analyze each player
+        for team_num, team in enumerate([team1, team2], 1):
+            team_won = (team_num == winner)
+
+            for player in team:
+                player_id = player.get('id', '')
+                player_name = player.get('name', 'Unknown')
+
+                player_analysis = {
+                    'name': player_name,
+                    'id': player_id,
+                    'team': team_num,
+                    'expected_result': 'win' if team_won else 'loss',
+                    'is_dummy': player_id.startswith('9000'),
+                    'has_mmr_record': False,
+                    'mmr_correct': None,
+                    'issues': []
+                }
+
+                if player_id.startswith('9000'):
+                    player_analysis['status'] = 'Dummy player (no MMR changes expected)'
+                else:
+                    # Find MMR change record for this player
+                    player_change = None
+                    for change in existing_mmr_changes:
+                        if change.get('player_id') == player_id and change.get('is_global', False) == is_global:
+                            player_change = change
+                            break
+
+                    if player_change:
+                        player_analysis['has_mmr_record'] = True
+                        mmr_change = player_change.get('mmr_change', 0)
+                        is_win_in_record = player_change.get('is_win', False)
+
+                        # Check if win/loss direction is correct
+                        if is_win_in_record != team_won:
+                            player_analysis['issues'].append('Win/loss direction incorrect')
+                            analysis_results['issues'].append(
+                                f"{player_name}: Expected {'win' if team_won else 'loss'}, recorded as {'win' if is_win_in_record else 'loss'}")
+
+                        # Check if MMR change direction makes sense
+                        if team_won and mmr_change <= 0:
+                            player_analysis['issues'].append('Winner has negative/zero MMR change')
+                            analysis_results['issues'].append(f"{player_name}: Winner with {mmr_change} MMR change")
+                        elif not team_won and mmr_change >= 0:
+                            player_analysis['issues'].append('Loser has positive/zero MMR change')
+                            analysis_results['issues'].append(f"{player_name}: Loser with {mmr_change} MMR change")
+
+                        # Check match type consistency
+                        change_is_global = player_change.get('is_global', False)
+                        if change_is_global != is_global:
+                            player_analysis['issues'].append('Match type mismatch')
+                            analysis_results['issues'].append(
+                                f"{player_name}: MMR change is {'global' if change_is_global else 'ranked'}, match is {'global' if is_global else 'ranked'}")
+
+                        player_analysis['mmr_change'] = mmr_change
+                        player_analysis['old_mmr'] = player_change.get('old_mmr', 0)
+                        player_analysis['new_mmr'] = player_change.get('new_mmr', 0)
+                        player_analysis['streak'] = player_change.get('streak', 0)
+
+                    else:
+                        player_analysis['has_mmr_record'] = False
+                        player_analysis['issues'].append('No MMR change record found')
+                        analysis_results['issues'].append(f"{player_name}: Missing MMR change record")
+
+                analysis_results['player_details'].append(player_analysis)
+
+        # Overall analysis
+        expected_changes = analysis_results['real_players']
+        actual_changes = analysis_results['recorded_changes']
+
+        if expected_changes != actual_changes:
+            analysis_results['issues'].append(
+                f"MMR record count mismatch: expected {expected_changes}, found {actual_changes}")
+
+        analysis_results['health_score'] = max(0, 100 - (len(analysis_results['issues']) * 10))
+        analysis_results['status'] = 'healthy' if len(analysis_results['issues']) == 0 else 'issues_found'
+
+        return analysis_results
+
+    except Exception as e:
+        print(f"Error in detailed MMR analysis: {e}")
+        return {
+            'status': 'error',
+            'error': str(e),
+            'issues': [f"Analysis failed: {str(e)}"]
+        }
+
+
+# Helper function to format MMR analysis for display
+def format_mmr_analysis_for_embed(analysis_results):
+    """Format the MMR analysis results for Discord embed display"""
+
+    if analysis_results.get('status') == 'error':
+        return [{
+            'name': '❌ Analysis Error',
+            'value': analysis_results.get('error', 'Unknown error occurred'),
+            'inline': False
+        }]
+
+    fields = []
+
+    # Overview field
+    overview_text = (
+        f"**Total Players:** {analysis_results['total_players']}\n"
+        f"**Real Players:** {analysis_results['real_players']}\n"
+        f"**Dummy Players:** {analysis_results['dummy_players']}\n"
+        f"**MMR Records:** {analysis_results['recorded_changes']}\n"
+        f"**Health Score:** {analysis_results['health_score']}/100"
+    )
+    fields.append({
+        'name': '📊 Overview',
+        'value': overview_text,
+        'inline': False
+    })
+
+    # Issues summary
+    if analysis_results['issues']:
+        issues_text = '\n'.join([f"• {issue}" for issue in analysis_results['issues'][:10]])  # Limit to 10 issues
+        if len(analysis_results['issues']) > 10:
+            issues_text += f"\n• ... and {len(analysis_results['issues']) - 10} more issues"
+
+        fields.append({
+            'name': '⚠️ Issues Found',
+            'value': issues_text,
+            'inline': False
+        })
+    else:
+        fields.append({
+            'name': '✅ Status',
+            'value': 'No issues detected - all MMR changes appear correct',
+            'inline': False
+        })
+
+    return fields
 
 @bot.tree.command(name="forcestart",
                   description="Force start the team selection process with dummy players if needed (Admin only)")

@@ -1255,7 +1255,32 @@ class MatchSystem:
                     print(
                         f"Player {player.get('name', 'Unknown')} GLOBAL MMR update: {old_mmr} - {mmr_loss} = {new_mmr} (Individual calculation)")
 
-                    # Update database...
+                    # FIXED: ADD MISSING DATABASE UPDATE FOR GLOBAL LOSSES
+                    self.players.update_one(
+                        {"id": player_id},
+                        {"$set": {
+                            "global_mmr": new_mmr,
+                            "global_losses": global_losses,
+                            "global_matches": global_matches,
+                            "global_current_streak": new_global_streak,
+                            "global_longest_loss_streak": global_longest_loss_streak,
+                            "global_longest_win_streak": player_data.get("global_longest_win_streak", 0),
+                            "last_updated": datetime.datetime.utcnow()
+                        }}
+                    )
+
+                    # FIXED: ADD MISSING MMR CHANGE TRACKING FOR GLOBAL LOSSES
+                    mmr_changes.append({
+                        "player_id": player_id,
+                        "old_mmr": old_mmr,
+                        "new_mmr": new_mmr,
+                        "mmr_change": -mmr_loss,  # Negative for loss
+                        "is_win": False,
+                        "is_global": True,
+                        "streak": new_global_streak
+                    })
+                    print(f"Added global MMR change for {player.get('name', 'Unknown')}: -{mmr_loss}")
+
                 else:
                     # Regular ranked match loss handling
                     matches_played = player_data.get("matches", 0) + 1
