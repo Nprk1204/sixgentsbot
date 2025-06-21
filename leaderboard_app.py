@@ -309,6 +309,222 @@ def oauth_test():
         'oauth_url_test': discord_oauth.get_oauth_url() if discord_oauth else 'No OAuth instance'
     }
 
+
+def check_discord_permissions(discord_id, required_roles=['6mod'], check_admin=True):
+    """Check if a Discord user has required roles or admin permissions"""
+    try:
+        if not DISCORD_TOKEN or not DISCORD_GUILD_ID:
+            print("Discord configuration missing")
+            return False
+
+        headers = {
+            "Authorization": f"Bot {DISCORD_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        # Get member information
+        member_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/members/{discord_id}"
+        member_response = requests.get(member_url, headers=headers, timeout=10)
+
+        if member_response.status_code != 200:
+            print(f"Failed to get member info: {member_response.status_code}")
+            return False
+
+        member_data = member_response.json()
+        member_roles = member_data.get('roles', [])
+
+        # Get all guild roles to check names and permissions
+        roles_url = f"https://discord.com/api/v10/guilds/{DISCORD_GUILD_ID}/roles"
+        roles_response = requests.get(roles_url, headers=headers, timeout=10)
+
+        if roles_response.status_code != 200:
+            print(f"Failed to get roles: {roles_response.status_code}")
+            return False
+
+        guild_roles = roles_response.json()
+
+        # Check if user has admin permissions or required roles
+        for role in guild_roles:
+            if role['id'] in member_roles:
+                # Check for admin permissions
+                if check_admin and (role.get('permissions', 0) & 0x8):  # Administrator permission
+                    print(f"User has admin permissions via role: {role['name']}")
+                    return True
+
+                # Check for required role names
+                if role['name'] in required_roles:
+                    print(f"User has required role: {role['name']}")
+                    return True
+
+        print(
+            f"User does not have required permissions. Roles: {[r['name'] for r in guild_roles if r['id'] in member_roles]}")
+        return False
+
+    except Exception as e:
+        print(f"Error checking Discord permissions: {e}")
+        return False
+
+
+def admin_required(f):
+    """Decorator to require admin/mod permissions for a route"""
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        user = get_current_user()
+        if not user:
+            flash('Please log in to access this page.', 'error')
+            return redirect(url_for('discord_login'))
+
+        # Check if user has admin/mod permissions
+        has_permission = check_discord_permissions(
+            user['id'],
+            required_roles=['6mod', 'Admin', 'Moderator'],
+            check_admin=True
+        )
+
+        if not has_permission:
+            flash('You do not have permission to access this page.', 'error')
+            return redirect(url_for('home'))
+
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+@app.route('/admin')
+@admin_required
+def admin_dashboard():
+    """Admin dashboard for managing rank verifications"""
+    return render_template('admin.html')
+
+@app.route('/api/admin/rank-verifications')
+@admin_required
+def get_rank_verifications():
+    """API endpoint to get paginated rank verification data"""
+    try:
+        page = request.args.get('page', 1, type=int)
+        per_page = 10
+        skip = (page - 1) * per_page
+
+        # Get total count
+        total_verifications = ranks_collection.count_documents({})
+
+        # Get paginated results
+        verifications = list(ranks_collection.find(
+            {},
+            {
+                "_id": 0,
+                "discord_username": 1,
+                "discord_id": 1,
+                "game_username": 1,
+                "platform": 1,
+                "rank": 1,
+                "tier": 1,
+                "mmr": 1,
+                "global_mmr": 1,
+                "timestamp": 1
+            }
+        ).sort("timestamp", -1).skip(skip).limit(per_page))
+
+        # Format timestamps and add additional info
+        for verification in verifications:
+            if "timestamp" in verification:
+                verification["verified_date"] = verification["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+                del verification["timestamp"]
+
+            # Add player stats if they exist
+            player_data = players_collection.find_one({"id": verification.get("discord_id")})
+            if player_data:
+                verification["current_mmr"] = player_data.get("mmr", verification.get("mmr", 0))
+                verification["current_global_mmr"] = player_data.get("global_mmr", verification.get("global_mmr", 300))
+                verification["matches_played"] = player_data.get("matches", 0)
+                verification["global_matches_played"] = player_data.get("global_matches", 0)
+                verification["win_rate"] = round(
+                    (player_data.get("wins", 0) / max(player_data.get("matches", 1), 1)) * 100, 2)
+            else:
+                verification["current_mmr"] = verification.get("mmr", 0)
+                verification["current_global_mmr"] = verification.get("global_mmr", 300)
+                verification["matches_played"] = 0
+                verification["global_matches_played"] = 0
+                verification["win_rate"] = 0
+
+        return jsonify({
+            "verifications": verifications,
+            "pagination": {
+                "total": total_verifications,
+                "page": page,
+                "per_page": per_page,
+                "pages": (total_verifications + per_page - 1) // per_page
+            }
+        })
+
+    except Exception as e:
+        print(f"Error getting rank verifications: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/api/admin/rank-verification/<discord_id>', methods=['DELETE'])
+@admin_required
+def delete_rank_verification(discord_id):
+    """Delete a rank verification"""
+    try:
+        result = ranks_collection.delete_one({"discord_id": discord_id})
+
+        if result.deleted_count > 0:
+            return jsonify({"success": True, "message": "Rank verification deleted successfully"})
+        else:
+            return jsonify({"success": False, "message": "Verification not found"}), 404
+
+    except Exception as e:
+        print(f"Error deleting rank verification: {e}")
+        return jsonify({"success": False, "message": "Internal server error"}), 500
+
+
+@app.route('/api/admin/stats')
+@admin_required
+def get_admin_stats():
+    """Get admin dashboard statistics"""
+    try:
+        stats = {
+            "total_verifications": ranks_collection.count_documents({}),
+            "rank_a_verifications": ranks_collection.count_documents({"tier": "Rank A"}),
+            "rank_b_verifications": ranks_collection.count_documents({"tier": "Rank B"}),
+            "rank_c_verifications": ranks_collection.count_documents({"tier": "Rank C"}),
+            "total_players": players_collection.count_documents({}),
+            "total_matches": matches_collection.count_documents({}),
+            "recent_verifications": ranks_collection.count_documents({
+                "timestamp": {"$gte": datetime.datetime.utcnow() - datetime.timedelta(days=7)}
+            })
+        }
+
+        return jsonify(stats)
+
+    except Exception as e:
+        print(f"Error getting admin stats: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
+@app.context_processor
+def inject_admin_check():
+    """Inject admin permission check into all templates"""
+
+    def user_has_admin_permissions():
+        user = get_current_user()
+        if not user:
+            return False
+
+        try:
+            # Check if user has admin/mod permissions
+            has_permission = check_discord_permissions(
+                user['id'],
+                required_roles=['6mod', 'Admin', 'Moderator'],
+                check_admin=True
+            )
+            return has_permission
+        except Exception as e:
+            print(f"Error checking admin permissions for template: {e}")
+            return False
+
+    return dict(user_has_admin_permissions=user_has_admin_permissions)
+
 # Main Routes
 @app.route('/')
 def home():

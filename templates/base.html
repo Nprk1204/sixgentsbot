@@ -121,6 +121,17 @@
                                 {% endif %}
                             </ul>
                         </li>
+
+                        <!-- Admin Link - Only show for users with admin/mod permissions -->
+                        {% if current_user and user_has_admin_permissions() %}
+                            <li class="nav-item">
+                                <a class="nav-link {% if request.path.startswith('/admin') %}active{% endif %}"
+                                   href="{{ url_for('admin_dashboard') }}">
+                                    <i class="fas fa-shield-alt"></i> Admin
+                                </a>
+                            </li>
+                        {% endif %}
+
                     </ul>
                 </div>
             </div>
