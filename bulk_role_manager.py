@@ -329,7 +329,7 @@ class BulkRoleManager:
             return 0, len(updates)
 
     async def _send_completion_summary(self, successful: int, errors: int):
-        """Send completion summary to role-updates channel instead of admin channels"""
+        """Send completion summary to rl-admin channel instead of admin channels"""
         try:
             summary_msg = (
                 f"🌅 **Daily Role Update Complete**\n"
@@ -340,10 +340,10 @@ class BulkRoleManager:
 
             print(summary_msg)
 
-            # Send to role-updates channel in all guilds
+            # Send to rl-admin channel in all guilds
             for guild in self.bot.guilds:
-                # Look for role-updates channel specifically
-                role_updates_channel = discord.utils.get(guild.text_channels, name="role-updates")
+                # Look for rl-admin channel specifically
+                role_updates_channel = discord.utils.get(guild.text_channels, name="rl-admin")
 
                 if role_updates_channel:
                     try:
@@ -408,9 +408,9 @@ class BulkRoleManager:
                     except Exception as e:
                         print(f"❌ Could not send summary to #{role_updates_channel.name} in {guild.name}: {e}")
                 else:
-                    print(f"⚠️ No #role-updates channel found in {guild.name}")
+                    print(f"⚠️ No #rl-admin channel found in {guild.name}")
 
-                    # Fallback to other admin channels if role-updates doesn't exist
+                    # Fallback to other admin channels if rl-admin doesn't exist
                     fallback_channels = [
                         discord.utils.get(guild.text_channels, name="admin-logs"),
                         discord.utils.get(guild.text_channels, name="bot-logs"),
@@ -423,7 +423,7 @@ class BulkRoleManager:
                                 fallback_embed = discord.Embed(
                                     title="🌅 Daily Role Update Complete",
                                     description=(
-                                        f"**Note:** This message should be in #role-updates channel\n\n"
+                                        f"**Note:** This message should be in #rl-admin channel\n\n"
                                         f"✅ **Successful:** {successful}\n"
                                         f"❌ **Errors:** {errors}\n"
                                         f"📊 **Total:** {successful + errors}"
@@ -434,7 +434,7 @@ class BulkRoleManager:
 
                                 fallback_embed.add_field(
                                     name="💡 Recommendation",
-                                    value="Create a #role-updates channel for these notifications",
+                                    value="Create a #rl-admin channel for these notifications",
                                     inline=False
                                 )
 
