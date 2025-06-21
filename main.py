@@ -2398,7 +2398,7 @@ async def removeplayer_slash(interaction: discord.Interaction, member: discord.M
                             inline=False)
             await interaction.followup.send(embed=embed)
 
-@bot.tree.command(name="removematch",
+@bot.tree.command(name="matchmanager",
                   description="Enhanced match management - remove, verify MMR, or reselect winner (Admin only)")
 @app_commands.describe(
     action="Choose an action",
