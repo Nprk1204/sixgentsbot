@@ -372,6 +372,21 @@ function applyFilters() {
 }
 
 function refreshData() {
+    // Show loading state on button
+    const refreshBtn = document.querySelector('[onclick="refreshData()"]');
+    if (refreshBtn) {
+        const originalHTML = refreshBtn.innerHTML;
+        refreshBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing...';
+        refreshBtn.disabled = true;
+
+        // Reset the button after refresh
+        setTimeout(() => {
+            refreshBtn.innerHTML = originalHTML;
+            refreshBtn.disabled = false;
+        }, 1000);
+    }
+
+    // Reload both stats and verifications
     loadStats();
     loadVerifications(currentPage);
 }
