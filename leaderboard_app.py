@@ -311,6 +311,7 @@ def oauth_test():
     }
 
 
+
 def check_discord_permissions(discord_id, required_roles=['6mod'], check_admin=True):
     """Check if a Discord user has required roles or admin permissions"""
     try:
@@ -347,10 +348,19 @@ def check_discord_permissions(discord_id, required_roles=['6mod'], check_admin=T
         # Check if user has admin permissions or required roles
         for role in guild_roles:
             if role['id'] in member_roles:
-                # Check for admin permissions
-                if check_admin and (role.get('permissions', 0) & 0x8):  # Administrator permission
-                    print(f"User has admin permissions via role: {role['name']}")
-                    return True
+                # Check for admin permissions - fix the permissions type issue
+                if check_admin:
+                    permissions = role.get('permissions', 0)
+                    # Convert to int if it's a string
+                    if isinstance(permissions, str):
+                        try:
+                            permissions = int(permissions)
+                        except (ValueError, TypeError):
+                            permissions = 0
+
+                    if permissions & 0x8:  # Administrator permission
+                        print(f"User has admin permissions via role: {role['name']}")
+                        return True
 
                 # Check for required role names
                 if role['name'] in required_roles:
@@ -364,6 +374,7 @@ def check_discord_permissions(discord_id, required_roles=['6mod'], check_admin=T
     except Exception as e:
         print(f"Error checking Discord permissions: {e}")
         return False
+
 
 
 def admin_required(f):
@@ -391,11 +402,15 @@ def admin_required(f):
 
     return decorated_function
 
+
+
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
     """Admin dashboard for managing rank verifications"""
     return render_template('admin.html')
+
+
 
 @app.route('/api/admin/rank-verifications')
 @admin_required
@@ -462,6 +477,8 @@ def get_rank_verifications():
         print(f"Error getting rank verifications: {e}")
         return jsonify({"error": "Internal server error"}), 500
 
+
+
 @app.route('/api/admin/rank-verification/<discord_id>', methods=['DELETE'])
 @admin_required
 def delete_rank_verification(discord_id):
@@ -477,6 +494,7 @@ def delete_rank_verification(discord_id):
     except Exception as e:
         print(f"Error deleting rank verification: {e}")
         return jsonify({"success": False, "message": "Internal server error"}), 500
+
 
 
 @app.route('/api/admin/stats')
